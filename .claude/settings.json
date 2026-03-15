@@ -31,7 +31,12 @@
       "Bash(touch:*)",
       "Bash(mv:*)",
       "Bash(cp:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(python3:*)",
+      "Bash(gh api:*)",
+      "Bash(gh run:*)",
+      "Bash(pip install:*)",
+      "Bash(pip install -q -r requirements.txt --break-system-packages:*)"
     ],
     "deny": []
   }

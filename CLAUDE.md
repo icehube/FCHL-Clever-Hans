@@ -411,6 +411,7 @@ Brandt Clarke,D,A,MINOR,SRL,LAK,21,0.5,0,25
 | `SALARY` | Current salary in millions. Ignore for `FCHL TEAM = UFA` (stale from last year) |
 | `BID` | Always 0 in the source file (populated during auction) |
 | `PTS` | Projected fantasy points |
+| `PRIOR FCHL TEAM` | For RFAs only: which FCHL team previously held this player (for ROFR). Blank for non-RFAs |
 
 **Deriving player categories from the CSV**:
 

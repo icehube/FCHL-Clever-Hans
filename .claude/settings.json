@@ -28,7 +28,10 @@
       "Bash(tail:*)",
       "Bash(wc:*)",
       "Bash(mkdir:*)",
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(awk:*)"
     ],
     "deny": []
   }

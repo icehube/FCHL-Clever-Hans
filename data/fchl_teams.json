@@ -9,6 +9,7 @@
   },
   "SRL": {
     "id": 2,
+    "is_my_team": false,
     "name": "Searle Supremes",
     "penalty": 0.0,
     "colors": { "primary": "#000000", "secondary": "#464646" },
@@ -16,6 +17,7 @@
   },
   "MAC": {
     "id": 3,
+    "is_my_team": false,
     "name": "Maccabi Tevatron",
     "penalty": 0.0,
     "colors": { "primary": "#F4DD2E", "secondary": "#E02B15" },
@@ -23,6 +25,7 @@
   },
   "LPT": {
     "id": 4,
+    "is_my_team": false,
     "name": "Lipton Soup Nuts",
     "penalty": 0.0,
     "colors": { "primary": "#26535f", "secondary": "#ed8e37" },
@@ -30,6 +33,7 @@
   },
   "SHF": {
     "id": 5,
+    "is_my_team": false,
     "name": "The Shafranators",
     "penalty": 0.0,
     "colors": { "primary": "#0D4499", "secondary": "#E7CD38" },
@@ -37,6 +41,7 @@
   },
   "JHN": {
     "id": 6,
+    "is_my_team": false,
     "name": "Johannesburg Israeleafs",
     "penalty": 0.3,
     "colors": { "primary": "#003876", "secondary": "#001f43" },
@@ -44,6 +49,7 @@
   },
   "GVR": {
     "id": 7,
+    "is_my_team": false,
     "name": "Grovenor Drew",
     "penalty": 0.0,
     "colors": { "primary": "#012169", "secondary": "#FC4C02" },
@@ -51,6 +57,7 @@
   },
   "ZSK": {
     "id": 8,
+    "is_my_team": false,
     "name": "The Zalesaks",
     "penalty": 0.0,
     "colors": { "primary": "#000000", "secondary": "#d10000" },
@@ -58,6 +65,7 @@
   },
   "LGN": {
     "id": 9,
+    "is_my_team": false,
     "name": "Lessard Gnomes",
     "penalty": 0.3,
     "colors": { "primary": "#164846", "secondary": "#80C042" },
@@ -65,6 +73,7 @@
   },
   "VPP": {
     "id": 10,
+    "is_my_team": false,
     "name": "Varsity Park Partisans",
     "penalty": 0.0,
     "colors": { "primary": "#172b1d", "secondary": "#8eaf38" },
@@ -72,6 +81,7 @@
   },
   "HSM": {
     "id": 11,
+    "is_my_team": false,
     "name": "Heskel Salims",
     "penalty": 0.0,
     "colors": { "primary": "#BD2F2E", "secondary": "#815061" },

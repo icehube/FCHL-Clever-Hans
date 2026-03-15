@@ -174,10 +174,10 @@ Layer 2. Market-adjusted prices using exact real-time budget data.
 2. **Market ceiling**: highest the bidding can realistically reach for a player.
 
    ```
-   ceiling = second-highest physical_max among active teams that need this position
+   ceiling = second-highest physical_max among all active (non-done) opponents
    ```
 
-   Second-highest because auction price is set when second-to-last bidder drops out.
+   Position-agnostic — any team can bid on any player (extras go to bench or minors). Second-highest because auction price is set when second-to-last bidder drops out.
 
 3. **Market-adjusted price**: what the MILP should use for roster planning.
 
@@ -185,7 +185,7 @@ Layer 2. Market-adjusted prices using exact real-time budget data.
    market_price = min(model_price, market_ceiling)
    ```
 
-4. **Demand count**: active (non-done) teams that need this position AND can afford the player. Zero demand = floor price.
+4. **Demand count**: active (non-done) teams that can afford to bid. Zero demand (all opponents done) = floor price.
 
 **Key functions**:
 
@@ -489,7 +489,7 @@ Vig-removed probabilities. Missing teams → 0.031 default.
 - RFA: secret bids, prior team can match (ROFR)
 - Combo: 1 RFA + 1 UFA per nomination turn
 - Min salary $0.5M, max $11.4M
-- Roster: 24 active (14F + 7D + 3G minimum), but teams can finish with fewer
+- Roster: 24 active (playing: 12F + 6D + 2G, bench: 4 any position). Teams can draft beyond 24 — extras go to minors with salary fully on cap. Teams can also finish with fewer than 24.
 - Snake draft for nominations
 - Trades allowed during auction breaks
 - Buyouts: player removed, 50% salary penalty remains on team's cap

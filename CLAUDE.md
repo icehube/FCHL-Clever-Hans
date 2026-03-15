@@ -84,12 +84,11 @@ fchl-auction-simulator/
 ├── static/
 │   ├── style.css                # Layout, dark mode, auction-day optimized
 │   └── shortcuts.js             # Keyboard shortcuts (Ctrl+Z undo, etc.)
-├── fchl_teams.json              # Team metadata: order, penalties, names
-├── team_odds.json               # Stanley Cup odds by NHL team
-├── fchl_logos/                   # Team logo GIFs (1.gif through 11.gif)
+├── fchl_logos/                   # Team logo GIFs (0.gif=league, 1-11=teams)
 ├── data/
-│   ├── keepers.json             # All 11 teams' keeper rosters + salaries
-│   ├── biddable_players.csv     # All players available at auction
+│   ├── players.csv              # All players: keepers, biddable, and minors
+│   ├── fchl_teams.json          # Team metadata: order, penalties, names
+│   ├── team_odds.json           # Stanley Cup odds by NHL team
 │   ├── model_params.json        # Price model coefficients (from pricer repo)
 │   └── state/                   # Auto-saved auction state snapshots
 ├── tests/
@@ -329,14 +328,13 @@ When `is_done = True`:
 
 Startup pipeline:
 
-1. Load `fchl_teams.json` (repo root) → team metadata, nomination order, penalties
-2. Load `data/keepers.json` → each team's roster
-3. Load `data/biddable_players.csv` → auction player pool
-4. Load `data/model_params.json` → price model coefficients
-5. Load `team_odds.json` (repo root) → Stanley Cup odds
-6. Layer 1: compute model prices for all biddable players
-7. Layer 2: compute initial market prices (full budgets)
-8. Build initial `AuctionState`
+1. Load `data/fchl_teams.json` → team metadata, nomination order, penalties
+2. Load `data/players.csv` → all players (keepers, biddable, minors), derive rosters
+3. Load `data/model_params.json` → price model coefficients
+4. Load `data/team_odds.json` → Stanley Cup odds
+5. Layer 1: compute model prices for biddable players
+6. Layer 2: compute initial market prices (full budgets)
+7. Build initial `AuctionState`
 
 ### main.py
 
@@ -386,32 +384,66 @@ Output: cap space freed, penalty incurred, new optimal roster comparison.
 
 ## Data file formats
 
-### keepers.json
+### players.csv
 
-```json
-{
-  "BOT": {
-    "players": [{ "name": "Zach Werenski", "position": "D", "salary": 4.6 }],
-    "penalties": 0.0
-  }
-}
-```
-
-- Salary in millions. Penalties = buyout/waiver penalties entering the auction.
-- Include Group 1 keepers (they take roster spots).
-- Player in keepers OR biddable CSV, never both.
-
-### biddable_players.csv
+Single source for all players in the system: keepers, auction-eligible, and minor leaguers.
 
 ```csv
-name,position,nhl_team,group,projected_points,age,prior_team,prior_salary
-John Gibson,G,DET,3,60,33,,
-Tim Stutzle,F,OTT,C,70,24,BOT,2.5
-Martin Necas,F,COL,2,79,27,SRL,2.4
+PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS
+Nikita Kucherov,F,3,START,LGN,TBL,31,8.5,0,144
+Connor McDavid,F,RFA2,,RFA,EDM,27,11.4,0,132
+Artemi Panarin,F,3,,UFA,NYR,32,7.3,0,120
+Connor Ingram,G,3,MINOR,BOT,UTA,27,0.5,0,30
+Brandt Clarke,D,A,MINOR,SRL,LAK,21,0.5,0,25
 ```
 
-- `group` C or 2 → RFA (is_rfa=1). Group 3 → UFA (is_rfa=0).
-- `prior_team`/`prior_salary` for RFAs only.
+**Column meanings**:
+
+| Column | Description |
+|--------|-------------|
+| `PLAYER` | Player name |
+| `POS` | Position: F, D, or G |
+| `GROUP` | Contract group: 2, 3, C, RFA1, RFA2, A, B, D, E |
+| `STATUS` | `START` = keeper on active roster, `MINOR` = minor league, blank = auction-eligible |
+| `FCHL TEAM` | Team code if on a team, `RFA` if restricted free agent, `UFA` if unrestricted |
+| `NHL TEAM` | NHL team |
+| `AGE` | Player age |
+| `SALARY` | Current salary in millions. Ignore for `FCHL TEAM = UFA` (stale from last year) |
+| `BID` | Always 0 in the source file (populated during auction) |
+| `PTS` | Projected fantasy points |
+
+**Deriving player categories from the CSV**:
+
+- **Keepers** (on a team's active roster): `STATUS = START` and `FCHL TEAM` is a team code (not UFA/RFA)
+- **Biddable at auction**: `FCHL TEAM = UFA` or `FCHL TEAM = RFA` (no STATUS, or STATUS is blank)
+- **Minor league**: `STATUS = MINOR`
+
+**RFA detection** (for price model `is_rfa` feature):
+- Only applies to biddable players. In practice, only `RFA1` and `RFA2` appear in the biddable pool.
+- `GROUP` in (`RFA1`, `RFA2`) → RFA (`is_rfa=1`). They are equivalent for auction purposes.
+- `GROUP = 3` → UFA (`is_rfa=0`)
+- `GROUP` 2 and C are keeper/minor contract types — they never appear in the biddable pool.
+
+**RFA group conversion on signing**: When an RFA is signed at auction, their group changes:
+- `RFA1` → becomes `GROUP 2`
+- `RFA2` → becomes `GROUP 3`
+
+This matters for salary cap rules if they are later sent to minors.
+
+**Keeper/minor contract groups and salary rules**:
+
+| GROUP | Appears in biddable pool? | Salary on cap (START)? | Salary on cap (MINOR)? |
+|-------|--------------------------|------------------------|------------------------|
+| `2`   | No                       | Yes                    | Yes                    |
+| `3`   | Yes (as UFA)             | Yes                    | Yes                    |
+| `RFA1`, `RFA2` | Yes (as RFA)    | N/A                   | N/A                    |
+| `A`, `B`, `C`, `D`, `E` | No     | Yes                   | No                     |
+
+**Minor league rules**:
+- Minors do NOT count toward the team's roster size or bench
+- Salary on cap depends on GROUP (see table above)
+
+**UFA salary**: When `FCHL TEAM = UFA`, the SALARY column is last year's value and should be ignored entirely. These players have no current FCHL salary.
 
 ### fchl_teams.json
 
@@ -427,6 +459,7 @@ Martin Necas,F,COL,2,79,27,SRL,2.4
   },
   "SRL": {
     "id": 2,
+    "is_my_team": false,
     "name": "Searle Supremes",
     "penalty": 0.0,
     "colors": { "primary": "#000000", "secondary": "#464646" },

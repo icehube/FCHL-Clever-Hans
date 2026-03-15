@@ -1,0 +1,94 @@
+{
+  "BOT": {
+    "id": 1,
+    "is_my_team": true,
+    "name": "Bridlewood AI",
+    "penalty": 0.0,
+    "colors": { "primary": "#ea217b", "secondary": "#ff7e31" },
+    "logo": "1.gif"
+  },
+  "SRL": {
+    "id": 2,
+    "name": "Searle Supremes",
+    "penalty": 0.0,
+    "colors": { "primary": "#000000", "secondary": "#464646" },
+    "logo": "2.gif"
+  },
+  "MAC": {
+    "id": 3,
+    "name": "Maccabi Tevatron",
+    "penalty": 0.0,
+    "colors": { "primary": "#F4DD2E", "secondary": "#E02B15" },
+    "logo": "3.gif"
+  },
+  "LPT": {
+    "id": 4,
+    "name": "Lipton Soup Nuts",
+    "penalty": 0.0,
+    "colors": { "primary": "#26535f", "secondary": "#ed8e37" },
+    "logo": "4.gif"
+  },
+  "SHF": {
+    "id": 5,
+    "name": "The Shafranators",
+    "penalty": 0.0,
+    "colors": { "primary": "#0D4499", "secondary": "#E7CD38" },
+    "logo": "5.gif"
+  },
+  "JHN": {
+    "id": 6,
+    "name": "Johannesburg Israeleafs",
+    "penalty": 0.3,
+    "colors": { "primary": "#003876", "secondary": "#001f43" },
+    "logo": "6.gif"
+  },
+  "GVR": {
+    "id": 7,
+    "name": "Grovenor Drew",
+    "penalty": 0.0,
+    "colors": { "primary": "#012169", "secondary": "#FC4C02" },
+    "logo": "7.gif"
+  },
+  "ZSK": {
+    "id": 8,
+    "name": "The Zalesaks",
+    "penalty": 0.0,
+    "colors": { "primary": "#000000", "secondary": "#d10000" },
+    "logo": "8.gif"
+  },
+  "LGN": {
+    "id": 9,
+    "name": "Lessard Gnomes",
+    "penalty": 0.3,
+    "colors": { "primary": "#164846", "secondary": "#80C042" },
+    "logo": "9.gif"
+  },
+  "VPP": {
+    "id": 10,
+    "name": "Varsity Park Partisans",
+    "penalty": 0.0,
+    "colors": { "primary": "#172b1d", "secondary": "#8eaf38" },
+    "logo": "10.gif"
+  },
+  "HSM": {
+    "id": 11,
+    "name": "Heskel Salims",
+    "penalty": 0.0,
+    "colors": { "primary": "#BD2F2E", "secondary": "#815061" },
+    "logo": "11.gif"
+  },
+  "nomination_order": [
+    "BOT",
+    "LPT",
+    "GVR",
+    "ZSK",
+    "JHN",
+    "LGN",
+    "SRL",
+    "VPP",
+    "MAC",
+    "SHF",
+    "HSM"
+  ],
+  "snake_draft": true
+}

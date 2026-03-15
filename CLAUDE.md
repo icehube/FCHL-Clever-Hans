@@ -419,14 +419,29 @@ Brandt Clarke,D,A,MINOR,SRL,LAK,21,0.5,0,25
 - **Minor league**: `STATUS = MINOR`
 
 **RFA detection** (for price model `is_rfa` feature):
-- `GROUP` in (`2`, `C`, `RFA1`, `RFA2`) → RFA (`is_rfa=1`)
+- Only applies to biddable players. In practice, only `RFA1` and `RFA2` appear in the biddable pool.
+- `GROUP` in (`RFA1`, `RFA2`) → RFA (`is_rfa=1`). They are equivalent for auction purposes.
 - `GROUP = 3` → UFA (`is_rfa=0`)
-- `RFA1` and `RFA2` are equivalent for auction purposes
+- `GROUP` 2 and C are keeper/minor contract types — they never appear in the biddable pool.
+
+**RFA group conversion on signing**: When an RFA is signed at auction, their group changes:
+- `RFA1` → becomes `GROUP 2`
+- `RFA2` → becomes `GROUP 3`
+
+This matters for salary cap rules if they are later sent to minors.
+
+**Keeper/minor contract groups and salary rules**:
+
+| GROUP | Appears in biddable pool? | Salary on cap (START)? | Salary on cap (MINOR)? |
+|-------|--------------------------|------------------------|------------------------|
+| `2`   | No                       | Yes                    | Yes                    |
+| `3`   | Yes (as UFA)             | Yes                    | Yes                    |
+| `RFA1`, `RFA2` | Yes (as RFA)    | N/A                   | N/A                    |
+| `A`, `B`, `C`, `D`, `E` | No     | Yes                   | No                     |
 
 **Minor league rules**:
 - Minors do NOT count toward the team's roster size or bench
-- If `GROUP` is `2` or `3`: salary counts toward the team's cap
-- If `GROUP` is anything else (A, B, C, D, E): salary does NOT count toward the cap
+- Salary on cap depends on GROUP (see table above)
 
 **UFA salary**: When `FCHL TEAM = UFA`, the SALARY column is last year's value and should be ignored entirely. These players have no current FCHL salary.
 

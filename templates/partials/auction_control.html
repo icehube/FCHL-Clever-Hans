@@ -1,0 +1,52 @@
+<section class="panel" id="auction-control">
+    <h2>Auction Control</h2>
+
+    <!-- Assign a drafted player -->
+    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="assign-form">
+        <div class="form-row">
+            <input type="text" name="player" placeholder="Player name" list="player-list" required class="input-wide">
+            <datalist id="player-list">
+                {% for name in available_players %}
+                <option value="{{ name }}">
+                {% endfor %}
+            </datalist>
+            <select name="team" required>
+                {% for code, t in teams.items() %}
+                <option value="{{ code }}" {% if code == my_team %}selected{% endif %}>{{ code }}</option>
+                {% endfor %}
+            </select>
+            <input type="number" name="salary" step="0.1" min="0.5" max="11.4" value="0.5" required class="input-salary">
+            <button type="submit" class="btn btn-primary">Assign</button>
+        </div>
+    </form>
+
+    <hr>
+
+    <!-- Live bidding advisor -->
+    <h3>Live Bidding</h3>
+    <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
+        <div class="form-row">
+            <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input-wide">
+            <input type="text" name="bidders" placeholder="Active bidders (comma-separated)" class="input-wide">
+            <input type="number" name="price" step="0.1" min="0.5" value="0.5" class="input-salary">
+            <input type="text" name="highest_bidder" placeholder="Highest bidder" class="input-narrow">
+            <button type="submit" class="btn btn-secondary">Check</button>
+        </div>
+    </form>
+
+    {% if bid_advice is defined and bid_advice %}
+    <div class="bid-result bid-{{ bid_advice.action|lower }}">
+        <div class="bid-action">{{ bid_advice.action }}</div>
+        <div class="bid-details">
+            <span>Max bid: <strong>${{ bid_advice.max_bid }}M</strong></span>
+            <span>Marginal: ${{ bid_advice.marginal_value }}M</span>
+            <span>Ceiling: ${{ bid_advice.market_ceiling }}M</span>
+        </div>
+        <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>
+        {% if bid_advice.action == "DROP" %}
+        <a hx-get="/explain/{{ bid_advice.player_name }}" hx-target="#explanation" hx-swap="outerHTML"
+           class="link-explain">Why not bid?</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>

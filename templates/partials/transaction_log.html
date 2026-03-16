@@ -1,0 +1,41 @@
+<section class="panel" id="transaction-log">
+    <h2>Transaction Log ({{ transaction_log|length }})</h2>
+
+    {% if transaction_log %}
+    <table class="log-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Player</th>
+                <th>Pos</th>
+                <th>Team</th>
+                <th>Salary</th>
+                <th>Model $</th>
+                <th>Market $</th>
+                <th>Deviation</th>
+                <th>Type</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for t in transaction_log|reverse %}
+        {% set deviation = t.salary - t.market_price if t.market_price > 0 else 0 %}
+        <tr class="log-{{ t.transaction_type }}">
+            <td>{{ loop.revindex }}</td>
+            <td>{{ t.player_name }}</td>
+            <td>{{ t.position }}</td>
+            <td>{{ t.team_code }}</td>
+            <td>${{ "%.1f"|format(t.salary) }}M</td>
+            <td>${{ "%.1f"|format(t.model_price) }}M</td>
+            <td>${{ "%.1f"|format(t.market_price) }}M</td>
+            <td class="{% if deviation > 0.5 %}over{% elif deviation < -0.5 %}under{% endif %}">
+                {{ "%+.1f"|format(deviation) }}
+            </td>
+            <td>{{ t.transaction_type }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No transactions yet.</p>
+    {% endif %}
+</section>

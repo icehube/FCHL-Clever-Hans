@@ -1,0 +1,33 @@
+<section class="panel" id="bid-limits">
+    <h2>Available Players ({{ bid_limits|length }})</h2>
+    <table class="player-table">
+        <thead>
+            <tr>
+                <th>Player</th>
+                <th>Pos</th>
+                <th>NHL</th>
+                <th>PTS</th>
+                <th>Model $</th>
+                <th>Market $</th>
+                <th>RFA</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for p in bid_limits[:100] %}
+        <tr class="{% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>{{ p.nhl_team }}</td>
+            <td>{{ p.projected_points }}</td>
+            <td>${{ p.model_price }}M</td>
+            <td>${{ p.market_price }}M</td>
+            <td>{% if p.is_rfa %}{{ p.prior_fchl_team }}{% endif %}</td>
+            <td>
+                <a hx-get="/explain/{{ p.name }}" hx-target="#explanation" hx-swap="outerHTML" class="link-small">?</a>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>

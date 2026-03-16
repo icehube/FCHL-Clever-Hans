@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid">
+    <div class="col-left">
+        {% include "partials/auction_control.html" %}
+        {% include "partials/nomination.html" %}
+        {% include "partials/bid_limits.html" %}
+        {% include "partials/trade_panel.html" %}
+        {% include "partials/buyout_panel.html" %}
+        {% include "partials/transaction_log.html" %}
+    </div>
+    <div class="col-right">
+        {% include "partials/roster_panel.html" %}
+        {% include "partials/league_state.html" %}
+    </div>
+</div>
+{% endblock %}

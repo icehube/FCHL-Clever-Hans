@@ -1,0 +1,71 @@
+<section class="panel" id="trade-panel">
+    <h2>Trade Evaluator</h2>
+
+    <form hx-post="/trade-evaluate" hx-target="#trade-panel" hx-swap="outerHTML" hx-encoding="multipart/form-data">
+        <div class="trade-sides">
+            <div class="trade-give">
+                <h3>I Give</h3>
+                <select name="give_player" multiple size="5" class="trade-select">
+                    {% for p in team.roster_players|sort(attribute='projected_points', reverse=True) %}
+                    <option value="{{ p.name }}">{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="trade-receive">
+                <h3>I Receive</h3>
+                {% for i in range(3) %}
+                <div class="trade-receive-row">
+                    <input type="text" name="receive_name" placeholder="Player name">
+                    <select name="receive_position">
+                        <option value="F">F</option>
+                        <option value="D">D</option>
+                        <option value="G">G</option>
+                    </select>
+                    <input type="number" name="receive_salary" step="0.1" min="0.5" value="0.5" class="input-salary">
+                    <input type="number" name="receive_points" min="0" value="0" class="input-pts">
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Evaluate Trade</button>
+    </form>
+
+    {% if trade_result is defined and trade_result %}
+    <div class="trade-result trade-{{ trade_result.recommendation }}">
+        <h3>Verdict: {{ trade_result.recommendation|upper }}</h3>
+        <p>{{ trade_result.reasoning }}</p>
+
+        <table class="scenario-table">
+            <thead><tr><th>Scenario</th><th>Points</th><th>Cap Remaining</th></tr></thead>
+            <tbody>
+            <tr class="scenario-current">
+                <td>{{ trade_result.current_scenario.description }}</td>
+                <td>{{ "%.0f"|format(trade_result.current_scenario.total_points) }}</td>
+                <td>${{ "%.1f"|format(trade_result.current_scenario.cap_remaining) }}M</td>
+            </tr>
+            {% for s in trade_result.scenarios %}
+            <tr class="{% if s == trade_result.best_scenario %}scenario-best{% endif %}">
+                <td>{{ s.description }}</td>
+                <td>{{ "%.0f"|format(s.total_points) }}</td>
+                <td>${{ "%.1f"|format(s.cap_remaining) }}M</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        {% if trade_result.recommendation == "accept" %}
+        <form hx-post="/trade-execute" hx-target="#app" hx-swap="innerHTML">
+            {% for s in trade_result.scenarios %}
+            {% if s.buyouts %}
+            <label>
+                <input type="checkbox" name="buyout_player" value="{{ s.buyouts[0] }}">
+                Buy out {{ s.buyouts[0] }}
+            </label>
+            {% endif %}
+            {% endfor %}
+            <button type="submit" class="btn btn-primary">Execute Trade</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>

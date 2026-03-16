@@ -1,0 +1,48 @@
+<section class="panel" id="nomination">
+    <h2>Nomination
+        {% if current_nominator %}
+        <span class="nominator-badge {% if current_nominator == my_team %}my-turn{% endif %}">
+            {{ current_nominator }}'s turn
+        </span>
+        {% endif %}
+    </h2>
+
+    {% if current_nominator == my_team %}
+    <button hx-get="/nominate" hx-target="#nomination" hx-swap="outerHTML" class="btn btn-primary btn-large">
+        It's My Turn — Get Recommendations
+    </button>
+    {% endif %}
+
+    {% if rfa_pick is defined and rfa_pick %}
+    <div class="nomination-pick">
+        <h3>RFA Pick (Secret Bid)</h3>
+        <div class="pick-card pick-{{ rfa_pick.strategy }}">
+            <div class="pick-name">{{ rfa_pick.player.name }}</div>
+            <div class="pick-meta">
+                {{ rfa_pick.player.position }} · {{ rfa_pick.player.nhl_team }} · {{ rfa_pick.player.projected_points }}pts
+                {% if rfa_pick.player.prior_fchl_team %}
+                · Prior: {{ rfa_pick.player.prior_fchl_team }} @ ${{ rfa_pick.player.salary }}M
+                {% endif %}
+            </div>
+            <div class="pick-strategy">Strategy: {{ rfa_pick.strategy }}</div>
+            <div class="pick-reasoning">{{ rfa_pick.reasoning }}</div>
+            <div class="pick-price">Expected: ~${{ "%.1f"|format(rfa_pick.expected_price) }}M</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if ufa_pick is defined and ufa_pick %}
+    <div class="nomination-pick">
+        <h3>UFA Pick (Open Bid)</h3>
+        <div class="pick-card pick-{{ ufa_pick.strategy }}">
+            <div class="pick-name">{{ ufa_pick.player.name }}</div>
+            <div class="pick-meta">
+                {{ ufa_pick.player.position }} · {{ ufa_pick.player.nhl_team }} · {{ ufa_pick.player.projected_points }}pts
+            </div>
+            <div class="pick-strategy">Strategy: {{ ufa_pick.strategy }}</div>
+            <div class="pick-reasoning">{{ ufa_pick.reasoning }}</div>
+            <div class="pick-price">Expected: ~${{ "%.1f"|format(ufa_pick.expected_price) }}M</div>
+        </div>
+    </div>
+    {% endif %}
+</section>

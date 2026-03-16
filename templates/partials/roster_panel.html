@@ -1,0 +1,92 @@
+<section class="panel" id="roster-panel">
+    <h2>
+        <img src="/fchl_logos/{{ team.logo }}" alt="{{ team.code }}" class="team-logo-sm">
+        {{ team.name }} ({{ team.code }})
+    </h2>
+
+    <div class="roster-summary">
+        <div class="stat">
+            <span class="stat-label">Cap Used</span>
+            <span class="stat-value">${{ "%.1f"|format(team.total_salary) }}M</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Remaining</span>
+            <span class="stat-value">${{ "%.1f"|format(team.remaining_budget) }}M</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Spendable</span>
+            <span class="stat-value highlight">${{ "%.1f"|format(team.spendable_budget) }}M</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Spots Left</span>
+            <span class="stat-value">{{ team.total_spots_remaining }}</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Max Bid</span>
+            <span class="stat-value">${{ "%.1f"|format(team.physical_max_bid) }}M</span>
+        </div>
+    </div>
+
+    <div class="roster-needs">
+        Needs: {{ team.roster_needs.get("F", 0) }}F · {{ team.roster_needs.get("D", 0) }}D · {{ team.roster_needs.get("G", 0) }}G
+    </div>
+
+    {% if milp and milp.status == "Optimal" %}
+    <div class="milp-summary">
+        <strong>Optimal Projected Points: {{ "%.0f"|format(milp.total_points) }}</strong>
+        (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
+    </div>
+    {% endif %}
+
+    <!-- Current roster -->
+    <h3>Keepers</h3>
+    <table class="roster-table">
+        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th></tr></thead>
+        <tbody>
+        {% for p in team.keeper_players|sort(attribute='projected_points', reverse=True) %}
+        <tr>
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>${{ "%.1f"|format(p.salary) }}M</td>
+            <td>{{ p.projected_points }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if team.acquired_players %}
+    <h3>Acquired</h3>
+    <table class="roster-table">
+        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th></tr></thead>
+        <tbody>
+        {% for p in team.acquired_players|sort(attribute='projected_points', reverse=True) %}
+        <tr class="acquired">
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>${{ "%.1f"|format(p.salary) }}M</td>
+            <td>{{ p.projected_points }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if milp and milp.status == "Optimal" and milp.roster %}
+    <h3>Target Roster (MILP)</h3>
+    <table class="roster-table">
+        <thead><tr><th>Player</th><th>Pos</th><th>Market $</th><th>PTS</th></tr></thead>
+        <tbody>
+        {% for pos in ["F", "D", "G"] %}
+        {% for p in milp.by_position.get(pos, [])|sort(attribute='projected_points', reverse=True) %}
+        <tr class="target">
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>${{ "%.1f"|format(market_prices.get(p.name, 0.5) if market_prices else 0.5) }}M</td>
+            <td>{{ p.projected_points }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</section>

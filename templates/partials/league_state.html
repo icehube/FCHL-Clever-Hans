@@ -1,0 +1,54 @@
+<section class="panel" id="league-state">
+    <h2>League State</h2>
+    <table class="league-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Team</th>
+                <th>Roster</th>
+                <th>Needs</th>
+                <th>Cap Used</th>
+                <th>Remaining</th>
+                <th>Spendable</th>
+                <th>Max Bid</th>
+                <th>Done</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for code in nomination_order %}
+        {% set t = teams[code] %}
+        <tr class="{% if t.is_done %}team-done{% endif %} {% if code == my_team %}team-mine{% endif %}">
+            <td><img src="/fchl_logos/{{ t.logo }}" alt="{{ code }}" class="team-logo-xs"></td>
+            <td>
+                <strong>{{ code }}</strong>
+                {% if t.is_my_team %}<span class="badge-mine">★</span>{% endif %}
+            </td>
+            <td>{{ t.roster_count }}/24</td>
+            <td>{{ t.roster_needs.get("F", 0) }}F {{ t.roster_needs.get("D", 0) }}D {{ t.roster_needs.get("G", 0) }}G</td>
+            <td>${{ "%.1f"|format(t.total_salary) }}M</td>
+            <td>${{ "%.1f"|format(t.remaining_budget) }}M</td>
+            <td>${{ "%.1f"|format(t.spendable_budget) }}M</td>
+            <td>${{ "%.1f"|format(t.physical_max_bid) }}M</td>
+            <td>
+                <form hx-post="/team-done" hx-target="#app" hx-swap="innerHTML" style="display:inline">
+                    <input type="hidden" name="team_code" value="{{ code }}">
+                    <button type="submit" class="btn btn-xs {% if t.is_done %}btn-done{% else %}btn-active{% endif %}">
+                        {{ "Done" if t.is_done else "Active" }}
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if market_info %}
+    <div class="market-summary">
+        Market ceiling: <strong>${{ "%.1f"|format(market_info.market_ceiling) }}M</strong>
+        ({{ market_info.demand_count }} active bidders)
+        {% if market_info.highest_bidder %}
+        · Top: {{ market_info.highest_bidder }} (${{ "%.1f"|format(market_info.highest_bid) }}M)
+        {% endif %}
+    </div>
+    {% endif %}
+</section>

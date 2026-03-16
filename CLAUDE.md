@@ -190,11 +190,11 @@ Layer 2. Market-adjusted prices using exact real-time budget data.
 **Key functions**:
 
 ```python
-def compute_opponent_ceiling(team: TeamState, player: Player) -> float | None
-def compute_market_ceiling(player: Player, all_teams: dict[str, TeamState]) -> MarketInfo
-def compute_market_price(player: Player, model_price: float, market_info: MarketInfo) -> float
+def compute_opponent_ceiling(team: TeamState) -> float | None
+def compute_market_ceiling(all_teams: dict[str, TeamState], exclude_team: str = MY_TEAM) -> MarketInfo
+def compute_market_price(model_price: float, market_info: MarketInfo) -> float
 def compute_all_market_prices(players, model_prices, all_teams) -> dict
-def compute_live_ceiling(active_bidders: list[str], teams: dict[str, TeamState]) -> float
+def compute_live_ceiling(active_bidders: list[str], teams: dict[str, TeamState], position: str) -> float
 ```
 
 During live bidding (Mode 3), the market layer uses the specific active bidders reported by the user to narrow the ceiling further.

@@ -32,6 +32,7 @@
       "Bash(mv:*)",
       "Bash(cp:*)",
       "Bash(awk:*)",
+      "Bash(sed:*)",
       "Bash(python3:*)",
       "Bash(python3 -c:*)",
       "Bash(gh api:*)",

@@ -38,7 +38,8 @@
       "Bash(gh run:*)",
       "Bash(pip install:*)",
       "Bash(pip install -q -r requirements.txt --break-system-packages:*)",
-      "Bash(pytest tests/:*)"
+      "Bash(pytest tests/:*)",
+      "Bash(cat /tmp/:*)"
     ],
     "deny": []
   }

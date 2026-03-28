@@ -100,7 +100,7 @@ def _recompute_buyout_indicators():
             bt.penalties += p.salary * BUYOUT_PENALTY_RATE
             bo_sol = solve_optimal_roster(bt, auction_state.available_players, market_prices)
             buyout_indicators[p.name] = "buyout" if bo_sol.total_points > current_pts else "keep"
-        except (ValueError, Exception):
+        except Exception:
             buyout_indicators[p.name] = "keep"
 
 

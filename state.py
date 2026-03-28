@@ -44,6 +44,7 @@ class PlayerOnRoster:
     salary: float
     projected_points: int
     is_minor: bool = False
+    is_bench: bool = False
 
     @property
     def counts_on_cap(self) -> bool:
@@ -157,6 +158,14 @@ class TeamState:
     def add_acquired_player(self, player: PlayerOnRoster) -> None:
         """Add a player drafted during the auction."""
         self.acquired_players.append(player)
+        self._invalidate_cache()
+
+    def adjust_salary(self, player_name: str, new_salary: float) -> None:
+        """Correct a player's salary (typo fix)."""
+        p = self.find_player(player_name)
+        if p is None:
+            raise ValueError(f"Player '{player_name}' not found on team {self.code}")
+        p.salary = new_salary
         self._invalidate_cache()
 
 
@@ -286,6 +295,7 @@ def _player_on_roster_to_dict(p: PlayerOnRoster) -> dict:
         "salary": p.salary,
         "projected_points": p.projected_points,
         "is_minor": p.is_minor,
+        "is_bench": p.is_bench,
     }
 
 
@@ -297,6 +307,7 @@ def _player_on_roster_from_dict(d: dict) -> PlayerOnRoster:
         salary=d["salary"],
         projected_points=d["projected_points"],
         is_minor=d.get("is_minor", False),
+        is_bench=d.get("is_bench", False),
     )
 
 

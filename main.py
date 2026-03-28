@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import MIN_SALARY, MY_TEAM
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM
 from data_loader import build_initial_state
 from market import (
     MarketInfo,
@@ -58,13 +58,17 @@ async def lifespan(app: FastAPI):
     auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
+    _recompute_buyout_indicators()
     yield
 
 
-app = FastAPI(title="FCHL Auction Simulator", lifespan=lifespan)
+app = FastAPI(title="FCHL Auction Manager", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/fchl_logos", StaticFiles(directory="fchl_logos"), name="logos")
 templates = Jinja2Templates(directory="templates")
+
+
+buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 
 
 def _recompute():
@@ -77,6 +81,27 @@ def _recompute():
     market_prices = {name: price for name, (price, _) in all_market.items()}
     team = auction_state.teams[MY_TEAM]
     milp_solution = solve_optimal_roster(team, auction_state.available_players, market_prices)
+
+
+def _recompute_buyout_indicators():
+    """Recompute buyout indicators for BOT's roster. Called after player assignment."""
+    global buyout_indicators
+    from copy import deepcopy
+    from config import BUYOUT_PENALTY_RATE
+
+    team = auction_state.teams[MY_TEAM]
+    current_pts = milp_solution.total_points if milp_solution and milp_solution.status == "Optimal" else 0
+    buyout_indicators = {}
+    for p in team.roster_players:
+        try:
+            clone = deepcopy(auction_state)
+            bt = clone.teams[MY_TEAM]
+            bt.remove_player(p.name)
+            bt.penalties += p.salary * BUYOUT_PENALTY_RATE
+            bo_sol = solve_optimal_roster(bt, auction_state.available_players, market_prices)
+            buyout_indicators[p.name] = "buyout" if bo_sol.total_points > current_pts else "keep"
+        except (ValueError, Exception):
+            buyout_indicators[p.name] = "keep"
 
 
 def _save_state():
@@ -136,6 +161,8 @@ def _context(request: Request) -> dict:
         "nomination_order": auction_state.nomination_order,
         "current_nominator": auction_state.current_nominator(),
         "my_team": MY_TEAM,
+        "buyout_indicators": buyout_indicators,
+        "market_prices": market_prices,
     }
 
 
@@ -159,7 +186,7 @@ async def assign_player(
 
     p = auction_state.available_players.pop(player, None)
     if p is None:
-        return _render(request, "index.html")
+        return _render(request, "partials/all_panels.html")
 
     # RFA group conversion: RFA1→GROUP 2, RFA2→GROUP 3
     group = p.group
@@ -195,8 +222,9 @@ async def assign_player(
     ))
 
     _recompute()
+    _recompute_buyout_indicators()
     _save_state()
-    return _render(request, "index.html")
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/bid-check", response_class=HTMLResponse)
@@ -238,6 +266,8 @@ async def bid_check(
     ctx["bid_advice"] = rec
     ctx["bid_player"] = p
     ctx["bid_price"] = price
+    ctx["bid_highest"] = highest_bidder
+    ctx["active_bidders"] = bidder_list
     return _render(request, "partials/auction_control.html", ctx)
 
 
@@ -280,10 +310,7 @@ async def trade_evaluate(request: Request):
     form = await request.form()
 
     give_names = form.getlist("give_player")
-    receive_names = form.getlist("receive_name")
-    receive_positions = form.getlist("receive_position")
-    receive_salaries = form.getlist("receive_salary")
-    receive_points = form.getlist("receive_points")
+    receive_json = form.getlist("receive_player")
 
     give = []
     for name in give_names:
@@ -292,14 +319,18 @@ async def trade_evaluate(request: Request):
             give.append(PlayerTrade(p.name, p.position, p.salary, p.projected_points))
 
     receive = []
-    for i in range(len(receive_names)):
-        if receive_names[i].strip():
-            receive.append(PlayerTrade(
-                name=receive_names[i].strip(),
-                position=receive_positions[i].strip() if i < len(receive_positions) else "F",
-                salary=float(receive_salaries[i]) if i < len(receive_salaries) else 0.5,
-                projected_points=int(receive_points[i]) if i < len(receive_points) else 0,
-            ))
+    for raw in receive_json:
+        if raw.strip():
+            try:
+                data = json.loads(raw)
+                receive.append(PlayerTrade(
+                    name=data["name"],
+                    position=data["position"],
+                    salary=float(data["salary"]),
+                    projected_points=int(data["projected_points"]),
+                ))
+            except (json.JSONDecodeError, KeyError):
+                pass
 
     if give or receive:
         result = evaluate_trade(auction_state, give, receive, market_prices)
@@ -317,7 +348,7 @@ async def trade_execute(request: Request):
     """Execute a previously evaluated trade."""
     global last_trade_eval
     if last_trade_eval is None:
-        return _render(request, "index.html")
+        return _render(request, "partials/all_panels.html")
 
     form = await request.form()
     buyout_names = form.getlist("buyout_player")
@@ -331,7 +362,7 @@ async def trade_execute(request: Request):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    return _render(request, "index.html")
+    return _render(request, "partials/all_panels.html")
 
 
 @app.get("/buyout-check/{player_name}", response_class=HTMLResponse)
@@ -358,7 +389,7 @@ async def buyout(request: Request, player: str = Form(...)):
 
     _recompute()
     _save_state()
-    return _render(request, "index.html")
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/team-done", response_class=HTMLResponse)
@@ -370,7 +401,7 @@ async def team_done(request: Request, team_code: str = Form(...)):
         t.is_done = not t.is_done
     _recompute()
     _save_state()
-    return _render(request, "index.html")
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/undo", response_class=HTMLResponse)
@@ -381,7 +412,114 @@ async def undo(request: Request):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    return _render(request, "index.html")
+    return _render(request, "partials/all_panels.html")
+
+
+@app.get("/team-view/{team_code}", response_class=HTMLResponse)
+async def team_view(request: Request, team_code: str):
+    """View another team's roster details."""
+    t = auction_state.teams.get(team_code)
+    if t is None:
+        return _render(request, "partials/roster_panel.html")
+    ctx = _context(request)
+    ctx["view_team"] = t
+    return _render(request, "partials/team_detail.html", ctx)
+
+
+@app.get("/team-players/{team_code}")
+async def team_players(team_code: str):
+    """Return JSON list of players on a team (for trade dropdown)."""
+    t = auction_state.teams.get(team_code)
+    if t is None:
+        return []
+    return [
+        {
+            "name": p.name,
+            "position": p.position,
+            "salary": p.salary,
+            "projected_points": p.projected_points,
+        }
+        for p in t.roster_players
+    ]
+
+
+@app.post("/toggle-bench", response_class=HTMLResponse)
+async def toggle_bench(
+    request: Request,
+    team_code: str = Form(...),
+    player_name: str = Form(...),
+):
+    """Toggle a player between active and bench."""
+    t = auction_state.teams.get(team_code)
+    if t is None:
+        return _render(request, "partials/all_panels.html")
+    p = t.find_player(player_name)
+    if p:
+        p.is_bench = not p.is_bench
+    _save_state()
+    ctx = _context(request)
+    ctx["view_team"] = t
+    return _render(request, "partials/team_detail.html", ctx)
+
+
+@app.post("/adjust-salary", response_class=HTMLResponse)
+async def adjust_salary(
+    request: Request,
+    team_code: str = Form(...),
+    player_name: str = Form(...),
+    new_salary: float = Form(...),
+):
+    """Correct a player's salary (typo fix)."""
+    t = auction_state.teams.get(team_code)
+    if t is None:
+        return _render(request, "partials/all_panels.html")
+    clamped = max(MIN_SALARY, min(new_salary, MAX_SALARY))
+    auction_state.save_snapshot()
+    t.adjust_salary(player_name, clamped)
+    _recompute()
+    _recompute_buyout_indicators()
+    _save_state()
+    ctx = _context(request)
+    ctx["view_team"] = t
+    return _render(request, "partials/team_detail.html", ctx)
+
+
+@app.post("/trade-between", response_class=HTMLResponse)
+async def trade_between(
+    request: Request,
+    team_a: str = Form(...),
+    team_b: str = Form(...),
+    players_from_a: str = Form(""),
+    players_from_b: str = Form(""),
+):
+    """Execute a trade between two non-BOT teams."""
+    names_a = [n.strip() for n in players_from_a.split(",") if n.strip()]
+    names_b = [n.strip() for n in players_from_b.split(",") if n.strip()]
+    if not names_a and not names_b:
+        return _render(request, "partials/all_panels.html")
+    ta = auction_state.teams.get(team_a)
+    tb = auction_state.teams.get(team_b)
+    if not ta or not tb:
+        return _render(request, "partials/all_panels.html")
+    auction_state.save_snapshot()
+    for name in names_a:
+        try:
+            p = ta.remove_player(name)
+            p.is_minor = False
+            tb.add_acquired_player(p)
+        except ValueError:
+            pass
+    for name in names_b:
+        try:
+            p = tb.remove_player(name)
+            p.is_minor = False
+            ta.add_acquired_player(p)
+        except ValueError:
+            pass
+    _recompute()
+    _recompute_buyout_indicators()
+    _save_state()
+    return _render(request, "partials/all_panels.html")
 
 
 @app.get("/state")

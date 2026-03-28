@@ -1,0 +1,170 @@
+<div class="team-detail-card team-detail-expanded">
+    <h3>
+        <img src="/fchl_logos/{{ view_team.logo }}" alt="{{ view_team.code }}" class="team-logo-sm">
+        {{ view_team.name }} ({{ view_team.code }})
+        <button onclick="this.closest('.team-detail-card').remove()" class="btn btn-xs">Close</button>
+    </h3>
+    <div class="roster-summary">
+        <div class="stat">
+            <span class="stat-label">Cap Used</span>
+            <span class="stat-value">${{ "%.1f"|format(view_team.total_salary) }}M</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Remaining</span>
+            <span class="stat-value">${{ "%.1f"|format(view_team.remaining_budget) }}M</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Spendable</span>
+            <span class="stat-value">${{ "%.1f"|format(view_team.spendable_budget) }}M</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Spots</span>
+            <span class="stat-value">{{ view_team.total_spots_remaining }}</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">Projected PTS</span>
+            <span class="stat-value highlight">{{ view_team.roster_players|sum(attribute='projected_points') }}</span>
+        </div>
+    </div>
+
+    {% if view_team.keeper_players %}
+    <h4>Keepers</h4>
+    <table class="roster-table">
+        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+        {% for p in view_team.keeper_players|sort(attribute='projected_points', reverse=True) %}
+        <tr class="{% if p.is_bench %}bench-player{% endif %}">
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>${{ "%.1f"|format(p.salary) }}M</td>
+            <td>{{ p.projected_points }}</td>
+            <td>{{ "Bench" if p.is_bench else "Active" }}</td>
+            <td class="actions-cell">
+                <form hx-post="/toggle-bench" hx-target="#team-detail" hx-swap="innerHTML" style="display:inline">
+                    <input type="hidden" name="team_code" value="{{ view_team.code }}">
+                    <input type="hidden" name="player_name" value="{{ p.name }}">
+                    <button type="submit" class="btn btn-xs">{{ "Activate" if p.is_bench else "Bench" }}</button>
+                </form>
+                <form hx-post="/adjust-salary" hx-target="#team-detail" hx-swap="innerHTML" class="inline-salary-form">
+                    <input type="hidden" name="team_code" value="{{ view_team.code }}">
+                    <input type="hidden" name="player_name" value="{{ p.name }}">
+                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input-salary-xs">
+                    <button type="submit" class="btn btn-xs" title="Adjust salary">$</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if view_team.acquired_players %}
+    <h4>Acquired</h4>
+    <table class="roster-table">
+        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+        {% for p in view_team.acquired_players|sort(attribute='projected_points', reverse=True) %}
+        <tr class="acquired {% if p.is_bench %}bench-player{% endif %}">
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>${{ "%.1f"|format(p.salary) }}M</td>
+            <td>{{ p.projected_points }}</td>
+            <td>{{ "Bench" if p.is_bench else "Active" }}</td>
+            <td class="actions-cell">
+                <form hx-post="/toggle-bench" hx-target="#team-detail" hx-swap="innerHTML" style="display:inline">
+                    <input type="hidden" name="team_code" value="{{ view_team.code }}">
+                    <input type="hidden" name="player_name" value="{{ p.name }}">
+                    <button type="submit" class="btn btn-xs">{{ "Activate" if p.is_bench else "Bench" }}</button>
+                </form>
+                <form hx-post="/adjust-salary" hx-target="#team-detail" hx-swap="innerHTML" class="inline-salary-form">
+                    <input type="hidden" name="team_code" value="{{ view_team.code }}">
+                    <input type="hidden" name="player_name" value="{{ p.name }}">
+                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input-salary-xs">
+                    <button type="submit" class="btn btn-xs" title="Adjust salary">$</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if view_team.minor_players %}
+    <h4>Minors</h4>
+    <table class="roster-table">
+        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th><th>On Cap</th></tr></thead>
+        <tbody>
+        {% for p in view_team.minor_players|sort(attribute='projected_points', reverse=True) %}
+        <tr>
+            <td>{{ p.name }}</td>
+            <td>{{ p.position }}</td>
+            <td>${{ "%.1f"|format(p.salary) }}M</td>
+            <td>{{ p.projected_points }}</td>
+            <td>{{ "Yes" if p.counts_on_cap else "No" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <hr>
+    <h4>Trade Between Teams</h4>
+    <form hx-post="/trade-between" hx-target="#app" hx-swap="innerHTML" class="trade-between-form">
+        <input type="hidden" name="team_a" value="{{ view_team.code }}">
+        <input type="hidden" name="players_from_a" id="trade-from-a-{{ view_team.code }}" value="">
+        <input type="hidden" name="players_from_b" id="trade-from-b-{{ view_team.code }}" value="">
+        <div class="form-row">
+            <label>{{ view_team.code }} sends:</label>
+            <select multiple size="3" class="trade-select-sm"
+                    onchange="updateTradeHidden(this, 'trade-from-a-{{ view_team.code }}')">
+                {% for p in view_team.roster_players|sort(attribute='projected_points', reverse=True) %}
+                <option value="{{ p.name }}">{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M)</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label>To team:</label>
+            <select name="team_b" required
+                    onchange="loadTradePartner(this.value, '{{ view_team.code }}')">
+                <option value="">Select...</option>
+                {% for code in nomination_order %}
+                {% if code != view_team.code %}
+                <option value="{{ code }}">{{ code }} — {{ teams[code].name }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label>Receives:</label>
+            <select multiple size="3" class="trade-select-sm" id="trade-partner-players-{{ view_team.code }}"
+                    onchange="updateTradeHidden(this, 'trade-from-b-{{ view_team.code }}')">
+                <option disabled>Select a team first</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-xs">Execute Trade</button>
+    </form>
+    <script>
+    function updateTradeHidden(sel, hiddenId) {
+        var vals = [];
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].selected) vals.push(sel.options[i].value);
+        }
+        document.getElementById(hiddenId).value = vals.join(',');
+    }
+    function loadTradePartner(teamCode, viewTeamCode) {
+        if (!teamCode) return;
+        fetch('/team-players/' + teamCode)
+            .then(function(r) { return r.json(); })
+            .then(function(players) {
+                var sel = document.getElementById('trade-partner-players-' + viewTeamCode);
+                sel.innerHTML = '';
+                players.forEach(function(p) {
+                    var opt = document.createElement('option');
+                    opt.value = p.name;
+                    opt.textContent = p.name + ' (' + p.position + ', $' + p.salary.toFixed(1) + 'M)';
+                    sel.appendChild(opt);
+                });
+            });
+    }
+    </script>
+</div>

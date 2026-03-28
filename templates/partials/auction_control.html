@@ -27,12 +27,32 @@
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
         <div class="form-row">
             <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input-wide">
-            <input type="text" name="bidders" placeholder="Active bidders (comma-separated)" class="input-wide">
-            <input type="number" name="price" step="0.1" min="0.5" value="0.5" class="input-salary">
-            <input type="text" name="highest_bidder" placeholder="Highest bidder" class="input-narrow">
+            <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" class="input-salary">
+            <input type="text" name="highest_bidder" placeholder="Highest" value="{{ bid_highest if bid_highest is defined else '' }}" class="input-narrow">
             <button type="submit" class="btn btn-secondary">Check</button>
         </div>
+        <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else '' }}">
+        <div class="bidder-logos" id="bidder-logos">
+            {% for code in nomination_order %}
+            {% if code != my_team %}
+            <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
+                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+                <span class="bidder-code">{{ code }}</span>
+            </button>
+            {% endif %}
+            {% endfor %}
+        </div>
     </form>
+    <script>
+    function toggleBidder(btn) {
+        btn.classList.toggle('active');
+        var codes = [];
+        document.querySelectorAll('.bidder-logo-btn.active').forEach(function(b) {
+            codes.push(b.dataset.team);
+        });
+        document.getElementById('bidders-hidden').value = codes.join(',');
+    }
+    </script>
 
     {% if bid_advice is defined and bid_advice %}
     <div class="bid-result bid-{{ bid_advice.action|lower }}">
@@ -44,7 +64,7 @@
         </div>
         <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>
         {% if bid_advice.action == "DROP" %}
-        <a hx-get="/explain/{{ bid_advice.player_name }}" hx-target="#explanation" hx-swap="outerHTML"
+        <a hx-get="/explain/{{ bid_advice.player_name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML"
            class="link-explain">Why not bid?</a>
         {% endif %}
     </div>

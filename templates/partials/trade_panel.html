@@ -13,18 +13,20 @@
             </div>
             <div class="trade-receive">
                 <h3>I Receive</h3>
-                {% for i in range(3) %}
-                <div class="trade-receive-row">
-                    <input type="text" name="receive_name" placeholder="Player name">
-                    <select name="receive_position">
-                        <option value="F">F</option>
-                        <option value="D">D</option>
-                        <option value="G">G</option>
+                <div class="trade-team-select">
+                    <label>From team:</label>
+                    <select id="trade-source-team" onchange="loadTeamPlayers(this.value)">
+                        <option value="">Select team...</option>
+                        {% for code, t in teams.items() %}
+                        {% if code != my_team %}
+                        <option value="{{ code }}">{{ code }} — {{ t.name }}</option>
+                        {% endif %}
+                        {% endfor %}
                     </select>
-                    <input type="number" name="receive_salary" step="0.1" min="0.5" value="0.5" class="input-salary">
-                    <input type="number" name="receive_points" min="0" value="0" class="input-pts">
                 </div>
-                {% endfor %}
+                <select name="receive_player" multiple size="5" id="trade-receive-select" class="trade-select">
+                    <option disabled>Select a team first</option>
+                </select>
             </div>
         </div>
         <button type="submit" class="btn btn-primary">Evaluate Trade</button>
@@ -69,3 +71,23 @@
     </div>
     {% endif %}
 </section>
+
+<script>
+async function loadTeamPlayers(teamCode) {
+    const select = document.getElementById('trade-receive-select');
+    if (!teamCode) {
+        select.innerHTML = '<option disabled>Select a team first</option>';
+        return;
+    }
+    const resp = await fetch('/team-players/' + teamCode);
+    const players = await resp.json();
+    select.innerHTML = '';
+    players.sort((a, b) => b.projected_points - a.projected_points);
+    for (const p of players) {
+        const opt = document.createElement('option');
+        opt.value = JSON.stringify(p);
+        opt.textContent = `${p.name} (${p.position}, $${p.salary.toFixed(1)}M, ${p.projected_points}pts)`;
+        select.appendChild(opt);
+    }
+}
+</script>

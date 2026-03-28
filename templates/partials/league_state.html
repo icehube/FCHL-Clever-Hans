@@ -20,7 +20,9 @@
         <tr class="{% if t.is_done %}team-done{% endif %} {% if code == my_team %}team-mine{% endif %}">
             <td><img src="/fchl_logos/{{ t.logo }}" alt="{{ code }}" class="team-logo-xs"></td>
             <td>
-                <strong>{{ code }}</strong>
+                <a hx-get="/team-view/{{ code }}" hx-target="#team-detail" hx-swap="innerHTML" class="team-link">
+                    <strong>{{ code }}</strong>
+                </a>
                 {% if t.is_my_team %}<span class="badge-mine">★</span>{% endif %}
             </td>
             <td>{{ t.roster_count }}/24</td>
@@ -41,6 +43,8 @@
         {% endfor %}
         </tbody>
     </table>
+
+    <div id="team-detail"></div>
 
     {% if market_info %}
     <div class="market-summary">

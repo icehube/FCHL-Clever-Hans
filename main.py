@@ -55,7 +55,12 @@ async def lifespan(app: FastAPI):
     global auction_state, model_params, model_prices
     os.makedirs(STATE_DIR, exist_ok=True)
     model_params = load_model_params()
-    auction_state = build_initial_state()
+    saved_path = os.path.join(STATE_DIR, "auction_state.json")
+    if os.path.exists(saved_path):
+        with open(saved_path) as f:
+            auction_state = AuctionState.from_json(f.read())
+    else:
+        auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _recompute_buyout_indicators()

@@ -1,55 +1,56 @@
-<div class="team-detail-card team-detail-expanded">
-    <h3>
-        <img src="/fchl_logos/{{ view_team.logo }}" alt="{{ view_team.code }}" class="team-logo-sm">
-        {{ view_team.name }} ({{ view_team.code }})
-        <button onclick="this.closest('.team-detail-card').remove()" class="btn btn-xs">Close</button>
-    </h3>
-    <div class="roster-summary">
-        <div class="stat">
-            <span class="stat-label">Cap Used</span>
-            <span class="stat-value">${{ "%.1f"|format(view_team.total_salary) }}M</span>
+<div class="card bg-base-300 shadow-lg p-4 mt-3">
+    <div class="flex items-center gap-2 mb-2">
+        <img src="/fchl_logos/{{ view_team.logo }}" alt="{{ view_team.code }}" class="w-6 h-6">
+        <h3 class="font-bold text-sm">{{ view_team.name }} ({{ view_team.code }})</h3>
+        <button onclick="this.closest('.card').remove()" class="btn btn-xs btn-ghost ml-auto">&times;</button>
+    </div>
+
+    <div class="stats stats-horizontal shadow bg-base-200 w-full text-xs mb-3">
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Cap Used</div>
+            <div class="stat-value text-sm">${{ "%.1f"|format(view_team.total_salary) }}M</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Remaining</span>
-            <span class="stat-value">${{ "%.1f"|format(view_team.remaining_budget) }}M</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Remaining</div>
+            <div class="stat-value text-sm">${{ "%.1f"|format(view_team.remaining_budget) }}M</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Spendable</span>
-            <span class="stat-value">${{ "%.1f"|format(view_team.spendable_budget) }}M</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Spendable</div>
+            <div class="stat-value text-sm">${{ "%.1f"|format(view_team.spendable_budget) }}M</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Spots</span>
-            <span class="stat-value">{{ view_team.total_spots_remaining }}</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Spots</div>
+            <div class="stat-value text-sm">{{ view_team.total_spots_remaining }}</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Projected PTS</span>
-            <span class="stat-value highlight">{{ view_team.roster_players|sum(attribute='projected_points') }}</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Projected PTS</div>
+            <div class="stat-value text-sm text-accent">{{ view_team.roster_players|sum(attribute='projected_points') }}</div>
         </div>
     </div>
 
     {% if view_team.keeper_players %}
-    <h4>Keepers</h4>
-    <table class="roster-table">
+    <h4 class="font-semibold text-xs mb-1">Keepers</h4>
+    <table class="table table-xs table-zebra mb-2">
         <thead><tr><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
         {% for p in view_team.keeper_players|sort(attribute='projected_points', reverse=True) %}
-        <tr class="{% if p.is_bench %}bench-player{% endif %}">
+        <tr class="{% if p.is_bench %}opacity-50{% endif %}">
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
-            <td>{{ "Bench" if p.is_bench else "Active" }}</td>
-            <td class="actions-cell">
+            <td><span class="badge badge-xs {% if p.is_bench %}badge-ghost{% else %}badge-success badge-outline{% endif %}">{{ "Bench" if p.is_bench else "Active" }}</span></td>
+            <td class="flex gap-1 items-center">
                 <form hx-post="/toggle-bench" hx-target="#team-detail" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ view_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
-                    <button type="submit" class="btn btn-xs">{{ "Activate" if p.is_bench else "Bench" }}</button>
+                    <button type="submit" class="btn btn-xs btn-ghost">{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
-                <form hx-post="/adjust-salary" hx-target="#team-detail" hx-swap="innerHTML" class="inline-salary-form">
+                <form hx-post="/adjust-salary" hx-target="#team-detail" hx-swap="innerHTML" class="flex items-center gap-1">
                     <input type="hidden" name="team_code" value="{{ view_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
-                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input-salary-xs">
-                    <button type="submit" class="btn btn-xs" title="Adjust salary">$</button>
+                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input input-xs input-bordered bg-base-200 w-16">
+                    <button type="submit" class="btn btn-xs btn-ghost" title="Adjust salary">$</button>
                 </form>
             </td>
         </tr>
@@ -59,28 +60,28 @@
     {% endif %}
 
     {% if view_team.acquired_players %}
-    <h4>Acquired</h4>
-    <table class="roster-table">
+    <h4 class="font-semibold text-xs mb-1">Acquired</h4>
+    <table class="table table-xs table-zebra mb-2">
         <thead><tr><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
         {% for p in view_team.acquired_players|sort(attribute='projected_points', reverse=True) %}
-        <tr class="acquired {% if p.is_bench %}bench-player{% endif %}">
+        <tr class="text-success {% if p.is_bench %}opacity-50{% endif %}">
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
-            <td>{{ "Bench" if p.is_bench else "Active" }}</td>
-            <td class="actions-cell">
+            <td><span class="badge badge-xs {% if p.is_bench %}badge-ghost{% else %}badge-success badge-outline{% endif %}">{{ "Bench" if p.is_bench else "Active" }}</span></td>
+            <td class="flex gap-1 items-center">
                 <form hx-post="/toggle-bench" hx-target="#team-detail" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ view_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
-                    <button type="submit" class="btn btn-xs">{{ "Activate" if p.is_bench else "Bench" }}</button>
+                    <button type="submit" class="btn btn-xs btn-ghost">{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
-                <form hx-post="/adjust-salary" hx-target="#team-detail" hx-swap="innerHTML" class="inline-salary-form">
+                <form hx-post="/adjust-salary" hx-target="#team-detail" hx-swap="innerHTML" class="flex items-center gap-1">
                     <input type="hidden" name="team_code" value="{{ view_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
-                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input-salary-xs">
-                    <button type="submit" class="btn btn-xs" title="Adjust salary">$</button>
+                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input input-xs input-bordered bg-base-200 w-16">
+                    <button type="submit" class="btn btn-xs btn-ghost" title="Adjust salary">$</button>
                 </form>
             </td>
         </tr>
@@ -90,8 +91,8 @@
     {% endif %}
 
     {% if view_team.minor_players %}
-    <h4>Minors</h4>
-    <table class="roster-table">
+    <h4 class="font-semibold text-xs mb-1">Minors</h4>
+    <table class="table table-xs table-zebra mb-2">
         <thead><tr><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th><th>On Cap</th></tr></thead>
         <tbody>
         {% for p in view_team.minor_players|sort(attribute='projected_points', reverse=True) %}
@@ -107,41 +108,43 @@
     </table>
     {% endif %}
 
-    <hr>
-    <h4>Trade Between Teams</h4>
-    <form hx-post="/trade-between" hx-target="#app" hx-swap="innerHTML" class="trade-between-form">
+    <div class="divider my-1"></div>
+    <h4 class="font-semibold text-xs mb-1">Trade Between Teams</h4>
+    <form hx-post="/trade-between" hx-target="#app" hx-swap="innerHTML">
         <input type="hidden" name="team_a" value="{{ view_team.code }}">
         <input type="hidden" name="players_from_a" id="trade-from-a-{{ view_team.code }}" value="">
         <input type="hidden" name="players_from_b" id="trade-from-b-{{ view_team.code }}" value="">
-        <div class="form-row">
-            <label>{{ view_team.code }} sends:</label>
-            <select multiple size="3" class="trade-select-sm"
-                    onchange="updateTradeHidden(this, 'trade-from-a-{{ view_team.code }}')">
-                {% for p in view_team.roster_players|sort(attribute='projected_points', reverse=True) %}
-                <option value="{{ p.name }}">{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M)</option>
-                {% endfor %}
-            </select>
+        <div class="grid grid-cols-3 gap-2">
+            <div>
+                <label class="text-xs opacity-70">{{ view_team.code }} sends:</label>
+                <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto"
+                        onchange="updateTradeHidden(this, 'trade-from-a-{{ view_team.code }}')">
+                    {% for p in view_team.roster_players|sort(attribute='projected_points', reverse=True) %}
+                    <option value="{{ p.name }}">{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M)</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="text-xs opacity-70">To team:</label>
+                <select name="team_b" required class="select select-bordered select-xs bg-base-200 w-full"
+                        onchange="loadTradePartner(this.value, '{{ view_team.code }}')">
+                    <option value="">Select...</option>
+                    {% for code in nomination_order %}
+                    {% if code != view_team.code %}
+                    <option value="{{ code }}">{{ code }} — {{ teams[code].name }}</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="text-xs opacity-70">Receives:</label>
+                <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto" id="trade-partner-players-{{ view_team.code }}"
+                        onchange="updateTradeHidden(this, 'trade-from-b-{{ view_team.code }}')">
+                    <option disabled>Select a team first</option>
+                </select>
+            </div>
         </div>
-        <div class="form-row">
-            <label>To team:</label>
-            <select name="team_b" required
-                    onchange="loadTradePartner(this.value, '{{ view_team.code }}')">
-                <option value="">Select...</option>
-                {% for code in nomination_order %}
-                {% if code != view_team.code %}
-                <option value="{{ code }}">{{ code }} — {{ teams[code].name }}</option>
-                {% endif %}
-                {% endfor %}
-            </select>
-        </div>
-        <div class="form-row">
-            <label>Receives:</label>
-            <select multiple size="3" class="trade-select-sm" id="trade-partner-players-{{ view_team.code }}"
-                    onchange="updateTradeHidden(this, 'trade-from-b-{{ view_team.code }}')">
-                <option disabled>Select a team first</option>
-            </select>
-        </div>
-        <button type="submit" class="btn btn-primary btn-xs">Execute Trade</button>
+        <button type="submit" class="btn btn-primary btn-xs mt-2">Execute Trade</button>
     </form>
     <script>
     function updateTradeHidden(sel, hiddenId) {

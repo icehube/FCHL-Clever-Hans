@@ -1,32 +1,32 @@
-<section class="panel" id="explanation">
-    <h2>Counterfactual</h2>
+<section class="card bg-base-200 shadow-md p-4" id="explanation">
+    <h2 class="card-title text-accent text-base mb-2">Counterfactual</h2>
 
     {% if counterfactual is defined and counterfactual %}
-    <div class="counterfactual">
-        <h3>{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
+    <div>
+        <h3 class="font-bold text-sm">{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
 
-        <div class="cf-comparison">
-            <div class="cf-side">
-                <h4>With {{ cf_player.name }}</h4>
-                <div class="cf-stat">Points: {{ "%.0f"|format(counterfactual.with_player.total_points) }}</div>
-                <div class="cf-stat">Cost: ${{ "%.1f"|format(counterfactual.with_player.total_cost) }}M</div>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+            <div class="card bg-base-300 p-3">
+                <h4 class="text-xs font-semibold opacity-70 mb-1">With {{ cf_player.name }}</h4>
+                <div class="text-sm">Points: {{ "%.0f"|format(counterfactual.with_player.total_points) }}</div>
+                <div class="text-sm">Cost: ${{ "%.1f"|format(counterfactual.with_player.total_cost) }}M</div>
             </div>
-            <div class="cf-side">
-                <h4>Without {{ cf_player.name }}</h4>
-                <div class="cf-stat">Points: {{ "%.0f"|format(counterfactual.without_player.total_points) }}</div>
-                <div class="cf-stat">Cost: ${{ "%.1f"|format(counterfactual.without_player.total_cost) }}M</div>
+            <div class="card bg-base-300 p-3">
+                <h4 class="text-xs font-semibold opacity-70 mb-1">Without {{ cf_player.name }}</h4>
+                <div class="text-sm">Points: {{ "%.0f"|format(counterfactual.without_player.total_points) }}</div>
+                <div class="text-sm">Cost: ${{ "%.1f"|format(counterfactual.without_player.total_cost) }}M</div>
             </div>
         </div>
 
-        <div class="cf-delta">
+        <div class="alert alert-sm py-2 mt-2 text-xs">
             Delta: {{ "%+.0f"|format(counterfactual.points_difference) }} points,
             {{ "%+.1f"|format(counterfactual.budget_difference) }}M cap
         </div>
 
         {% if counterfactual.alternative_players %}
-        <div class="cf-alternatives">
-            <h4>Alternatives (who you'd draft instead):</h4>
-            <ul>
+        <div class="mt-2">
+            <h4 class="text-xs font-semibold opacity-70 mb-1">Alternatives (who you'd draft instead):</h4>
+            <ul class="text-xs list-disc list-inside">
             {% for alt in counterfactual.alternative_players[:5] %}
                 <li>{{ alt.name }} ({{ alt.position }}, {{ alt.projected_points }}pts)</li>
             {% endfor %}
@@ -35,6 +35,6 @@
         {% endif %}
     </div>
     {% else %}
-    <p class="muted">Click "?" on a player to see the counterfactual analysis.</p>
+    <p class="text-sm opacity-50">Click "?" on a player to see the counterfactual analysis.</p>
     {% endif %}
 </section>

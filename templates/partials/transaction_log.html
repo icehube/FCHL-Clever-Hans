@@ -1,25 +1,26 @@
-<section class="panel" id="transaction-log">
-    <h2>Transaction Log ({{ transaction_log|length }})</h2>
+<section class="card bg-base-200 shadow-md p-4" id="transaction-log">
+    <h2 class="card-title text-accent text-base mb-2">Transaction Log ({{ transaction_log|length }})</h2>
 
     {% if transaction_log %}
-    <table class="log-table">
+    <div class="scroll-container">
+    <table class="table table-xs table-zebra">
         <thead>
             <tr>
-                <th data-sort-col="0" data-sort-type="number" onclick="sortTable(this)">#</th>
-                <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)">Pos</th>
-                <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)">Player</th>
-                <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)">Team</th>
-                <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)">Salary</th>
-                <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)">Model $</th>
-                <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)">Market $</th>
-                <th data-sort-col="7" data-sort-type="currency" onclick="sortTable(this)">Deviation</th>
-                <th data-sort-col="8" data-sort-type="text" onclick="sortTable(this)">Type</th>
+                <th data-sort-col="0" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">#</th>
+                <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
+                <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
+                <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Team</th>
+                <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Salary</th>
+                <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Model $</th>
+                <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Market $</th>
+                <th data-sort-col="7" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Deviation</th>
+                <th data-sort-col="8" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Type</th>
             </tr>
         </thead>
         <tbody>
         {% for t in transaction_log|reverse %}
         {% set deviation = t.salary - t.market_price if t.market_price > 0 else 0 %}
-        <tr class="log-{{ t.transaction_type }}">
+        <tr>
             <td>{{ loop.revindex }}</td>
             <td>{{ t.position }}</td>
             <td>{{ t.player_name }}</td>
@@ -27,15 +28,16 @@
             <td>${{ "%.1f"|format(t.salary) }}M</td>
             <td>${{ "%.1f"|format(t.model_price) }}M</td>
             <td>${{ "%.1f"|format(t.market_price) }}M</td>
-            <td class="{% if deviation > 0.5 %}over{% elif deviation < -0.5 %}under{% endif %}">
+            <td class="{% if deviation > 0.5 %}text-error{% elif deviation < -0.5 %}text-success{% endif %}">
                 {{ "%+.1f"|format(deviation) }}
             </td>
-            <td>{{ t.transaction_type }}</td>
+            <td><span class="badge badge-xs badge-ghost">{{ t.transaction_type }}</span></td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {% else %}
-    <p class="muted">No transactions yet.</p>
+    <p class="text-sm opacity-50">No transactions yet.</p>
     {% endif %}
 </section>

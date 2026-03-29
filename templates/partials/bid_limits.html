@@ -1,37 +1,37 @@
-<section class="panel" id="bid-limits">
-    <h2>Available Players ({{ bid_limits|length }})</h2>
-    <div class="panel-legend">
-        <span class="legend-item"><span class="legend-swatch in-optimal-swatch"></span> In optimal roster</span>
-        <span class="legend-item"><span class="legend-swatch rfa-swatch"></span> RFA</span>
+<section class="card bg-base-200 shadow-md p-4" id="bid-limits">
+    <h2 class="card-title text-accent text-base mb-1">Available Players ({{ bid_limits|length }})</h2>
+    <div class="flex gap-4 text-xs mb-2">
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm inline-block" style="background:rgba(163,190,140,0.25)"></span> In optimal roster</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm inline-block border-l-2 border-warning"></span> RFA</span>
     </div>
     <div id="player-chart-container"></div>
     <div class="scroll-container">
-        <table class="player-table">
+        <table class="table table-xs table-zebra">
             <thead>
                 <tr>
-                    <th data-sort-col="0" data-sort-type="text" onclick="sortTable(this)">Pos</th>
-                    <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)">Player</th>
-                    <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)">NHL</th>
-                    <th data-sort-col="3" data-sort-type="number" onclick="sortTable(this)">PTS</th>
-                    <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)">Model $</th>
-                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)">Market $</th>
-                    <th data-sort-col="6" data-sort-type="text" onclick="sortTable(this)">RFA</th>
+                    <th data-sort-col="0" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
+                    <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
+                    <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
+                    <th data-sort-col="3" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">PTS</th>
+                    <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Model $</th>
+                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Market $</th>
+                    <th data-sort-col="6" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">RFA</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
             {% for p in bid_limits[:100] %}
-            <tr class="{% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
+            <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
                 <td>{{ p.position }}</td>
-                <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="player-link">{{ p.name }}</a></td>
+                <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>
                 <td>{{ p.nhl_team }}</td>
                 <td>{{ p.projected_points }}</td>
                 <td>${{ p.model_price }}M</td>
                 <td>${{ p.market_price }}M</td>
-                <td>{% if p.is_rfa %}{{ p.prior_fchl_team }}{% endif %}</td>
-                <td>
-                    <button type="button" class="btn btn-xs btn-add" onclick="setBidPlayer('{{ p.name }}')" title="Add to bid">+</button>
-                    <a hx-get="/explain/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="link-small">?</a>
+                <td>{% if p.is_rfa %}<span class="badge badge-warning badge-xs">{{ p.prior_fchl_team }}</span>{% endif %}</td>
+                <td class="flex gap-1">
+                    <button type="button" class="btn btn-xs btn-ghost btn-circle" onclick="setBidPlayer('{{ p.name }}')" title="Add to bid">+</button>
+                    <a hx-get="/explain/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="btn btn-xs btn-ghost btn-circle">?</a>
                 </td>
             </tr>
             {% endfor %}

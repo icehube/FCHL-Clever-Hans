@@ -1,7 +1,7 @@
-<div id="player-chart-container" class="player-chart-wrapper">
-    <div class="chart-header">
-        <h3>Price Model: {{ chart_player.name }}</h3>
-        <button onclick="document.getElementById('player-chart-container').innerHTML=''" class="btn btn-xs" title="Close chart">&times;</button>
+<div id="player-chart-container" class="card bg-base-300 p-3 mb-2">
+    <div class="flex items-center justify-between mb-1">
+        <h3 class="font-semibold text-sm">Price Model: {{ chart_player.name }}</h3>
+        <button onclick="document.getElementById('player-chart-container').innerHTML=''" class="btn btn-xs btn-ghost">&times;</button>
     </div>
     <div class="chart-meta">
         {{ chart_player.position }} · {{ chart_player.nhl_team }} · {{ chart_player.projected_points }}pts

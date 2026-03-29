@@ -1,46 +1,46 @@
-<section class="panel" id="roster-panel">
-    <h2>
-        <img src="/fchl_logos/{{ team.logo }}" alt="{{ team.code }}" class="team-logo-sm">
+<section class="card bg-base-200 shadow-md p-4" id="roster-panel">
+    <h2 class="card-title text-accent text-base mb-2">
+        <img src="/fchl_logos/{{ team.logo }}" alt="{{ team.code }}" class="w-6 h-6">
         {{ team.name }} ({{ team.code }})
     </h2>
 
-    <div class="roster-summary">
-        <div class="stat">
-            <span class="stat-label">Cap Used</span>
-            <span class="stat-value">${{ "%.1f"|format(team.total_salary) }}M</span>
+    <div class="stats stats-horizontal shadow bg-base-300 w-full text-xs mb-2">
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Cap Used</div>
+            <div class="stat-value text-sm">${{ "%.1f"|format(team.total_salary) }}M</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Remaining</span>
-            <span class="stat-value">${{ "%.1f"|format(team.remaining_budget) }}M</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Remaining</div>
+            <div class="stat-value text-sm">${{ "%.1f"|format(team.remaining_budget) }}M</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Spendable</span>
-            <span class="stat-value highlight">${{ "%.1f"|format(team.spendable_budget) }}M</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Spendable</div>
+            <div class="stat-value text-sm text-accent">${{ "%.1f"|format(team.spendable_budget) }}M</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Spots Left</span>
-            <span class="stat-value">{{ team.total_spots_remaining }}</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Spots</div>
+            <div class="stat-value text-sm">{{ team.total_spots_remaining }}</div>
         </div>
-        <div class="stat">
-            <span class="stat-label">Max Bid</span>
-            <span class="stat-value">${{ "%.1f"|format(team.physical_max_bid) }}M</span>
+        <div class="stat py-2 px-3">
+            <div class="stat-title text-xs">Max Bid</div>
+            <div class="stat-value text-sm">${{ "%.1f"|format(team.physical_max_bid) }}M</div>
         </div>
     </div>
 
-    <div class="roster-needs">
+    <div class="text-xs opacity-70 mb-2">
         Needs: {{ team.roster_needs.get("F", 0) }}F · {{ team.roster_needs.get("D", 0) }}D · {{ team.roster_needs.get("G", 0) }}G
     </div>
 
     {% if milp and milp.status == "Optimal" %}
-    <div class="milp-summary">
+    <div class="alert alert-success py-2 text-sm mb-2">
         <strong>Optimal Projected Points: {{ "%.0f"|format(milp.total_points) }}</strong>
         (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
     </div>
     {% endif %}
 
     <!-- Current roster -->
-    <h3>Keepers</h3>
-    <table class="roster-table">
+    <h3 class="font-semibold text-sm mt-2 mb-1">Keepers</h3>
+    <table class="table table-xs table-zebra">
         <thead><tr><th></th><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th></tr></thead>
         <tbody>
         {% for p in team.keeper_players|sort(attribute='projected_points', reverse=True) %}
@@ -57,13 +57,13 @@
     </table>
 
     {% if team.acquired_players %}
-    <h3>Acquired</h3>
-    <table class="roster-table">
+    <h3 class="font-semibold text-sm mt-2 mb-1">Acquired</h3>
+    <table class="table table-xs table-zebra">
         <thead><tr><th></th><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th></tr></thead>
         <tbody>
         {% for p in team.acquired_players|sort(attribute='projected_points', reverse=True) %}
         {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined else "keep" %}
-        <tr class="acquired">
+        <tr class="text-success">
             <td><span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span></td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
@@ -76,13 +76,13 @@
     {% endif %}
 
     {% if milp and milp.status == "Optimal" and milp.roster %}
-    <h3>Target Roster (MILP)</h3>
-    <table class="roster-table">
+    <h3 class="font-semibold text-sm mt-2 mb-1">Target Roster (MILP)</h3>
+    <table class="table table-xs table-zebra">
         <thead><tr><th>Pos</th><th>Player</th><th>Market $</th><th>PTS</th></tr></thead>
         <tbody>
         {% for pos in ["F", "D", "G"] %}
         {% for p in milp.by_position.get(pos, [])|sort(attribute='projected_points', reverse=True) %}
-        <tr class="target">
+        <tr class="text-info italic">
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
             <td>${{ "%.1f"|format(market_prices.get(p.name, 0.5) if market_prices else 0.5) }}M</td>

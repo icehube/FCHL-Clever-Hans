@@ -6,21 +6,43 @@
     <title>FCHL Auction Manager</title>
     <link rel="icon" type="image/gif" href="/fchl_logos/0.gif">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        darkMode: ['class', '[data-theme="nord-dark"]'],
+        theme: {
+            extend: {
+                colors: {
+                    nord: {
+                        0: '#2e3440', 1: '#3b4252', 2: '#434c5e', 3: '#4c566a',
+                        4: '#d8dee9', 5: '#e5e9f0', 6: '#eceff4',
+                        7: '#8fbcbb', 8: '#88c0d0', 9: '#81a1c1', 10: '#5e81ac',
+                        11: '#bf616a', 12: '#d08770', 13: '#ebcb8b', 14: '#a3be8c', 15: '#b48ead',
+                    }
+                }
+            }
+        },
+        daisyui: {
+            themes: ["dark"]
+        }
+    }
+    </script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <header>
-        <div class="header-left">
-            <img src="/fchl_logos/0.gif" alt="FCHL" class="league-logo">
-            <h1>FCHL Auction Manager</h1>
+    <div class="navbar bg-base-200 border-b border-base-300 px-4 sticky top-0 z-50">
+        <div class="flex-1 gap-2">
+            <img src="/fchl_logos/0.gif" alt="FCHL" class="w-8 h-8">
+            <span class="text-lg font-bold text-accent">FCHL Auction Manager</span>
         </div>
-        <div class="header-right">
-            <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-undo" title="Undo (Ctrl+Z)">
+        <div class="flex-none gap-2">
+            <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-sm btn-outline btn-info" title="Undo (Ctrl+Z)">
                 ↩ Undo
             </button>
-            <button hx-post="/save" hx-swap="none" class="btn btn-save">Save</button>
+            <button hx-post="/save" hx-swap="none" class="btn btn-sm btn-outline btn-success">Save</button>
         </div>
-    </header>
+    </div>
     <main id="app">
         {% block content %}{% endblock %}
     </main>

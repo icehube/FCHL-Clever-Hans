@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="nord-dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +10,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
     tailwind.config = {
-        darkMode: ['class', '[data-theme="nord-dark"]'],
         theme: {
             extend: {
                 colors: {
@@ -22,25 +21,51 @@
                     }
                 }
             }
-        },
-        daisyui: {
-            themes: ["dark"]
         }
     }
     </script>
+    <style>
+    /* Nord DaisyUI theme override */
+    [data-theme="nord-dark"] {
+        --b1: 222.2 18.3% 22.4%;    /* nord0 #2e3440 — base background */
+        --b2: 222 16.4% 27.8%;      /* nord1 #3b4252 — panels/cards */
+        --b3: 220 16.4% 31.4%;      /* nord2 #434c5e — hover/borders */
+        --bc: 219 28% 93.3%;         /* nord6 #eceff4 — base content text */
+        --p: 193 43.4% 67.5%;       /* nord8 #88c0d0 — primary (accent) */
+        --pc: 222.2 18.3% 22.4%;    /* nord0 — primary content (dark text on accent) */
+        --s: 210 34% 63.1%;         /* nord9 #81a1c1 — secondary (blue) */
+        --sc: 222.2 18.3% 22.4%;    /* nord0 — secondary content */
+        --a: 40 70.9% 73.3%;        /* nord13 #ebcb8b — accent (yellow) */
+        --ac: 222.2 18.3% 22.4%;    /* nord0 — accent content */
+        --n: 220 16.4% 35.7%;       /* nord3 #4c566a — neutral */
+        --nc: 219 28% 88%;          /* nord4 #d8dee9 — neutral content */
+        --su: 92 27.8% 64.7%;       /* nord14 #a3be8c — success (green) */
+        --suc: 222.2 18.3% 22.4%;   /* nord0 */
+        --wa: 40 70.9% 73.3%;       /* nord13 #ebcb8b — warning (yellow) */
+        --wac: 222.2 18.3% 22.4%;   /* nord0 */
+        --er: 354 42.4% 56.5%;      /* nord11 #bf616a — error (red) */
+        --erc: 219 28% 93.3%;       /* nord6 — white text on red */
+        --in: 193 43.4% 67.5%;      /* nord8 #88c0d0 — info */
+        --inc: 222.2 18.3% 22.4%;   /* nord0 */
+        --rounded-btn: 0.25rem;
+        --rounded-box: 0.375rem;
+        --border-btn: 1px;
+        color-scheme: dark;
+    }
+    </style>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="navbar bg-base-200 border-b border-base-300 px-4 sticky top-0 z-50">
+    <div class="navbar bg-base-200 border-b border-base-300 px-4 sticky top-0 z-50 min-h-0 h-10">
         <div class="flex-1 gap-2">
-            <img src="/fchl_logos/0.gif" alt="FCHL" class="w-8 h-8">
-            <span class="text-lg font-bold text-accent">FCHL Auction Manager</span>
+            <img src="/fchl_logos/0.gif" alt="FCHL" class="w-7 h-7">
+            <span class="text-base font-bold text-primary">FCHL Auction Manager</span>
         </div>
         <div class="flex-none gap-2">
-            <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-sm btn-outline btn-info" title="Undo (Ctrl+Z)">
+            <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-xs btn-outline btn-info" title="Undo (Ctrl+Z)">
                 ↩ Undo
             </button>
-            <button hx-post="/save" hx-swap="none" class="btn btn-sm btn-outline btn-success">Save</button>
+            <button hx-post="/save" hx-swap="none" class="btn btn-xs btn-outline btn-success">Save</button>
         </div>
     </div>
     <main id="app">

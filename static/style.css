@@ -1,310 +1,38 @@
-/* FCHL Auction Manager — Dark mode, compact layout for draft day */
+/* FCHL Auction Manager — Nord theme overrides for DaisyUI */
 
 :root {
-    --bg: #2e3440;          /* nord0  — Polar Night origin, base background */
-    --bg-panel: #3b4252;    /* nord1  — elevated panels, cards, status bars */
-    --bg-hover: #434c5e;    /* nord2  — hover/active/selection highlight */
-    --text: #eceff4;        /* nord6  — Snow Storm brightest, elevated text */
-    --text-muted: #d8dee9;  /* nord4  — Snow Storm origin, secondary text */
-    --accent: #88c0d0;      /* nord8  — Frost, "main visual accent" */
-    --accent-secondary: #d08770; /* nord12 — Aurora orange, warm secondary */
-    --green: #a3be8c;       /* nord14 — Aurora green, success states */
-    --red: #bf616a;         /* nord11 — Aurora red, error/danger states */
-    --yellow: #ebcb8b;      /* nord13 — Aurora yellow, warning states */
-    --blue: #81a1c1;        /* nord9  — Frost, secondary interactive */
-    --border: #4c566a;      /* nord3  — subtle separators */
-    --input-bg: #2e3440;    /* nord0  — recessed inputs (inset in nord1 panels) */
+    --bg: #2e3440;
+    --bg-panel: #3b4252;
+    --bg-hover: #434c5e;
+    --text: #eceff4;
+    --text-muted: #d8dee9;
+    --accent: #88c0d0;
+    --green: #a3be8c;
+    --red: #bf616a;
+    --yellow: #ebcb8b;
+    --blue: #81a1c1;
+    --border: #4c566a;
+    --input-bg: #2e3440;
 }
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.4;
-}
-
-/* Header */
-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 16px;
-    background: var(--bg-panel);
-    border-bottom: 2px solid var(--accent);
-}
-.header-left { display: flex; align-items: center; gap: 12px; }
-.header-right { display: flex; gap: 8px; }
-.league-logo { width: 32px; height: 32px; }
-h1 { font-size: 20px; color: var(--accent); }
-
-/* Grid layout */
-.grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    padding: 8px;
-    max-height: calc(100vh - 52px);
-    overflow-y: auto;
-}
-.col-left, .col-right {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-/* Panels */
-.panel {
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px;
-}
-.panel h2 {
-    font-size: 15px;
-    margin-bottom: 8px;
-    color: var(--accent);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.panel h3 { font-size: 14px; margin: 8px 0 4px; color: var(--text); }
-.panel hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
-
-/* Buttons */
-.btn {
-    padding: 4px 12px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    cursor: pointer;
-    font-size: 13px;
-}
-.btn:hover { background: var(--bg-hover); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.btn-primary:hover { background: #8fbcbb; }
-.btn-secondary { background: var(--blue); border-color: var(--blue); color: var(--bg); }
-.btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
-.btn-undo { background: var(--bg); }
-.btn-save { background: var(--bg); }
-.btn-large { padding: 8px 24px; font-size: 15px; }
-.btn-xs { padding: 3px 10px; font-size: 12px; }
-.btn-outline { background: transparent; }
-.btn-done { background: var(--text-muted); color: var(--bg); }
-.btn-active { background: var(--green); color: var(--bg); }
-
-/* Forms */
-.form-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-input, select {
-    padding: 4px 8px;
-    background: var(--input-bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text);
-    font-size: 13px;
-}
-.input-wide { flex: 1; min-width: 150px; }
-.input-salary { width: 70px; }
-.input-narrow { width: 80px; }
-.input-pts { width: 60px; }
-
-/* Tables */
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; }
-td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
-tr:hover { background: var(--bg-hover); }
-
-/* Roster table */
-.roster-table td:nth-child(4), .roster-table td:nth-child(5),
-.roster-table th:nth-child(4), .roster-table th:nth-child(5) { text-align: right; }
-tr.acquired td { color: var(--green); }
-tr.target td { color: var(--blue); font-style: italic; }
-
-/* Player table */
-.player-table tr.in-optimal { background: rgba(163, 190, 140, 0.1); }
-.player-table tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
-
-/* League table */
-.league-table tr.team-done td { color: var(--text-muted); text-decoration: line-through; }
-.league-table tr.team-mine { background: rgba(136, 192, 208, 0.1); }
-.team-logo-xs { width: 20px; height: 20px; }
-.team-logo-sm { width: 24px; height: 24px; }
-.badge-mine { color: var(--accent); }
-
-/* Stats */
-.roster-summary { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; }
-.stat { display: flex; flex-direction: column; }
-.stat-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; }
-.stat-value { font-size: 16px; font-weight: bold; }
-.stat-value.highlight { color: var(--accent); }
-.roster-needs { color: var(--text-muted); font-size: 12px; }
-.milp-summary { margin: 8px 0; padding: 6px; background: rgba(163, 190, 140, 0.1); border-radius: 4px; }
-
-/* Auction active indicator */
-.auction-active-indicator {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    margin-top: 8px;
-    background: rgba(136, 192, 208, 0.12);
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    font-size: 13px;
-    color: var(--accent);
-}
-.spinner {
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* Bid result */
-.bid-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
-.bid-bid { background: rgba(163, 190, 140, 0.15); border-left: 4px solid var(--green); }
-.bid-caution { background: rgba(235, 203, 139, 0.15); border-left: 4px solid var(--yellow); }
-.bid-drop { background: rgba(191, 97, 106, 0.15); border-left: 4px solid var(--red); }
-.bid-action { font-size: 18px; font-weight: bold; }
-.bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 12px; }
-.bid-reasoning { color: var(--text-muted); font-size: 12px; }
-.link-explain { color: var(--blue); cursor: pointer; font-size: 12px; }
-.link-small { color: var(--blue); cursor: pointer; text-decoration: none; }
-
-/* Nomination */
-.nominator-badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--border); }
-.nominator-badge.my-turn { background: var(--accent); color: var(--bg); }
-.nomination-pick { margin: 8px 0; }
-.pick-card { padding: 8px; border-radius: 4px; border-left: 4px solid var(--border); }
-.pick-target { border-color: var(--green); background: rgba(163, 190, 140, 0.08); }
-.pick-drain { border-color: var(--red); background: rgba(191, 97, 106, 0.08); }
-.pick-depth { border-color: var(--blue); background: rgba(129, 161, 193, 0.08); }
-.pick-name { font-size: 14px; font-weight: bold; }
-.pick-meta { font-size: 12px; color: var(--text-muted); }
-.pick-strategy { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
-.pick-reasoning { font-size: 12px; margin-top: 2px; }
-.pick-price { font-size: 12px; color: var(--text-muted); }
-
-/* Counterfactual */
-.cf-comparison { display: flex; gap: 16px; margin: 8px 0; }
-.cf-side { flex: 1; padding: 8px; background: var(--bg); border-radius: 4px; }
-.cf-stat { font-size: 12px; }
-.cf-delta { font-weight: bold; margin: 4px 0; }
-.cf-alternatives { margin-top: 8px; }
-.cf-alternatives ul { padding-left: 16px; }
-.cf-alternatives li { font-size: 12px; }
-
-/* Trade */
-.trade-sides { display: flex; gap: 16px; margin: 8px 0; }
-.trade-give, .trade-receive { flex: 1; }
-.trade-select { width: 100%; background: var(--input-bg); color: var(--text); border: 1px solid var(--border); }
-.trade-receive-row { display: flex; gap: 4px; margin: 4px 0; }
-.trade-receive-row input, .trade-receive-row select { font-size: 12px; }
-.trade-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
-.trade-accept { background: rgba(163, 190, 140, 0.1); border-left: 4px solid var(--green); }
-.trade-decline { background: rgba(191, 97, 106, 0.1); border-left: 4px solid var(--red); }
-.scenario-table { margin: 8px 0; }
-.scenario-current td { color: var(--text-muted); }
-.scenario-best { background: rgba(163, 190, 140, 0.15); }
-
-/* Buyout */
-.buyout-select { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
-.buyout-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
-.buyout-buyout { background: rgba(235, 203, 139, 0.1); border-left: 4px solid var(--yellow); }
-.buyout-keep { background: rgba(163, 190, 140, 0.1); border-left: 4px solid var(--green); }
-.buyout-math { display: flex; gap: 16px; font-size: 12px; margin: 4px 0; }
-.buyout-impact { font-weight: bold; }
-
-/* Transaction log */
-.log-table td.over { color: var(--red); }
-.log-table td.under { color: var(--green); }
-.log-draft { }
-.log-trade_give td { color: var(--red); }
-.log-trade_receive td { color: var(--green); }
-.log-buyout td { color: var(--yellow); }
-
-/* Market summary */
-.market-summary { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
-
-/* Buyout indicator lights */
-.buyout-light {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-}
-.light-green { background: var(--green); }
-.light-red { background: var(--red); }
-
-/* Team detail card */
-.team-detail-card {
-    margin-top: 8px;
-    padding: 8px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-}
-.team-detail-card h3 {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.team-detail-card h3 .btn { margin-left: auto; }
-
-/* Team link in league table */
-.team-link { color: var(--text); text-decoration: none; cursor: pointer; }
-.team-link:hover { color: var(--accent); }
-.team-logo-link { cursor: pointer; display: inline-block; }
-.team-logo-link:hover { opacity: 0.8; }
-.team-name-label { color: var(--text-muted); font-size: 12px; font-weight: normal; margin-left: 4px; }
-
-/* Trade team select */
-.trade-team-select { margin-bottom: 6px; }
-.trade-team-select label { font-size: 12px; color: var(--text-muted); margin-right: 4px; }
 
 /* Scroll container for long tables */
 .scroll-container {
     max-height: min(500px, 45vh);
     overflow-y: auto;
 }
-.scroll-container .player-table thead th {
+.scroll-container thead th {
     position: sticky;
     top: 0;
     background: var(--bg-panel);
     z-index: 1;
 }
 
-/* Panel legend */
-.panel-legend {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 6px;
-    font-size: 12px;
-    color: var(--text-muted);
-}
-.legend-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-.legend-swatch {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-}
-.in-optimal-swatch { background: rgba(163, 190, 140, 0.3); }
-.rfa-swatch { border-left: 3px solid var(--yellow); background: var(--bg-hover); }
+/* Player table row highlights */
+tr.in-optimal { background: rgba(163, 190, 140, 0.12) !important; }
+tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 
-/* Bidder logo grid */
-.bidder-logos {
+/* Bidder/assign logo grid */
+.bidder-logos, .assign-logos {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -331,35 +59,32 @@ tr.target td { color: var(--blue); font-style: italic; }
 .bidder-logo-btn:hover { opacity: 0.7; }
 .bidder-logo-btn.active:hover { opacity: 1; }
 .bidder-code { font-size: 10px; color: var(--text-muted); }
+.team-logo-xs { width: 20px; height: 20px; }
 
-/* Team detail expanded */
-.team-detail-expanded {
-    padding: 12px;
-    max-height: 80vh;
-    overflow-y: auto;
+/* Bid result */
+.bid-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
+.bid-bid { background: rgba(163, 190, 140, 0.15); border-left: 4px solid var(--green); }
+.bid-caution { background: rgba(235, 203, 139, 0.15); border-left: 4px solid var(--yellow); }
+.bid-drop { background: rgba(191, 97, 106, 0.15); border-left: 4px solid var(--red); }
+.bid-action { font-size: 18px; font-weight: bold; }
+.bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 12px; }
+.bid-reasoning { color: var(--text-muted); font-size: 12px; }
+
+/* Buyout indicator lights */
+.buyout-light {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
 }
-.bench-player td { color: var(--text-muted); font-style: italic; }
-.input-salary-xs {
-    width: 55px;
-    padding: 2px 4px;
-    font-size: 12px;
-}
-.inline-salary-form {
-    display: inline-flex;
-    gap: 2px;
-    align-items: center;
-}
-.trade-select-sm {
-    width: 100%;
-    font-size: 12px;
-    background: var(--input-bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 4px;
-}
-.trade-between-form .form-row { margin: 4px 0; }
-.trade-between-form label { font-size: 12px; color: var(--text-muted); min-width: 100px; }
-.actions-cell { white-space: nowrap; }
+.light-green { background: var(--green); }
+.light-red { background: var(--red); }
+
+/* Price chart */
+.price-chart { width: 100%; max-width: 500px; height: auto; }
+.chart-meta { font-size: 13px; color: var(--text-muted); margin: 4px 0; }
+.chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.chart-leg { display: flex; gap: 4px; align-items: center; }
 
 /* Sortable headers */
 th[data-sort-col] { cursor: pointer; user-select: none; }
@@ -368,52 +93,5 @@ th[data-sort-col]::after { content: ' \21C5'; font-size: 10px; opacity: 0.3; }
 th.sort-asc::after { content: ' \25B2'; opacity: 1; }
 th.sort-desc::after { content: ' \25BC'; opacity: 1; }
 
-/* Player link in available table */
-.player-link { color: var(--text); text-decoration: none; }
-.player-link:hover { color: var(--accent); text-decoration: underline; }
-
-/* Add to bid button */
-.btn-add { background: var(--green); color: var(--bg); border-color: var(--green); font-weight: bold; margin-right: 4px; }
-.btn-add:hover { opacity: 0.8; }
-
-/* Price chart */
-.player-chart-wrapper {
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 10px 12px;
-    margin-bottom: 8px;
-}
-.chart-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
-}
-.chart-header h3 { margin: 0; font-size: 14px; }
-.price-chart { width: 100%; max-width: 500px; height: auto; }
-.chart-meta { font-size: 13px; color: var(--text-muted); margin: 4px 0; }
-.chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-.chart-leg { display: flex; gap: 4px; align-items: center; }
-
-/* Nomination override */
-.nominator-override {
-    font-size: 12px;
-    padding: 2px 4px;
-    margin-left: 8px;
-    background: var(--input-bg);
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-}
-
-/* Assign team logos */
-.assign-logos {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding: 4px 0;
-}
-
-/* Misc */
-.muted { color: var(--text-muted); font-size: 12px; }
+/* Fix DaisyUI table images — ensure logos aren't collapsed */
+.table img { min-width: 20px; min-height: 20px; }

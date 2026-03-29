@@ -1,13 +1,15 @@
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-3 p-3" style="max-height: calc(100vh - 52px); overflow-y: auto;">
-    <div class="flex flex-col gap-3">
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-2 p-2" style="max-height: calc(100vh - 40px); overflow-y: auto;">
+    <div class="flex flex-col gap-2">
         {% include "partials/auction_control.html" %}
         {% include "partials/nomination.html" %}
-        {% include "partials/bid_limits.html" %}
-        {% include "partials/explanation.html" %}
         {% include "partials/trade_panel.html" %}
         {% include "partials/transaction_log.html" %}
     </div>
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-2">
+        {% include "partials/bid_limits.html" %}
+        {% include "partials/explanation.html" %}
+    </div>
+    <div class="flex flex-col gap-2">
         {% include "partials/roster_panel.html" %}
         {% include "partials/league_state.html" %}
     </div>

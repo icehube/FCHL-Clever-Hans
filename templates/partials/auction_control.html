@@ -1,65 +1,9 @@
-<section class="card bg-base-200 shadow-md p-4" id="auction-control">
-    <h2 class="card-title text-accent text-base mb-2">Auction Control</h2>
-
-    <!-- Assign a drafted player -->
-    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="assign-form">
-        <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" placeholder="Player name" list="player-list" required class="input input-sm input-bordered bg-base-300 flex-1 min-w-[140px]">
-            <datalist id="player-list">
-                {% for name in available_players %}
-                <option value="{{ name }}">
-                {% endfor %}
-            </datalist>
-            <input type="hidden" name="team" id="assign-team-hidden" value="{{ my_team }}">
-            <input type="number" name="salary" step="0.1" min="0.5" max="11.4" value="0.5" required class="input input-sm input-bordered bg-base-300 w-20">
-            <button type="submit" class="btn btn-sm btn-primary">Assign</button>
-        </div>
-        <div class="assign-logos">
-            {% for code in nomination_order %}
-            <button type="button" class="bidder-logo-btn {% if code == my_team %}active{% endif %}" data-team="{{ code }}" onclick="selectAssignTeam(this)" title="{{ teams[code].name }} ({{ code }})">
-                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
-                <span class="bidder-code">{{ code }}</span>
-            </button>
-            {% endfor %}
-        </div>
-    </form>
-
-    <div class="divider my-1"></div>
-
-    <!-- Live bidding advisor -->
-    <h3 class="font-semibold text-sm mb-1">Live Bidding</h3>
-    <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
-        <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-sm input-bordered bg-base-300 flex-1 min-w-[140px]">
-            <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" class="input input-sm input-bordered bg-base-300 w-20">
-            <input type="text" name="highest_bidder" placeholder="Highest" value="{{ bid_highest if bid_highest is defined else '' }}" class="input input-sm input-bordered bg-base-300 w-20">
-            <button type="submit" class="btn btn-sm btn-secondary">Check</button>
-        </div>
-        <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else '' }}">
-        <div class="bidder-logos" id="bidder-logos">
-            {% for code in nomination_order %}
-            {% if code != my_team %}
-            <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
-                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
-                <span class="bidder-code">{{ code }}</span>
-            </button>
-            {% endif %}
-            {% endfor %}
-        </div>
-    </form>
-    <script>
-    function toggleBidder(btn) {
-        btn.classList.toggle('active');
-        var codes = [];
-        document.querySelectorAll('.bidder-logo-btn.active').forEach(function(b) {
-            codes.push(b.dataset.team);
-        });
-        document.getElementById('bidders-hidden').value = codes.join(',');
-    }
-    </script>
+<section class="card bg-base-200 shadow-md p-3" id="auction-control">
+    <h2 class="card-title text-primary text-sm mb-2">Auction Control</h2>
 
     {% if bid_advice is defined and bid_advice %}
-    <div class="alert alert-info mt-2 py-2 text-sm">
+    <!-- Auction is active: show spinner, results, and assign form -->
+    <div class="alert alert-info py-2 text-sm mb-2">
         <span class="loading loading-spinner loading-xs"></span>
         <span>Auction in progress — <strong>{{ bid_advice.player_name }}</strong></span>
     </div>
@@ -76,5 +20,97 @@
            class="link link-info text-xs">Why not bid?</a>
         {% endif %}
     </div>
+
+    <!-- Update bid check (re-check at new price) -->
+    <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
+        <div class="flex flex-wrap gap-2 items-center">
+            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <datalist id="player-list">
+                {% for name in available_players %}
+                <option value="{{ name }}">
+                {% endfor %}
+            </datalist>
+            <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" class="input input-xs input-bordered bg-base-300 w-16">
+            <input type="text" name="highest_bidder" placeholder="Highest" value="{{ bid_highest if bid_highest is defined else '' }}" class="input input-xs input-bordered bg-base-300 w-16">
+            <button type="submit" class="btn btn-xs btn-secondary">Re-check</button>
+        </div>
+        <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else '' }}">
+        <div class="bidder-logos" id="bidder-logos">
+            {% for code in nomination_order %}
+            {% if code != my_team %}
+            <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
+                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+                <span class="bidder-code">{{ code }}</span>
+            </button>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </form>
+
+    <div class="divider my-1"></div>
+
+    <!-- Assign the auctioned player -->
+    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="assign-form">
+        <div class="flex flex-wrap gap-2 items-center">
+            <input type="text" name="player" placeholder="Player name" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <input type="hidden" name="team" id="assign-team-hidden" value="{{ my_team }}">
+            <input type="number" name="salary" step="0.1" min="0.5" max="11.4" value="{{ bid_price if bid_price is defined else 0.5 }}" required class="input input-xs input-bordered bg-base-300 w-16">
+            <button type="submit" class="btn btn-xs btn-primary">Assign</button>
+        </div>
+        <div class="assign-logos">
+            {% for code in nomination_order %}
+            <button type="button" class="bidder-logo-btn {% if code == my_team %}active{% endif %}" data-team="{{ code }}" onclick="selectAssignTeam(this)" title="{{ teams[code].name }} ({{ code }})">
+                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+                <span class="bidder-code">{{ code }}</span>
+            </button>
+            {% endfor %}
+        </div>
+    </form>
+
+    <script>
+    // Hide nomination panel during active auction
+    var nom = document.getElementById('nomination');
+    if (nom) nom.style.display = 'none';
+    </script>
+
+    {% else %}
+    <!-- No auction active: show full control panel -->
+
+    <!-- Live bidding advisor -->
+    <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
+        <div class="flex flex-wrap gap-2 items-center">
+            <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <datalist id="player-list">
+                {% for name in available_players %}
+                <option value="{{ name }}">
+                {% endfor %}
+            </datalist>
+            <input type="number" name="price" step="0.1" min="0.5" value="0.5" class="input input-xs input-bordered bg-base-300 w-16">
+            <input type="text" name="highest_bidder" placeholder="Highest" class="input input-xs input-bordered bg-base-300 w-16">
+            <button type="submit" class="btn btn-xs btn-secondary">Check</button>
+        </div>
+        <input type="hidden" name="bidders" id="bidders-hidden" value="">
+        <div class="bidder-logos" id="bidder-logos">
+            {% for code in nomination_order %}
+            {% if code != my_team %}
+            <button type="button" class="bidder-logo-btn" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
+                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+                <span class="bidder-code">{{ code }}</span>
+            </button>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </form>
     {% endif %}
+
+    <script>
+    function toggleBidder(btn) {
+        btn.classList.toggle('active');
+        var codes = [];
+        document.querySelectorAll('#bidder-logos .bidder-logo-btn.active').forEach(function(b) {
+            codes.push(b.dataset.team);
+        });
+        document.getElementById('bidders-hidden').value = codes.join(',');
+    }
+    </script>
 </section>

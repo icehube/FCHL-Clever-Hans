@@ -261,6 +261,9 @@ tr.target td { color: var(--blue); font-style: italic; }
 /* Team link in league table */
 .team-link { color: var(--text); text-decoration: none; cursor: pointer; }
 .team-link:hover { color: var(--accent); }
+.team-logo-link { cursor: pointer; display: inline-block; }
+.team-logo-link:hover { opacity: 0.8; }
+.team-name-label { color: var(--text-muted); font-size: 12px; font-weight: normal; margin-left: 4px; }
 
 /* Trade team select */
 .trade-team-select { margin-bottom: 6px; }

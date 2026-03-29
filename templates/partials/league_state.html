@@ -18,10 +18,14 @@
         {% for code in nomination_order %}
         {% set t = teams[code] %}
         <tr class="{% if t.is_done %}team-done{% endif %} {% if code == my_team %}team-mine{% endif %}">
-            <td><img src="/fchl_logos/{{ t.logo }}" alt="{{ code }}" class="team-logo-xs"></td>
+            <td>
+                <a hx-get="/team-view/{{ code }}" hx-target="#team-detail" hx-swap="innerHTML" class="team-logo-link">
+                    <img src="/fchl_logos/{{ t.logo }}" alt="{{ code }}" class="team-logo-xs">
+                </a>
+            </td>
             <td>
                 <a hx-get="/team-view/{{ code }}" hx-target="#team-detail" hx-swap="innerHTML" class="team-link">
-                    <strong>{{ code }}</strong>
+                    <strong>{{ code }}</strong> <span class="team-name-label">{{ t.name }}</span>
                 </a>
                 {% if t.is_my_team %}<span class="badge-mine">★</span>{% endif %}
             </td>

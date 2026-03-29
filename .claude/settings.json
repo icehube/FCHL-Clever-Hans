@@ -41,7 +41,12 @@
       "Bash(pip install:*)",
       "Bash(pip install -q -r requirements.txt --break-system-packages:*)",
       "Bash(pytest tests/:*)",
-      "Bash(cat /tmp/:*)"
+      "Bash(cat /tmp/:*)",
+      "Bash(curl:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -c:*)",
+      "Bash(kill:*)",
+      "Bash(pip install -r:*)"
     ],
     "deny": []
   }

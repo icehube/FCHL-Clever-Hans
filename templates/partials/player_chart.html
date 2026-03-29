@@ -1,0 +1,65 @@
+<section class="panel" id="explanation">
+    <h2>Price Model: {{ chart_player.name }}</h2>
+    <div class="chart-meta">
+        {{ chart_player.position }} · {{ chart_player.nhl_team }} · {{ chart_player.projected_points }}pts
+        · P(floor): {{ "%.0f"|format(chart_data.p_floor * 100) }}%
+        · Sigma: {{ "%.2f"|format(chart_data.sigma) }}
+    </div>
+
+    {% set scale = 360.0 / chart_scale_max %}
+    {% set x_off = 20 %}
+
+    <svg viewBox="0 0 400 130" class="price-chart" xmlns="http://www.w3.org/2000/svg">
+        <!-- Axis line -->
+        <line x1="{{ x_off }}" y1="75" x2="385" y2="75" stroke="#4c566a" stroke-width="1"/>
+
+        <!-- Tick marks -->
+        {% for tick in range((chart_scale_max + 0.5)|int + 1) %}
+        {% set tx = x_off + tick * scale %}
+        {% if tx <= 385 %}
+        <line x1="{{ tx }}" y1="73" x2="{{ tx }}" y2="77" stroke="#4c566a" stroke-width="1"/>
+        <text x="{{ tx }}" y="88" fill="#4c566a" font-size="9" text-anchor="middle">${{ tick }}</text>
+        {% endif %}
+        {% endfor %}
+
+        <!-- CI range bar (10th-90th percentile) -->
+        {% set ci_x1 = x_off + chart_data.ci_low * scale %}
+        {% set ci_x2 = x_off + chart_data.ci_high * scale %}
+        <rect x="{{ ci_x1 }}" y="55" width="{{ ci_x2 - ci_x1 }}" height="40"
+              rx="4" fill="#81a1c1" opacity="0.25"/>
+        <text x="{{ ci_x1 }}" y="48" fill="#81a1c1" font-size="9" text-anchor="middle">
+            ${{ "%.1f"|format(chart_data.ci_low) }}M
+        </text>
+        <text x="{{ ci_x2 }}" y="48" fill="#81a1c1" font-size="9" text-anchor="middle">
+            ${{ "%.1f"|format(chart_data.ci_high) }}M
+        </text>
+
+        <!-- Median marker -->
+        {% set med_x = x_off + chart_data.median_price * scale %}
+        <line x1="{{ med_x }}" y1="50" x2="{{ med_x }}" y2="100" stroke="#ebcb8b" stroke-width="2"/>
+        <text x="{{ med_x }}" y="42" fill="#ebcb8b" font-size="10" text-anchor="middle">
+            Median ${{ "%.1f"|format(chart_data.median_price) }}M
+        </text>
+
+        <!-- Expected price marker -->
+        {% set exp_x = x_off + chart_data.expected_price * scale %}
+        <circle cx="{{ exp_x }}" cy="75" r="5" fill="#a3be8c"/>
+        <text x="{{ exp_x }}" y="115" fill="#a3be8c" font-size="10" text-anchor="middle">
+            E[$] ${{ "%.1f"|format(chart_data.expected_price) }}M
+        </text>
+
+        <!-- Market price marker -->
+        {% set mkt_x = x_off + chart_market_price * scale %}
+        <line x1="{{ mkt_x }}" y1="52" x2="{{ mkt_x }}" y2="98" stroke="#bf616a" stroke-width="2" stroke-dasharray="4,2"/>
+        <text x="{{ mkt_x }}" y="125" fill="#bf616a" font-size="10" text-anchor="middle">
+            Mkt ${{ "%.1f"|format(chart_market_price) }}M
+        </text>
+    </svg>
+
+    <div class="chart-legend">
+        <span class="chart-leg"><span style="color:#81a1c1">&#9608;</span> 80% CI</span>
+        <span class="chart-leg"><span style="color:#ebcb8b">|</span> Median</span>
+        <span class="chart-leg"><span style="color:#a3be8c">&#9679;</span> Expected</span>
+        <span class="chart-leg"><span style="color:#bf616a">&#9482;</span> Market</span>
+    </div>
+</section>

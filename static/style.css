@@ -4,8 +4,8 @@
     --bg: #2e3440;          /* nord0  — Polar Night origin, base background */
     --bg-panel: #3b4252;    /* nord1  — elevated panels, cards, status bars */
     --bg-hover: #434c5e;    /* nord2  — hover/active/selection highlight */
-    --text: #d8dee9;        /* nord4  — Snow Storm origin, primary text */
-    --text-muted: #5e81ac;  /* nord10 — Frost, readable muted text on nord1 panels */
+    --text: #eceff4;        /* nord6  — Snow Storm brightest, elevated text */
+    --text-muted: #d8dee9;  /* nord4  — Snow Storm origin, secondary text */
     --accent: #88c0d0;      /* nord8  — Frost, "main visual accent" */
     --accent-secondary: #d08770; /* nord12 — Aurora orange, warm secondary */
     --green: #a3be8c;       /* nord14 — Aurora green, success states */
@@ -22,7 +22,7 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
     background: var(--bg);
     color: var(--text);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.4;
 }
 
@@ -38,7 +38,7 @@ header {
 .header-left { display: flex; align-items: center; gap: 12px; }
 .header-right { display: flex; gap: 8px; }
 .league-logo { width: 32px; height: 32px; }
-h1 { font-size: 18px; color: var(--accent); }
+h1 { font-size: 20px; color: var(--accent); }
 
 /* Grid layout */
 .grid {
@@ -63,14 +63,14 @@ h1 { font-size: 18px; color: var(--accent); }
     padding: 12px;
 }
 .panel h2 {
-    font-size: 14px;
+    font-size: 15px;
     margin-bottom: 8px;
     color: var(--accent);
     display: flex;
     align-items: center;
     gap: 8px;
 }
-.panel h3 { font-size: 13px; margin: 8px 0 4px; color: var(--text); }
+.panel h3 { font-size: 14px; margin: 8px 0 4px; color: var(--text); }
 .panel hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
 
 /* Buttons */
@@ -81,7 +81,7 @@ h1 { font-size: 18px; color: var(--accent); }
     background: var(--bg);
     color: var(--text);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
 }
 .btn:hover { background: var(--bg-hover); }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
@@ -90,21 +90,21 @@ h1 { font-size: 18px; color: var(--accent); }
 .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
 .btn-undo { background: var(--bg); }
 .btn-save { background: var(--bg); }
-.btn-large { padding: 8px 24px; font-size: 14px; }
-.btn-xs { padding: 2px 8px; font-size: 11px; }
+.btn-large { padding: 8px 24px; font-size: 15px; }
+.btn-xs { padding: 3px 10px; font-size: 12px; }
 .btn-outline { background: transparent; }
 .btn-done { background: var(--text-muted); color: var(--bg); }
 .btn-active { background: var(--green); color: var(--bg); }
 
 /* Forms */
-.form-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.form-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 input, select {
     padding: 4px 8px;
     background: var(--input-bg);
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--text);
-    font-size: 12px;
+    font-size: 13px;
 }
 .input-wide { flex: 1; min-width: 150px; }
 .input-salary { width: 70px; }
@@ -112,20 +112,20 @@ input, select {
 .input-pts { width: 60px; }
 
 /* Tables */
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; }
-td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
 tr:hover { background: var(--bg-hover); }
 
 /* Roster table */
-.roster-table td:nth-child(3), .roster-table td:nth-child(4),
-.roster-table th:nth-child(3), .roster-table th:nth-child(4) { text-align: right; }
+.roster-table td:nth-child(4), .roster-table td:nth-child(5),
+.roster-table th:nth-child(4), .roster-table th:nth-child(5) { text-align: right; }
 tr.acquired td { color: var(--green); }
 tr.target td { color: var(--blue); font-style: italic; }
 
 /* Player table */
 .player-table tr.in-optimal { background: rgba(163, 190, 140, 0.1); }
-.player-table tr.is-rfa td:first-child { border-left: 3px solid var(--yellow); }
+.player-table tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 
 /* League table */
 .league-table tr.team-done td { color: var(--text-muted); text-decoration: line-through; }
@@ -137,7 +137,7 @@ tr.target td { color: var(--blue); font-style: italic; }
 /* Stats */
 .roster-summary { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0; }
 .stat { display: flex; flex-direction: column; }
-.stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+.stat-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; }
 .stat-value { font-size: 16px; font-weight: bold; }
 .stat-value.highlight { color: var(--accent); }
 .roster-needs { color: var(--text-muted); font-size: 12px; }
@@ -151,11 +151,11 @@ tr.target td { color: var(--blue); font-style: italic; }
 .bid-action { font-size: 18px; font-weight: bold; }
 .bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 12px; }
 .bid-reasoning { color: var(--text-muted); font-size: 12px; }
-.link-explain { color: var(--blue); cursor: pointer; font-size: 11px; }
+.link-explain { color: var(--blue); cursor: pointer; font-size: 12px; }
 .link-small { color: var(--blue); cursor: pointer; text-decoration: none; }
 
 /* Nomination */
-.nominator-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--border); }
+.nominator-badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--border); }
 .nominator-badge.my-turn { background: var(--accent); color: var(--bg); }
 .nomination-pick { margin: 8px 0; }
 .pick-card { padding: 8px; border-radius: 4px; border-left: 4px solid var(--border); }
@@ -163,8 +163,8 @@ tr.target td { color: var(--blue); font-style: italic; }
 .pick-drain { border-color: var(--red); background: rgba(191, 97, 106, 0.08); }
 .pick-depth { border-color: var(--blue); background: rgba(129, 161, 193, 0.08); }
 .pick-name { font-size: 14px; font-weight: bold; }
-.pick-meta { font-size: 11px; color: var(--text-muted); }
-.pick-strategy { font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+.pick-meta { font-size: 12px; color: var(--text-muted); }
+.pick-strategy { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
 .pick-reasoning { font-size: 12px; margin-top: 2px; }
 .pick-price { font-size: 12px; color: var(--text-muted); }
 
@@ -182,7 +182,7 @@ tr.target td { color: var(--blue); font-style: italic; }
 .trade-give, .trade-receive { flex: 1; }
 .trade-select { width: 100%; background: var(--input-bg); color: var(--text); border: 1px solid var(--border); }
 .trade-receive-row { display: flex; gap: 4px; margin: 4px 0; }
-.trade-receive-row input, .trade-receive-row select { font-size: 11px; }
+.trade-receive-row input, .trade-receive-row select { font-size: 12px; }
 .trade-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
 .trade-accept { background: rgba(163, 190, 140, 0.1); border-left: 4px solid var(--green); }
 .trade-decline { background: rgba(191, 97, 106, 0.1); border-left: 4px solid var(--red); }
@@ -240,11 +240,11 @@ tr.target td { color: var(--blue); font-style: italic; }
 
 /* Trade team select */
 .trade-team-select { margin-bottom: 6px; }
-.trade-team-select label { font-size: 11px; color: var(--text-muted); margin-right: 4px; }
+.trade-team-select label { font-size: 12px; color: var(--text-muted); margin-right: 4px; }
 
 /* Scroll container for long tables */
 .scroll-container {
-    max-height: 500px;
+    max-height: min(500px, 45vh);
     overflow-y: auto;
 }
 .scroll-container .player-table thead th {
@@ -259,7 +259,7 @@ tr.target td { color: var(--blue); font-style: italic; }
     display: flex;
     gap: 16px;
     margin-bottom: 6px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
 }
 .legend-item {
@@ -303,7 +303,7 @@ tr.target td { color: var(--blue); font-style: italic; }
 }
 .bidder-logo-btn:hover { opacity: 0.7; }
 .bidder-logo-btn.active:hover { opacity: 1; }
-.bidder-code { font-size: 9px; color: var(--text-muted); }
+.bidder-code { font-size: 10px; color: var(--text-muted); }
 
 /* Team detail expanded */
 .team-detail-expanded {
@@ -315,7 +315,7 @@ tr.target td { color: var(--blue); font-style: italic; }
 .input-salary-xs {
     width: 55px;
     padding: 2px 4px;
-    font-size: 11px;
+    font-size: 12px;
 }
 .inline-salary-form {
     display: inline-flex;
@@ -324,15 +324,55 @@ tr.target td { color: var(--blue); font-style: italic; }
 }
 .trade-select-sm {
     width: 100%;
-    font-size: 11px;
+    font-size: 12px;
     background: var(--input-bg);
     color: var(--text);
     border: 1px solid var(--border);
     padding: 4px;
 }
 .trade-between-form .form-row { margin: 4px 0; }
-.trade-between-form label { font-size: 11px; color: var(--text-muted); min-width: 100px; }
+.trade-between-form label { font-size: 12px; color: var(--text-muted); min-width: 100px; }
 .actions-cell { white-space: nowrap; }
+
+/* Sortable headers */
+th[data-sort-col] { cursor: pointer; user-select: none; }
+th[data-sort-col]:hover { color: var(--accent); }
+th[data-sort-col]::after { content: ' \21C5'; font-size: 10px; opacity: 0.3; }
+th.sort-asc::after { content: ' \25B2'; opacity: 1; }
+th.sort-desc::after { content: ' \25BC'; opacity: 1; }
+
+/* Player link in available table */
+.player-link { color: var(--text); text-decoration: none; }
+.player-link:hover { color: var(--accent); text-decoration: underline; }
+
+/* Add to bid button */
+.btn-add { background: var(--green); color: var(--bg); border-color: var(--green); font-weight: bold; margin-right: 4px; }
+.btn-add:hover { opacity: 0.8; }
+
+/* Price chart */
+.price-chart { width: 100%; max-width: 500px; height: auto; }
+.chart-meta { font-size: 13px; color: var(--text-muted); margin: 4px 0; }
+.chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.chart-leg { display: flex; gap: 4px; align-items: center; }
+
+/* Nomination override */
+.nominator-override {
+    font-size: 12px;
+    padding: 2px 4px;
+    margin-left: 8px;
+    background: var(--input-bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+/* Assign team logos */
+.assign-logos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 0;
+}
 
 /* Misc */
 .muted { color: var(--text-muted); font-size: 12px; }

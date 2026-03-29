@@ -5,15 +5,15 @@
     <table class="log-table">
         <thead>
             <tr>
-                <th>#</th>
-                <th>Player</th>
-                <th>Pos</th>
-                <th>Team</th>
-                <th>Salary</th>
-                <th>Model $</th>
-                <th>Market $</th>
-                <th>Deviation</th>
-                <th>Type</th>
+                <th data-sort-col="0" data-sort-type="number" onclick="sortTable(this)">#</th>
+                <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)">Pos</th>
+                <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)">Player</th>
+                <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)">Team</th>
+                <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)">Salary</th>
+                <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)">Model $</th>
+                <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)">Market $</th>
+                <th data-sort-col="7" data-sort-type="currency" onclick="sortTable(this)">Deviation</th>
+                <th data-sort-col="8" data-sort-type="text" onclick="sortTable(this)">Type</th>
             </tr>
         </thead>
         <tbody>
@@ -21,8 +21,8 @@
         {% set deviation = t.salary - t.market_price if t.market_price > 0 else 0 %}
         <tr class="log-{{ t.transaction_type }}">
             <td>{{ loop.revindex }}</td>
-            <td>{{ t.player_name }}</td>
             <td>{{ t.position }}</td>
+            <td>{{ t.player_name }}</td>
             <td>{{ t.team_code }}</td>
             <td>${{ "%.1f"|format(t.salary) }}M</td>
             <td>${{ "%.1f"|format(t.model_price) }}M</td>

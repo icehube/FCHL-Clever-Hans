@@ -8,27 +8,28 @@
         <table class="player-table">
             <thead>
                 <tr>
-                    <th>Player</th>
-                    <th>Pos</th>
-                    <th>NHL</th>
-                    <th>PTS</th>
-                    <th>Model $</th>
-                    <th>Market $</th>
-                    <th>RFA</th>
+                    <th data-sort-col="0" data-sort-type="text" onclick="sortTable(this)">Pos</th>
+                    <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)">Player</th>
+                    <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)">NHL</th>
+                    <th data-sort-col="3" data-sort-type="number" onclick="sortTable(this)">PTS</th>
+                    <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)">Model $</th>
+                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)">Market $</th>
+                    <th data-sort-col="6" data-sort-type="text" onclick="sortTable(this)">RFA</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
             {% for p in bid_limits[:100] %}
             <tr class="{% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
-                <td>{{ p.name }}</td>
                 <td>{{ p.position }}</td>
+                <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="player-link">{{ p.name }}</a></td>
                 <td>{{ p.nhl_team }}</td>
                 <td>{{ p.projected_points }}</td>
                 <td>${{ p.model_price }}M</td>
                 <td>${{ p.market_price }}M</td>
                 <td>{% if p.is_rfa %}{{ p.prior_fchl_team }}{% endif %}</td>
                 <td>
+                    <button type="button" class="btn btn-xs btn-add" onclick="setBidPlayer('{{ p.name }}')" title="Add to bid">+</button>
                     <a hx-get="/explain/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="link-small">?</a>
                 </td>
             </tr>

@@ -5,6 +5,14 @@
             {{ current_nominator }}'s turn
         </span>
         {% endif %}
+        <select class="nominator-override" onchange="if(this.value) htmx.ajax('POST', '/set-nominator', {target:'#nomination', swap:'outerHTML', values:{team_code: this.value}})" title="Override nominator">
+            <option value="">Override...</option>
+            {% for code in nomination_order %}
+            {% if not teams[code].is_done %}
+            <option value="{{ code }}">{{ code }}</option>
+            {% endif %}
+            {% endfor %}
+        </select>
     </h2>
 
     {% if current_nominator == my_team %}

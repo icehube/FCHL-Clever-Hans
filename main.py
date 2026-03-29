@@ -415,6 +415,36 @@ async def undo(request: Request):
     return _render(request, "partials/all_panels.html")
 
 
+@app.get("/player-chart/{player_name}", response_class=HTMLResponse)
+async def player_chart(request: Request, player_name: str):
+    """Show price model visualization for a player."""
+    p = auction_state.available_players.get(player_name)
+    if p is None:
+        return _render(request, "partials/explanation.html")
+    pred = model_prices.get(player_name)
+    if pred is None:
+        return _render(request, "partials/explanation.html")
+    mp = market_prices.get(player_name, MIN_SALARY)
+    scale_max = max(pred.ci_high, mp, pred.expected_price) * 1.2
+    ctx = _context(request)
+    ctx["chart_player"] = p
+    ctx["chart_data"] = pred
+    ctx["chart_market_price"] = mp
+    ctx["chart_scale_max"] = max(scale_max, 1.0)
+    return _render(request, "partials/player_chart.html", ctx)
+
+
+@app.post("/set-nominator", response_class=HTMLResponse)
+async def set_nominator(request: Request, team_code: str = Form(...)):
+    """Override which team nominates next."""
+    auction_state.save_snapshot()
+    order = auction_state._effective_order()
+    if team_code in order:
+        auction_state.nomination_index = order.index(team_code)
+    _save_state()
+    return _render(request, "partials/nomination.html")
+
+
 @app.get("/team-view/{team_code}", response_class=HTMLResponse)
 async def team_view(request: Request, team_code: str):
     """View another team's roster details."""

@@ -10,13 +10,17 @@
                 <option value="{{ name }}">
                 {% endfor %}
             </datalist>
-            <select name="team" required>
-                {% for code, t in teams.items() %}
-                <option value="{{ code }}" {% if code == my_team %}selected{% endif %}>{{ code }}</option>
-                {% endfor %}
-            </select>
+            <input type="hidden" name="team" id="assign-team-hidden" value="{{ my_team }}">
             <input type="number" name="salary" step="0.1" min="0.5" max="11.4" value="0.5" required class="input-salary">
             <button type="submit" class="btn btn-primary">Assign</button>
+        </div>
+        <div class="assign-logos">
+            {% for code in nomination_order %}
+            <button type="button" class="bidder-logo-btn {% if code == my_team %}active{% endif %}" data-team="{{ code }}" onclick="selectAssignTeam(this)" title="{{ teams[code].name }} ({{ code }})">
+                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+                <span class="bidder-code">{{ code }}</span>
+            </button>
+            {% endfor %}
         </div>
     </form>
 

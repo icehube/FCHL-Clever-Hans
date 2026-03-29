@@ -30,12 +30,12 @@
     {% if view_team.keeper_players %}
     <h4>Keepers</h4>
     <table class="roster-table">
-        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
         {% for p in view_team.keeper_players|sort(attribute='projected_points', reverse=True) %}
         <tr class="{% if p.is_bench %}bench-player{% endif %}">
-            <td>{{ p.name }}</td>
             <td>{{ p.position }}</td>
+            <td>{{ p.name }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
             <td>{{ "Bench" if p.is_bench else "Active" }}</td>
@@ -61,12 +61,12 @@
     {% if view_team.acquired_players %}
     <h4>Acquired</h4>
     <table class="roster-table">
-        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
         {% for p in view_team.acquired_players|sort(attribute='projected_points', reverse=True) %}
         <tr class="acquired {% if p.is_bench %}bench-player{% endif %}">
-            <td>{{ p.name }}</td>
             <td>{{ p.position }}</td>
+            <td>{{ p.name }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
             <td>{{ "Bench" if p.is_bench else "Active" }}</td>
@@ -92,12 +92,12 @@
     {% if view_team.minor_players %}
     <h4>Minors</h4>
     <table class="roster-table">
-        <thead><tr><th>Player</th><th>Pos</th><th>Salary</th><th>PTS</th><th>On Cap</th></tr></thead>
+        <thead><tr><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th><th>On Cap</th></tr></thead>
         <tbody>
         {% for p in view_team.minor_players|sort(attribute='projected_points', reverse=True) %}
         <tr>
-            <td>{{ p.name }}</td>
             <td>{{ p.position }}</td>
+            <td>{{ p.name }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
             <td>{{ "Yes" if p.counts_on_cap else "No" }}</td>

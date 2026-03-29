@@ -14,14 +14,14 @@
 
     <svg viewBox="0 0 400 130" class="price-chart" xmlns="http://www.w3.org/2000/svg">
         <!-- Axis line -->
-        <line x1="{{ x_off }}" y1="75" x2="385" y2="75" stroke="#4c566a" stroke-width="1"/>
+        <line x1="{{ x_off }}" y1="75" x2="385" y2="75" stroke="#d8dee9" stroke-width="1"/>
 
         <!-- Tick marks -->
         {% for tick in range((chart_scale_max + 0.5)|int + 1) %}
         {% set tx = x_off + tick * scale %}
         {% if tx <= 385 %}
-        <line x1="{{ tx }}" y1="73" x2="{{ tx }}" y2="77" stroke="#4c566a" stroke-width="1"/>
-        <text x="{{ tx }}" y="88" fill="#4c566a" font-size="9" text-anchor="middle">${{ tick }}</text>
+        <line x1="{{ tx }}" y1="73" x2="{{ tx }}" y2="77" stroke="#d8dee9" stroke-width="1"/>
+        <text x="{{ tx }}" y="88" fill="#d8dee9" font-size="9" text-anchor="middle">${{ tick }}M</text>
         {% endif %}
         {% endfor %}
 

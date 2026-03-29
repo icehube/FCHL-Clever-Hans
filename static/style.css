@@ -143,6 +143,30 @@ tr.target td { color: var(--blue); font-style: italic; }
 .roster-needs { color: var(--text-muted); font-size: 12px; }
 .milp-summary { margin: 8px 0; padding: 6px; background: rgba(163, 190, 140, 0.1); border-radius: 4px; }
 
+/* Auction active indicator */
+.auction-active-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-top: 8px;
+    background: rgba(136, 192, 208, 0.12);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--accent);
+}
+.spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* Bid result */
 .bid-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
 .bid-bid { background: rgba(163, 190, 140, 0.15); border-left: 4px solid var(--green); }

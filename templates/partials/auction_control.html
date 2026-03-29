@@ -59,6 +59,10 @@
     </script>
 
     {% if bid_advice is defined and bid_advice %}
+    <div class="auction-active-indicator">
+        <span class="spinner"></span>
+        <span>Auction in progress — <strong>{{ bid_advice.player_name }}</strong></span>
+    </div>
     <div class="bid-result bid-{{ bid_advice.action|lower }}">
         <div class="bid-action">{{ bid_advice.action }}</div>
         <div class="bid-details">

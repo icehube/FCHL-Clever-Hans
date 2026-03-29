@@ -4,6 +4,7 @@
         <span class="legend-item"><span class="legend-swatch in-optimal-swatch"></span> In optimal roster</span>
         <span class="legend-item"><span class="legend-swatch rfa-swatch"></span> RFA</span>
     </div>
+    <div id="player-chart-container"></div>
     <div class="scroll-container">
         <table class="player-table">
             <thead>
@@ -22,7 +23,7 @@
             {% for p in bid_limits[:100] %}
             <tr class="{% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
                 <td>{{ p.position }}</td>
-                <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="player-link">{{ p.name }}</a></td>
+                <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="player-link">{{ p.name }}</a></td>
                 <td>{{ p.nhl_team }}</td>
                 <td>{{ p.projected_points }}</td>
                 <td>${{ p.model_price }}M</td>

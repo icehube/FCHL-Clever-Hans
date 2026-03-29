@@ -1,5 +1,8 @@
-<section class="panel" id="explanation">
-    <h2>Price Model: {{ chart_player.name }}</h2>
+<div id="player-chart-container" class="player-chart-wrapper">
+    <div class="chart-header">
+        <h3>Price Model: {{ chart_player.name }}</h3>
+        <button onclick="document.getElementById('player-chart-container').innerHTML=''" class="btn btn-xs" title="Close chart">&times;</button>
+    </div>
     <div class="chart-meta">
         {{ chart_player.position }} · {{ chart_player.nhl_team }} · {{ chart_player.projected_points }}pts
         · P(floor): {{ "%.0f"|format(chart_data.p_floor * 100) }}%
@@ -62,4 +65,4 @@
         <span class="chart-leg"><span style="color:#a3be8c">&#9679;</span> Expected</span>
         <span class="chart-leg"><span style="color:#bf616a">&#9482;</span> Market</span>
     </div>
-</section>
+</div>

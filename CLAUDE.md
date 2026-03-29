@@ -643,19 +643,3 @@ After every correction or mistake, update this CLAUDE.md with a rule to prevent 
 | `build-validator` | Ensure project builds correctly for deployment               |
 | `oncall-guide`    | Help diagnose and resolve production issues                  |
 | `staff-reviewer`  | Review plans and architectures as a skeptical staff engineer |
-
-## Parallel work
-
-- Run 3-5 Claude sessions in parallel using git worktrees
-- Use subagents to throw more compute at problems
-- Offload individual tasks to subagents to keep the main context window clean
-- When working in parallel, only one agent should edit a given file at a time
-
-## Prompting tips
-
-- Challenge Claude: "Grill me on these changes"
-- Demand proof: "Prove to me this works"
-- Reset mediocre work: "Scrap this, implement the elegant solution"
-- Write detailed specs to reduce ambiguity
-- Say "Go fix the failing CI tests" — don't micromanage how
-- Point Claude at docker logs to troubleshoot distributed systems

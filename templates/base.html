@@ -25,32 +25,32 @@
     }
     </script>
     <style>
-    /* Nord DaisyUI theme override */
+    /* Nord DaisyUI theme — oklch color space (DaisyUI v4 requirement) */
     [data-theme="nord-dark"] {
-        --b1: 222.2 18.3% 22.4%;    /* nord0 #2e3440 — base background */
-        --b2: 222 16.4% 27.8%;      /* nord1 #3b4252 — panels/cards */
-        --b3: 220 16.4% 31.4%;      /* nord2 #434c5e — hover/borders */
-        --bc: 219 28% 93.3%;         /* nord6 #eceff4 — base content text */
-        --p: 193 43.4% 67.5%;       /* nord8 #88c0d0 — primary (accent) */
-        --pc: 222.2 18.3% 22.4%;    /* nord0 — primary content (dark text on accent) */
-        --s: 210 34% 63.1%;         /* nord9 #81a1c1 — secondary (blue) */
-        --sc: 222.2 18.3% 22.4%;    /* nord0 — secondary content */
-        --a: 40 70.9% 73.3%;        /* nord13 #ebcb8b — accent (yellow) */
-        --ac: 222.2 18.3% 22.4%;    /* nord0 — accent content */
-        --n: 220 16.4% 35.7%;       /* nord3 #4c566a — neutral */
-        --nc: 219 28% 88%;          /* nord4 #d8dee9 — neutral content */
-        --su: 92 27.8% 64.7%;       /* nord14 #a3be8c — success (green) */
-        --suc: 222.2 18.3% 22.4%;   /* nord0 */
-        --wa: 40 70.9% 73.3%;       /* nord13 #ebcb8b — warning (yellow) */
-        --wac: 222.2 18.3% 22.4%;   /* nord0 */
-        --er: 354 42.4% 56.5%;      /* nord11 #bf616a — error (red) */
-        --erc: 219 28% 93.3%;       /* nord6 — white text on red */
-        --in: 193 43.4% 67.5%;      /* nord8 #88c0d0 — info */
-        --inc: 222.2 18.3% 22.4%;   /* nord0 */
+        color-scheme: dark;
+        --b1: 32.44% 0.0230 264.19;    /* nord0 #2e3440 — base background */
+        --b2: 37.92% 0.0290 266.47;    /* nord1 #3b4252 — panels/cards */
+        --b3: 41.57% 0.0324 264.13;    /* nord2 #434c5e — hover/borders */
+        --bc: 95.13% 0.0075 260.76;    /* nord6 #eceff4 — base content text */
+        --p: 77.46% 0.0623 217.52;     /* nord8 #88c0d0 — primary (accent) */
+        --pc: 32.44% 0.0230 264.19;    /* nord0 — dark text on primary */
+        --s: 69.65% 0.0592 248.71;     /* nord9 #81a1c1 — secondary (blue) */
+        --sc: 32.44% 0.0230 264.19;    /* nord0 — dark text on secondary */
+        --a: 85.49% 0.0892 84.10;      /* nord13 #ebcb8b — accent (yellow) */
+        --ac: 32.44% 0.0230 264.19;    /* nord0 — dark text on accent */
+        --n: 45.23% 0.0353 264.13;     /* nord3 #4c566a — neutral */
+        --nc: 89.93% 0.0165 262.76;    /* nord4 #d8dee9 — neutral content */
+        --su: 76.83% 0.0749 131.10;    /* nord14 #a3be8c — success (green) */
+        --suc: 32.44% 0.0230 264.19;   /* nord0 */
+        --wa: 85.49% 0.0892 84.10;     /* nord13 #ebcb8b — warning (yellow) */
+        --wac: 32.44% 0.0230 264.19;   /* nord0 */
+        --er: 60.61% 0.1206 15.32;     /* nord11 #bf616a — error (red) */
+        --erc: 95.13% 0.0075 260.76;   /* nord6 — light text on error */
+        --in: 77.46% 0.0623 217.52;    /* nord8 #88c0d0 — info */
+        --inc: 32.44% 0.0230 264.19;   /* nord0 */
         --rounded-btn: 0.25rem;
         --rounded-box: 0.375rem;
         --border-btn: 1px;
-        color-scheme: dark;
     }
     </style>
     <link rel="stylesheet" href="/static/style.css">

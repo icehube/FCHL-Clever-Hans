@@ -621,6 +621,12 @@ After every correction or mistake, update this CLAUDE.md with a rule to prevent 
 - When something goes sideways, switch back to plan mode and re-plan — don't keep pushing
 - Use plan mode for verification steps too, not just for the build
 
+## Commit discipline
+
+- After each step in a plan is executed, do a `/quick-commit`
+- After each issue resolved during a `/grill`, do a `/quick-commit`
+- Keep commits small and atomic — one logical change per commit
+
 ## Slash commands
 
 | Command           | Description                                             |

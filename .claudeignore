@@ -1,0 +1,16 @@
+# Binary assets — never edited
+fchl_logos/
+
+# Historical build plans — project is built
+FCHL_AUCTION_SIMULATOR_PLAN_v3.md
+IMPLEMENTATION_PLAN.md
+
+# Large data files — column semantics documented in .claude/rules/data-formats.md
+data/players.csv
+data/players-23.csv
+
+# Generated externally — do not edit
+data/model_params.json
+
+# Runtime state snapshots
+data/state/

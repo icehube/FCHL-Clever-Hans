@@ -119,6 +119,34 @@ class TestSave:
         assert r.json()["status"] == "saved"
 
 
+class TestPlayerChart:
+    def test_player_chart_valid(self, client):
+        """Player chart should return SVG visualization."""
+        r = client.get("/player-chart/Sidney Crosby")
+        assert r.status_code == 200
+        assert "Price Model" in r.text
+        assert "<svg" in r.text
+
+    def test_player_chart_invalid(self, client):
+        """Invalid player should return fallback without crashing."""
+        r = client.get("/player-chart/Nobody")
+        assert r.status_code == 200
+
+
+class TestSetNominator:
+    def test_set_nominator_valid(self, client):
+        """Setting a valid nominator should update nomination panel."""
+        r = client.post("/set-nominator", data={"team_code": "LGN"})
+        assert r.status_code == 200
+        assert "Nomination" in r.text
+
+    def test_set_nominator_invalid(self, client):
+        """Setting an invalid team code should not crash."""
+        r = client.post("/set-nominator", data={"team_code": "FAKE"})
+        assert r.status_code == 200
+        assert "Nomination" in r.text
+
+
 class TestBuyout:
     def test_buyout_check(self, client):
         """Buyout check should return preview."""

@@ -30,7 +30,7 @@
                 <td>${{ p.market_price }}M</td>
                 <td>{% if p.is_rfa %}<span class="badge badge-warning badge-xs">{{ p.prior_fchl_team }}</span>{% endif %}</td>
                 <td class="flex gap-1">
-                    <button type="button" class="btn btn-xs btn-ghost btn-circle" onclick="setBidPlayer('{{ p.name }}')" title="Add to bid">+</button>
+                    <button type="button" class="btn btn-xs btn-ghost btn-circle btn-add-bid" data-player="{{ p.name }}" title="Add to bid">+</button>
                     <a hx-get="/explain/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="btn btn-xs btn-ghost btn-circle">?</a>
                 </td>
             </tr>

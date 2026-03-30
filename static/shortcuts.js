@@ -1,3 +1,13 @@
+/* Live viewport size display */
+(function() {
+    function updateSize() {
+        var el = document.getElementById('viewport-size');
+        if (el) el.textContent = window.innerWidth + '×' + window.innerHeight;
+    }
+    window.addEventListener('resize', updateSize);
+    updateSize();
+})();
+
 /* Keyboard shortcuts for auction day */
 
 document.addEventListener('keydown', function(e) {

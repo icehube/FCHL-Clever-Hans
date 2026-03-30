@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 
@@ -57,8 +58,12 @@ async def lifespan(app: FastAPI):
     model_params = load_model_params()
     saved_path = os.path.join(STATE_DIR, "auction_state.json")
     if os.path.exists(saved_path):
-        with open(saved_path) as f:
-            auction_state = AuctionState.from_json(f.read())
+        try:
+            with open(saved_path) as f:
+                auction_state = AuctionState.from_json(f.read())
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logging.warning("Corrupt state file, starting fresh: %s", e)
+            auction_state = build_initial_state()
     else:
         auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)

@@ -1,5 +1,10 @@
 <section class="card bg-base-200 shadow-md p-3" id="auction-control">
     <h2 class="card-title text-primary text-sm mb-2">Auction Control</h2>
+    <datalist id="player-list">
+        {% for name in available_players %}
+        <option value="{{ name }}">
+        {% endfor %}
+    </datalist>
 
     {% if bid_advice is defined and bid_advice %}
     <!-- Auction is active: show spinner, results, and assign form -->
@@ -25,11 +30,6 @@
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
-            <datalist id="player-list">
-                {% for name in available_players %}
-                <option value="{{ name }}">
-                {% endfor %}
-            </datalist>
             <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" class="input input-xs input-bordered bg-base-300 w-16">
             <input type="text" name="highest_bidder" placeholder="Highest" value="{{ bid_highest if bid_highest is defined else '' }}" class="input input-xs input-bordered bg-base-300 w-16">
             <button type="submit" class="btn btn-xs btn-secondary">Re-check</button>
@@ -80,11 +80,6 @@
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
-            <datalist id="player-list">
-                {% for name in available_players %}
-                <option value="{{ name }}">
-                {% endfor %}
-            </datalist>
             <input type="number" name="price" step="0.1" min="0.5" value="0.5" class="input input-xs input-bordered bg-base-300 w-16">
             <input type="text" name="highest_bidder" placeholder="Highest" class="input input-xs input-bordered bg-base-300 w-16">
             <button type="submit" class="btn btn-xs btn-secondary">Check</button>

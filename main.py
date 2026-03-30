@@ -442,10 +442,11 @@ async def player_chart(request: Request, player_name: str):
 @app.post("/set-nominator", response_class=HTMLResponse)
 async def set_nominator(request: Request, team_code: str = Form(...)):
     """Override which team nominates next."""
-    auction_state.save_snapshot()
     order = auction_state._effective_order()
-    if team_code in order:
-        auction_state.nomination_index = order.index(team_code)
+    if team_code not in order:
+        return _render(request, "partials/nomination.html")
+    auction_state.save_snapshot()
+    auction_state.nomination_index = order.index(team_code)
     _save_state()
     return _render(request, "partials/nomination.html")
 

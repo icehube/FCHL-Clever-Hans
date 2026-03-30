@@ -46,7 +46,9 @@
       "Bash(python -m pytest:*)",
       "Bash(python -c:*)",
       "Bash(kill:*)",
-      "Bash(pip install -r:*)"
+      "Bash(pip install -r:*)",
+      "Bash(echo:*)",
+      "Bash(xxd:*)"
     ],
     "deny": []
   }

@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="FCHL Auction Manager", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/fchl_logos", StaticFiles(directory="fchl_logos"), name="logos")
+app.mount("/nhl_logos", StaticFiles(directory="nhl_logos"), name="nhl_logos")
 templates = Jinja2Templates(directory="templates")
 
 

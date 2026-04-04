@@ -52,7 +52,7 @@
             <td><span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span></td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
-            <td>{{ p.nhl_team }}</td>
+            <td><img src="/nhl_logos/{{ p.nhl_team }}.png" alt="{{ p.nhl_team }}" class="w-4 h-4 inline" title="{{ p.nhl_team }}"></td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
         </tr>

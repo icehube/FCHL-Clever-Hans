@@ -636,10 +636,3 @@ async def trade_between(
 async def get_state():
     """JSON state dump for debugging."""
     return json.loads(auction_state.to_json(include_snapshots=False))
-
-
-@app.post("/save")
-async def save():
-    """Force save current state."""
-    _save_state()
-    return {"status": "saved"}

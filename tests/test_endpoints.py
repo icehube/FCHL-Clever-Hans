@@ -112,12 +112,6 @@ class TestState:
         assert "available_players" in data
 
 
-class TestSave:
-    def test_save(self, client):
-        r = client.post("/save")
-        assert r.status_code == 200
-        assert r.json()["status"] == "saved"
-
 
 class TestLognormalPdfPath:
     def test_returns_valid_svg_path(self):

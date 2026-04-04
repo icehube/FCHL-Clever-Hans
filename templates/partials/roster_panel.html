@@ -38,8 +38,9 @@
     </div>
     {% endif %}
 
-    <!-- Current roster (keepers + acquired, color coded) -->
+    <!-- Roster: current players + MILP targets integrated -->
     {% set acquired_names = team.acquired_players|map(attribute='name')|list %}
+    {% set roster_names = (team.keeper_players + team.acquired_players)|map(attribute='name')|list %}
     {% set all_roster = (team.keeper_players + team.acquired_players)|sort(attribute='projected_points', reverse=True) %}
     <h3 class="font-semibold text-sm mt-2 mb-1">Roster</h3>
     <table class="table table-xs table-zebra">
@@ -57,25 +58,21 @@
             <td>{{ p.projected_points }}</td>
         </tr>
         {% endfor %}
-        </tbody>
-    </table>
-
-    {% if milp and milp.status == "Optimal" and milp.roster %}
-    <h3 class="font-semibold text-sm mt-2 mb-1">Target Roster (MILP)</h3>
-    <table class="table table-xs table-zebra">
-        <thead><tr><th>Pos</th><th>Player</th><th>Market $</th><th>PTS</th></tr></thead>
-        <tbody>
-        {% for pos in ["F", "D", "G"] %}
-        {% for p in milp.by_position.get(pos, [])|sort(attribute='projected_points', reverse=True) %}
-        <tr class="text-info italic">
+        {% if milp and milp.status == "Optimal" and milp.roster %}
+        <tr><td colspan="6" class="text-xs opacity-50 text-center py-1">— MILP Targets —</td></tr>
+        {% for p in milp.roster|sort(attribute='projected_points', reverse=True) %}
+        {% if p.name not in roster_names %}
+        <tr class="opacity-50 italic">
+            <td></td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
+            <td><img src="/nhl_logos/{{ p.nhl_team }}.png" alt="{{ p.nhl_team }}" class="h-4 inline object-contain" title="{{ p.nhl_team }}"></td>
             <td>${{ "%.1f"|format(market_prices.get(p.name, 0.5) if market_prices else 0.5) }}M</td>
             <td>{{ p.projected_points }}</td>
         </tr>
+        {% endif %}
         {% endfor %}
-        {% endfor %}
+        {% endif %}
         </tbody>
     </table>
-    {% endif %}
 </section>

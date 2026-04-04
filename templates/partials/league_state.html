@@ -38,8 +38,9 @@
             <td>
                 <form hx-post="/team-done" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ code }}">
-                    <button type="submit" class="btn btn-xs {% if t.is_done %}btn-error btn-outline{% else %}btn-success btn-outline{% endif %}">
-                        {{ "Done" if t.is_done else "Active" }}
+                    <button type="submit" class="btn btn-xs {% if t.is_done %}btn-error btn-outline{% else %}btn-success btn-outline{% endif %}"
+                            title="{{ 'Click to include in market calculations' if t.is_done else 'Click to exclude from market calculations' }}">
+                        {{ "Stopped Drafting" if t.is_done else "Drafting" }}
                     </button>
                 </form>
             </td>

@@ -64,6 +64,15 @@ def _backfill_nhl_teams(csv_path: str = "data/players.csv"):
                 p.nhl_team = nhl_lookup.get(p.name, "")
 
 
+def _backfill_team_metadata(teams_path: str = "data/fchl_teams.json"):
+    """Refresh team metadata (logos, colors) from fchl_teams.json for old state files."""
+    with open(teams_path) as f:
+        meta = json.load(f)
+    for code, team in auction_state.teams.items():
+        if code in meta:
+            team.logo = meta[code].get("logo", team.logo)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
@@ -76,6 +85,7 @@ async def lifespan(app: FastAPI):
             with open(saved_path) as f:
                 auction_state = AuctionState.from_json(f.read())
             _backfill_nhl_teams()
+            _backfill_team_metadata()
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logging.warning("Corrupt state file, starting fresh: %s", e)
             auction_state = build_initial_state()

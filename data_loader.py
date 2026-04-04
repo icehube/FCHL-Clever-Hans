@@ -97,6 +97,7 @@ def load_players(
                     group=group,
                     salary=salary,
                     projected_points=pts,
+                    nhl_team=nhl_team,
                     is_minor=is_minor,
                 )
                 if fchl_team not in team_players:

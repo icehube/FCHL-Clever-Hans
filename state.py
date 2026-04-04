@@ -43,6 +43,7 @@ class PlayerOnRoster:
     group: str
     salary: float
     projected_points: int
+    nhl_team: str = ""
     is_minor: bool = False
     is_bench: bool = False
 
@@ -294,6 +295,7 @@ def _player_on_roster_to_dict(p: PlayerOnRoster) -> dict:
         "group": p.group,
         "salary": p.salary,
         "projected_points": p.projected_points,
+        "nhl_team": p.nhl_team,
         "is_minor": p.is_minor,
         "is_bench": p.is_bench,
     }
@@ -306,6 +308,7 @@ def _player_on_roster_from_dict(d: dict) -> PlayerOnRoster:
         group=d["group"],
         salary=d["salary"],
         projected_points=d["projected_points"],
+        nhl_team=d.get("nhl_team", ""),
         is_minor=d.get("is_minor", False),
         is_bench=d.get("is_bench", False),
     )

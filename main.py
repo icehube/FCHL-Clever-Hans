@@ -210,6 +210,7 @@ async def assign_player(
         group=group,
         salary=salary,
         projected_points=p.projected_points,
+        nhl_team=p.nhl_team,
     )
     auction_state.teams[team].add_acquired_player(roster_player)
 

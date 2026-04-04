@@ -108,7 +108,7 @@ def evaluate_trade(
             group="3",  # Acquired players are group 3
             salary=p.salary,
             projected_points=p.projected_points,
-            nhl_team=p.nhl_team,
+            nhl_team=getattr(p, "nhl_team", ""),
         ))
 
     # Remove received players from available pool (they're now on BOT)
@@ -284,7 +284,7 @@ def execute_trade(
                 group="3",
                 salary=p.salary,
                 projected_points=p.projected_points,
-                nhl_team=p.nhl_team,
+                nhl_team=getattr(p, "nhl_team", ""),
             ))
 
 

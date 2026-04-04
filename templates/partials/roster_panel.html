@@ -38,42 +38,27 @@
     </div>
     {% endif %}
 
-    <!-- Current roster -->
-    <h3 class="font-semibold text-sm mt-2 mb-1">Keepers</h3>
+    <!-- Current roster (keepers + acquired, color coded) -->
+    {% set acquired_names = team.acquired_players|map(attribute='name')|list %}
+    {% set all_roster = (team.keeper_players + team.acquired_players)|sort(attribute='projected_points', reverse=True) %}
+    <h3 class="font-semibold text-sm mt-2 mb-1">Roster</h3>
     <table class="table table-xs table-zebra">
-        <thead><tr><th></th><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th></tr></thead>
+        <thead><tr><th></th><th>Pos</th><th>Player</th><th>NHL</th><th>Salary</th><th>PTS</th></tr></thead>
         <tbody>
-        {% for p in team.keeper_players|sort(attribute='projected_points', reverse=True) %}
+        {% for p in all_roster %}
         {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined else "keep" %}
-        <tr>
+        {% set is_acquired = p.name in acquired_names %}
+        <tr class="{{ 'text-success' if is_acquired else '' }}">
             <td><span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span></td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
+            <td>{{ p.nhl_team }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
         </tr>
         {% endfor %}
         </tbody>
     </table>
-
-    {% if team.acquired_players %}
-    <h3 class="font-semibold text-sm mt-2 mb-1">Acquired</h3>
-    <table class="table table-xs table-zebra">
-        <thead><tr><th></th><th>Pos</th><th>Player</th><th>Salary</th><th>PTS</th></tr></thead>
-        <tbody>
-        {% for p in team.acquired_players|sort(attribute='projected_points', reverse=True) %}
-        {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined else "keep" %}
-        <tr class="text-success">
-            <td><span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span></td>
-            <td>{{ p.position }}</td>
-            <td>{{ p.name }}</td>
-            <td>${{ "%.1f"|format(p.salary) }}M</td>
-            <td>{{ p.projected_points }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
 
     {% if milp and milp.status == "Optimal" and milp.roster %}
     <h3 class="font-semibold text-sm mt-2 mb-1">Target Roster (MILP)</h3>

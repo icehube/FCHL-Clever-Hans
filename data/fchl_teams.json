@@ -5,7 +5,7 @@
     "name": "Bridlewood AI",
     "penalty": 0.0,
     "colors": { "primary": "#ea217b", "secondary": "#ff7e31" },
-    "logo": "1.gif"
+    "logo": "BOT.png"
   },
   "SRL": {
     "id": 2,
@@ -13,7 +13,7 @@
     "name": "Searle Supremes",
     "penalty": 0.0,
     "colors": { "primary": "#000000", "secondary": "#464646" },
-    "logo": "2.gif"
+    "logo": "SRL.png"
   },
   "MAC": {
     "id": 3,
@@ -21,7 +21,7 @@
     "name": "Maccabi Tevatron",
     "penalty": 0.0,
     "colors": { "primary": "#F4DD2E", "secondary": "#E02B15" },
-    "logo": "3.gif"
+    "logo": "MAC.png"
   },
   "LPT": {
     "id": 4,
@@ -29,7 +29,7 @@
     "name": "Lipton Soup Nuts",
     "penalty": 0.0,
     "colors": { "primary": "#26535f", "secondary": "#ed8e37" },
-    "logo": "4.gif"
+    "logo": "LPT.png"
   },
   "SHF": {
     "id": 5,
@@ -37,7 +37,7 @@
     "name": "The Shafranators",
     "penalty": 0.0,
     "colors": { "primary": "#0D4499", "secondary": "#E7CD38" },
-    "logo": "5.gif"
+    "logo": "SHF.png"
   },
   "JHN": {
     "id": 6,
@@ -45,7 +45,7 @@
     "name": "Johannesburg Israeleafs",
     "penalty": 0.3,
     "colors": { "primary": "#003876", "secondary": "#001f43" },
-    "logo": "6.gif"
+    "logo": "JHN.png"
   },
   "GVR": {
     "id": 7,
@@ -53,7 +53,7 @@
     "name": "Grovenor Drew",
     "penalty": 0.0,
     "colors": { "primary": "#012169", "secondary": "#FC4C02" },
-    "logo": "7.gif"
+    "logo": "GVR.png"
   },
   "ZSK": {
     "id": 8,
@@ -61,7 +61,7 @@
     "name": "The Zalesaks",
     "penalty": 0.0,
     "colors": { "primary": "#000000", "secondary": "#d10000" },
-    "logo": "8.gif"
+    "logo": "ZSK.png"
   },
   "LGN": {
     "id": 9,
@@ -69,7 +69,7 @@
     "name": "Lessard Gnomes",
     "penalty": 0.3,
     "colors": { "primary": "#164846", "secondary": "#80C042" },
-    "logo": "9.gif"
+    "logo": "LGN.png"
   },
   "VPP": {
     "id": 10,
@@ -77,7 +77,7 @@
     "name": "Varsity Park Partisans",
     "penalty": 0.0,
     "colors": { "primary": "#172b1d", "secondary": "#8eaf38" },
-    "logo": "10.gif"
+    "logo": "VPP.png"
   },
   "HSM": {
     "id": 11,
@@ -85,7 +85,7 @@
     "name": "Heskel Salims",
     "penalty": 0.0,
     "colors": { "primary": "#BD2F2E", "secondary": "#815061" },
-    "logo": "11.gif"
+    "logo": "HSM.png"
   },
   "nomination_order": [
     "BOT",

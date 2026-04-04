@@ -120,6 +120,7 @@ class TestPredictPrice:
         assert hasattr(pred, "median_price")
         assert hasattr(pred, "p_floor")
         assert hasattr(pred, "sigma")
+        assert hasattr(pred, "log_mu")
         assert hasattr(pred, "ci_low")
         assert hasattr(pred, "ci_high")
 

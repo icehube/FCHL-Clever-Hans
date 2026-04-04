@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import datetime
 
@@ -425,6 +426,65 @@ async def undo(request: Request):
     return _render(request, "partials/all_panels.html")
 
 
+_TWO_PI_SQRT = math.sqrt(2.0 * math.pi)
+
+
+def _lognormal_pdf_path(
+    log_mu: float,
+    sigma: float,
+    p_floor: float,
+    scale_max: float,
+    min_salary: float,
+    n_points: int = 60,
+    x_off: float = 20.0,
+    chart_width: float = 360.0,
+    y_axis: float = 75.0,
+    max_height: float = 55.0,
+) -> tuple[str, tuple[float, float, float, float] | None]:
+    """Build SVG path for log-normal PDF curve and optional floor spike."""
+    if sigma <= 0:
+        return "", None
+
+    scale = chart_width / scale_max
+    x_start = max(min_salary, 0.01)
+    x_end = scale_max
+    step = (x_end - x_start) / n_points
+
+    # Sample PDF values
+    points: list[tuple[float, float]] = []
+    peak_pdf = 0.0
+    for i in range(n_points + 1):
+        x = x_start + i * step
+        ln_x = math.log(x)
+        exponent = -((ln_x - log_mu) ** 2) / (2.0 * sigma * sigma)
+        pdf = (1.0 / (x * sigma * _TWO_PI_SQRT)) * math.exp(exponent)
+        pdf *= 1.0 - p_floor
+        svg_x = x_off + x * scale
+        points.append((svg_x, pdf))
+        peak_pdf = max(peak_pdf, pdf)
+
+    if not points or peak_pdf == 0:
+        return "", None
+
+    # Scale to pixel height
+    h_scale = max_height / peak_pdf
+    parts = [f"M {points[0][0]:.1f} {y_axis:.1f}"]
+    for svg_x, pdf in points:
+        parts.append(f"L {svg_x:.1f} {y_axis - pdf * h_scale:.1f}")
+    parts.append(f"L {points[-1][0]:.1f} {y_axis:.1f} Z")
+    curve_d = " ".join(parts)
+
+    # Floor spike when p_floor is meaningful
+    floor_bar = None
+    if p_floor > 0.05:
+        bar_x = x_off + min_salary * scale
+        bar_h = p_floor * max_height
+        bar_w = max(2.0, 0.1 * scale)
+        floor_bar = (bar_x - bar_w / 2, y_axis - bar_h, bar_w, bar_h)
+
+    return curve_d, floor_bar
+
+
 @app.get("/player-chart/{player_name}", response_class=HTMLResponse)
 async def player_chart(request: Request, player_name: str):
     """Show price model visualization for a player."""
@@ -436,11 +496,20 @@ async def player_chart(request: Request, player_name: str):
         return _render(request, "partials/explanation.html")
     mp = market_prices.get(player_name, MIN_SALARY)
     scale_max = max(pred.ci_high, mp, pred.expected_price) * 1.2
+    curve_d, floor_bar = _lognormal_pdf_path(
+        log_mu=pred.log_mu,
+        sigma=pred.sigma,
+        p_floor=pred.p_floor,
+        scale_max=max(scale_max, 1.0),
+        min_salary=MIN_SALARY,
+    )
     ctx = _context(request)
     ctx["chart_player"] = p
     ctx["chart_data"] = pred
     ctx["chart_market_price"] = mp
     ctx["chart_scale_max"] = max(scale_max, 1.0)
+    ctx["chart_curve_d"] = curve_d
+    ctx["chart_floor_bar"] = floor_bar
     return _render(request, "partials/player_chart.html", ctx)
 
 

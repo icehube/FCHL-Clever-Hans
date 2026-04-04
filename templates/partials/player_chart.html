@@ -25,11 +25,22 @@
         {% endif %}
         {% endfor %}
 
-        <!-- CI range bar (10th-90th percentile) -->
+        <!-- PDF distribution curve -->
+        {% if chart_curve_d %}
+        <path d="{{ chart_curve_d }}" fill="#81a1c1" opacity="0.25"
+              stroke="#81a1c1" stroke-width="1" stroke-opacity="0.5"/>
+        {% endif %}
+
+        <!-- Floor probability spike -->
+        {% if chart_floor_bar %}
+        <rect x="{{ chart_floor_bar[0] }}" y="{{ chart_floor_bar[1] }}"
+              width="{{ chart_floor_bar[2] }}" height="{{ chart_floor_bar[3] }}"
+              fill="#81a1c1" opacity="0.35"/>
+        {% endif %}
+
+        <!-- CI bounds labels -->
         {% set ci_x1 = x_off + chart_data.ci_low * scale %}
         {% set ci_x2 = x_off + chart_data.ci_high * scale %}
-        <rect x="{{ ci_x1 }}" y="55" width="{{ ci_x2 - ci_x1 }}" height="40"
-              rx="4" fill="#81a1c1" opacity="0.25"/>
         <text x="{{ ci_x1 }}" y="48" fill="#81a1c1" font-size="9" text-anchor="middle">
             ${{ "%.1f"|format(chart_data.ci_low) }}M
         </text>
@@ -60,7 +71,7 @@
     </svg>
 
     <div class="chart-legend">
-        <span class="chart-leg"><span style="color:#81a1c1">&#9608;</span> 80% CI</span>
+        <span class="chart-leg"><span style="color:#81a1c1">&#9608;</span> Distribution</span>
         <span class="chart-leg"><span style="color:#ebcb8b">|</span> Median</span>
         <span class="chart-leg"><span style="color:#a3be8c">&#9679;</span> Expected</span>
         <span class="chart-leg"><span style="color:#bf616a">&#9482;</span> Market</span>

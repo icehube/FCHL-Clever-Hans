@@ -119,6 +119,64 @@ class TestSave:
         assert r.json()["status"] == "saved"
 
 
+class TestLognormalPdfPath:
+    def test_returns_valid_svg_path(self):
+        """PDF path should be a valid SVG path string."""
+        from main import _lognormal_pdf_path
+
+        curve_d, floor_bar = _lognormal_pdf_path(
+            log_mu=1.0, sigma=0.3, p_floor=0.0,
+            scale_max=8.0, min_salary=0.5,
+        )
+        assert curve_d.startswith("M ")
+        assert "L " in curve_d
+        assert curve_d.endswith("Z")
+        assert floor_bar is None
+
+    def test_floor_bar_when_p_floor_high(self):
+        """Floor spike bar should appear when p_floor > 0.05."""
+        from main import _lognormal_pdf_path
+
+        _, floor_bar = _lognormal_pdf_path(
+            log_mu=0.5, sigma=0.3, p_floor=0.5,
+            scale_max=5.0, min_salary=0.5,
+        )
+        assert floor_bar is not None
+        assert len(floor_bar) == 4
+
+    def test_no_floor_bar_when_p_floor_low(self):
+        """Floor spike bar should not appear when p_floor <= 0.05."""
+        from main import _lognormal_pdf_path
+
+        _, floor_bar = _lognormal_pdf_path(
+            log_mu=1.0, sigma=0.3, p_floor=0.03,
+            scale_max=8.0, min_salary=0.5,
+        )
+        assert floor_bar is None
+
+    def test_sigma_zero_returns_empty(self):
+        """Zero sigma should return empty path without crashing."""
+        from main import _lognormal_pdf_path
+
+        curve_d, floor_bar = _lognormal_pdf_path(
+            log_mu=1.0, sigma=0.0, p_floor=0.0,
+            scale_max=8.0, min_salary=0.5,
+        )
+        assert curve_d == ""
+        assert floor_bar is None
+
+    def test_sigma_negative_returns_empty(self):
+        """Negative sigma should return empty path without crashing."""
+        from main import _lognormal_pdf_path
+
+        curve_d, floor_bar = _lognormal_pdf_path(
+            log_mu=1.0, sigma=-0.1, p_floor=0.0,
+            scale_max=8.0, min_salary=0.5,
+        )
+        assert curve_d == ""
+        assert floor_bar is None
+
+
 class TestPlayerChart:
     def test_player_chart_valid(self, client):
         """Player chart should return SVG visualization."""
@@ -126,6 +184,7 @@ class TestPlayerChart:
         assert r.status_code == 200
         assert "Price Model" in r.text
         assert "<svg" in r.text
+        assert "<path" in r.text
 
     def test_player_chart_invalid(self, client):
         """Invalid player should return fallback without crashing."""

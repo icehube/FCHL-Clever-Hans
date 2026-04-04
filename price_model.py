@@ -17,6 +17,7 @@ class PricePrediction:
     median_price: float  # (1-p_floor) * exp(log_mu) + p_floor * MIN
     p_floor: float  # P(sells at floor)
     sigma: float  # Log-normal sigma for above-floor distribution
+    log_mu: float  # Log-normal mu for above-floor distribution
     ci_low: float  # 10th percentile
     ci_high: float  # 90th percentile
 
@@ -98,6 +99,7 @@ def predict_price(
         median_price=median,
         p_floor=p_floor,
         sigma=sigma,
+        log_mu=log_mu,
         ci_low=ci_low,
         ci_high=ci_high,
     )

@@ -4,7 +4,7 @@
         <button onclick="document.getElementById('player-chart-container').innerHTML=''" class="btn btn-xs btn-ghost">&times;</button>
     </div>
     <div class="chart-meta">
-        {{ chart_player.position }} · <img src="/nhl_logos/{{ chart_player.nhl_team }}.png" alt="{{ chart_player.nhl_team }}" class="w-4 h-4 inline" title="{{ chart_player.nhl_team }}"> · {{ chart_player.projected_points }}pts
+        {{ chart_player.position }} · <img src="/nhl_logos/{{ chart_player.nhl_team }}.png" alt="{{ chart_player.nhl_team }}" class="h-4 inline object-contain" title="{{ chart_player.nhl_team }}"> · {{ chart_player.projected_points }}pts
         · P(floor): {{ "%.0f"|format(chart_data.p_floor * 100) }}%
         · Sigma: {{ "%.2f"|format(chart_data.sigma) }}
     </div>

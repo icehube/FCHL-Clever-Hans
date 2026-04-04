@@ -51,6 +51,19 @@ milp_solution = None
 last_trade_eval = None
 
 
+def _backfill_nhl_teams(csv_path: str = "data/players.csv"):
+    """Fill in nhl_team for roster players loaded from old state files."""
+    import csv
+    nhl_lookup: dict[str, str] = {}
+    with open(csv_path) as f:
+        for row in csv.DictReader(f):
+            nhl_lookup[row["PLAYER"].strip()] = row["NHL TEAM"].strip()
+    for team in auction_state.teams.values():
+        for p in team.keeper_players + team.acquired_players + team.minor_players:
+            if not p.nhl_team:
+                p.nhl_team = nhl_lookup.get(p.name, "")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
@@ -62,6 +75,7 @@ async def lifespan(app: FastAPI):
         try:
             with open(saved_path) as f:
                 auction_state = AuctionState.from_json(f.read())
+            _backfill_nhl_teams()
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logging.warning("Corrupt state file, starting fresh: %s", e)
             auction_state = build_initial_state()

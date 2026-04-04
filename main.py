@@ -316,7 +316,7 @@ async def nominate(request: Request):
     ctx = _context(request)
     ctx["rfa_pick"] = rfa_pick
     ctx["ufa_pick"] = ufa_pick
-    return _render(request, "partials/nomination.html", ctx)
+    return _render(request, "partials/auction_control.html", ctx)
 
 
 @app.get("/explain/{player_name}", response_class=HTMLResponse)
@@ -542,11 +542,11 @@ async def set_nominator(request: Request, team_code: str = Form(...)):
     """Override which team nominates next."""
     order = auction_state._effective_order()
     if team_code not in order:
-        return _render(request, "partials/nomination.html")
+        return _render(request, "partials/auction_control.html")
     auction_state.save_snapshot()
     auction_state.nomination_index = order.index(team_code)
     _save_state()
-    return _render(request, "partials/nomination.html")
+    return _render(request, "partials/auction_control.html")
 
 
 @app.get("/team-view/{team_code}", response_class=HTMLResponse)

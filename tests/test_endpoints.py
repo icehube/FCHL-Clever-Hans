@@ -18,7 +18,7 @@ class TestIndexPage:
 
     def test_index_has_panels(self, client):
         r = client.get("/")
-        assert "Auction Control" in r.text
+        assert "Auction" in r.text
         assert "League State" in r.text
         assert "Bridlewood AI" in r.text
 
@@ -67,10 +67,10 @@ class TestBidCheck:
 
 class TestNominate:
     def test_nominate(self, client):
-        """Nomination should return picks."""
+        """Nomination should return picks in auction control."""
         r = client.get("/nominate")
         assert r.status_code == 200
-        assert "Nomination" in r.text
+        assert "Auction" in r.text
 
 
 class TestExplain:
@@ -188,10 +188,10 @@ class TestPlayerChart:
 
 class TestSetNominator:
     def test_set_nominator_valid(self, client):
-        """Setting a valid nominator should update nomination panel."""
+        """Setting a valid nominator should update auction control."""
         r = client.post("/set-nominator", data={"team_code": "LGN"})
         assert r.status_code == 200
-        assert "Nomination" in r.text
+        assert "Auction" in r.text
 
     def test_set_nominator_invalid(self, client):
         """Setting an invalid team code should not crash."""

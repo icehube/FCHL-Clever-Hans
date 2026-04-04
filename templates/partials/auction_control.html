@@ -1,16 +1,74 @@
 <section class="card bg-base-200 shadow-md p-3" id="auction-control">
-    <h2 class="card-title text-primary text-sm mb-2">Auction Control</h2>
+    <div class="flex items-center gap-2 mb-2">
+        <h2 class="card-title text-accent text-base">Auction</h2>
+        {% if current_nominator %}
+        <span class="badge {% if current_nominator == my_team %}badge-primary{% else %}badge-ghost{% endif %}">
+            {{ current_nominator }}'s turn
+        </span>
+        {% endif %}
+        <select class="select select-xs select-bordered bg-base-300 ml-auto" onchange="if(this.value) htmx.ajax('POST', '/set-nominator', {target:'#auction-control', swap:'outerHTML', values:{team_code: this.value}})" title="Override nominator">
+            <option value="">Override...</option>
+            {% for code in nomination_order %}
+            {% if not teams[code].is_done %}
+            <option value="{{ code }}">{{ code }}</option>
+            {% endif %}
+            {% endfor %}
+        </select>
+    </div>
+
     <datalist id="player-list">
         {% for name in available_players %}
         <option value="{{ name }}">
         {% endfor %}
     </datalist>
 
+    <!-- Nomination recommendations (when it's our turn) -->
+    {% if current_nominator == my_team %}
+    <button hx-get="/nominate" hx-target="#auction-control" hx-swap="outerHTML" class="btn btn-primary btn-sm w-full mb-2">
+        It's My Turn — Get Recommendations
+    </button>
+    {% endif %}
+
+    {% if rfa_pick is defined and rfa_pick %}
+    <div class="mb-2">
+        <h3 class="font-semibold text-sm mb-1">RFA Pick (Secret Bid)</h3>
+        <div class="card bg-base-300 p-3 text-sm">
+            <div class="font-bold text-accent">{{ rfa_pick.player.name }}</div>
+            <div class="text-xs opacity-70">
+                {{ rfa_pick.player.position }} · <img src="/nhl_logos/{{ rfa_pick.player.nhl_team }}.png" alt="{{ rfa_pick.player.nhl_team }}" class="h-4 inline object-contain" title="{{ rfa_pick.player.nhl_team }}"> · {{ rfa_pick.player.projected_points }}pts
+                {% if rfa_pick.player.prior_fchl_team %}
+                · Prior: {{ rfa_pick.player.prior_fchl_team }} @ ${{ rfa_pick.player.salary }}M
+                {% endif %}
+            </div>
+            <div class="badge badge-sm badge-outline mt-1">{{ rfa_pick.strategy }}</div>
+            <div class="text-xs opacity-80 mt-1">{{ rfa_pick.reasoning }}</div>
+            <div class="text-xs font-semibold mt-1">Expected: ~${{ "%.1f"|format(rfa_pick.expected_price) }}M</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if ufa_pick is defined and ufa_pick %}
+    <div class="mb-2">
+        <h3 class="font-semibold text-sm mb-1">UFA Pick (Open Bid)</h3>
+        <div class="card bg-base-300 p-3 text-sm">
+            <div class="font-bold text-accent">{{ ufa_pick.player.name }}</div>
+            <div class="text-xs opacity-70">
+                {{ ufa_pick.player.position }} · <img src="/nhl_logos/{{ ufa_pick.player.nhl_team }}.png" alt="{{ ufa_pick.player.nhl_team }}" class="h-4 inline object-contain" title="{{ ufa_pick.player.nhl_team }}"> · {{ ufa_pick.player.projected_points }}pts
+            </div>
+            <div class="badge badge-sm badge-outline mt-1">{{ ufa_pick.strategy }}</div>
+            <div class="text-xs opacity-80 mt-1">{{ ufa_pick.reasoning }}</div>
+            <div class="text-xs font-semibold mt-1">Expected: ~${{ "%.1f"|format(ufa_pick.expected_price) }}M</div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="divider my-1"></div>
+
+    <!-- Bid advisor -->
     {% if bid_advice is defined and bid_advice %}
-    <!-- Auction is active: show spinner, results, and assign form -->
     <div class="alert alert-info py-2 text-sm mb-2">
         <span class="loading loading-spinner loading-xs"></span>
-        <span>Auction in progress — <strong>{{ bid_advice.player_name }}</strong></span>
+        <span>Bidding on <strong>{{ bid_advice.player_name }}</strong></span>
     </div>
     <div class="bid-result bid-{{ bid_advice.action|lower }}">
         <div class="bid-action">{{ bid_advice.action }}</div>
@@ -26,13 +84,12 @@
         {% endif %}
     </div>
 
-    <!-- Update bid check (re-check at new price) -->
+    <!-- Update at new price -->
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
             <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" class="input input-xs input-bordered bg-base-300 w-16">
-            <input type="text" name="highest_bidder" placeholder="Highest" value="{{ bid_highest if bid_highest is defined else '' }}" class="input input-xs input-bordered bg-base-300 w-16">
-            <button type="submit" class="btn btn-xs btn-secondary">Re-check</button>
+            <button type="submit" class="btn btn-xs btn-secondary">Update</button>
         </div>
         <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else '' }}">
         <div class="bidder-logos" id="bidder-logos">
@@ -67,28 +124,19 @@
         </div>
     </form>
 
-    <script>
-    // Hide nomination panel during active auction
-    var nom = document.getElementById('nomination');
-    if (nom) nom.style.display = 'none';
-    </script>
-
     {% else %}
-    <!-- No auction active: show full control panel -->
-
-    <!-- Live bidding advisor -->
+    <!-- No auction active: bid advisor form -->
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
             <input type="number" name="price" step="0.1" min="0.5" value="0.5" class="input input-xs input-bordered bg-base-300 w-16">
-            <input type="text" name="highest_bidder" placeholder="Highest" class="input input-xs input-bordered bg-base-300 w-16">
-            <button type="submit" class="btn btn-xs btn-secondary">Check</button>
+            <button type="submit" class="btn btn-xs btn-secondary">Get Advice</button>
         </div>
         <input type="hidden" name="bidders" id="bidders-hidden" value="">
         <div class="bidder-logos" id="bidder-logos">
             {% for code in nomination_order %}
             {% if code != my_team %}
-            <button type="button" class="bidder-logo-btn" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
+            <button type="button" class="bidder-logo-btn active" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
                 <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
                 <span class="bidder-code">{{ code }}</span>
             </button>

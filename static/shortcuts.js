@@ -10,7 +10,7 @@ document.addEventListener('keydown', function(e) {
     // Ctrl+N: Nominate
     if (e.ctrlKey && e.key === 'n') {
         e.preventDefault();
-        htmx.ajax('GET', '/nominate', {target: '#nomination', swap: 'outerHTML'});
+        htmx.ajax('GET', '/nominate', {target: '#auction-control', swap: 'outerHTML'});
     }
 });
 

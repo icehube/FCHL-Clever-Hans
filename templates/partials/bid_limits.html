@@ -20,7 +20,7 @@
                 </tr>
             </thead>
             <tbody>
-            {% for p in bid_limits[:100] %}
+            {% for p in bid_limits %}
             <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
                 <td>{{ p.position }}</td>
                 <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>

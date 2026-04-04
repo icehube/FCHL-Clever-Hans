@@ -144,8 +144,6 @@ def _context(request: Request) -> dict:
         auction_state.available_players.items(),
         key=lambda x: -x[1].projected_points,
     ):
-        if player.projected_points <= 0:
-            continue
         mp = market_prices.get(name, MIN_SALARY)
         model_p = model_prices[name].expected_price if name in model_prices else MIN_SALARY
         bid_limits.append({

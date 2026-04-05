@@ -60,9 +60,8 @@
         <thead><tr><th></th><th>Pos</th><th>Player</th><th>NHL</th><th>Salary</th><th>PTS</th></tr></thead>
         <tbody>
         {% for p in combined|sort(attribute='projected_points', reverse=True)|sort(attribute='pos_rank') %}
-        {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined and not p.is_target else "keep" %}
         <tr class="{{ 'text-info opacity-50 italic' if p.is_target else ('text-success' if p.is_acquired else '') }}">
-            <td>{% if not p.is_target %}<span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span>{% endif %}</td>
+            <td>{% if not p.is_target %}<span id="bo-{{ p.name|replace(' ', '-') }}" class="buyout-light light-grey" title="Loading..."></span>{% endif %}</td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
             <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
@@ -72,4 +71,6 @@
         {% endfor %}
         </tbody>
     </table>
+    <!-- Lazy-load buyout indicators after page render -->
+    <div hx-get="/buyout-indicators" hx-trigger="load" hx-swap="none"></div>
 </section>

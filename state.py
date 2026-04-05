@@ -147,6 +147,11 @@ class TeamState:
             return 0.0
         return min(self.spendable_budget + MIN_SALARY, MAX_SALARY)
 
+    @property
+    def current_roster_points(self) -> int:
+        """Sum of projected points for all active roster players."""
+        return sum(p.projected_points for p in self.roster_players)
+
     def find_player(self, name: str) -> PlayerOnRoster | None:
         """Find a player by name across all lists."""
         for p in self.all_players:

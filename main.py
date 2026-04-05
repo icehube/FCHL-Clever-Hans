@@ -93,7 +93,6 @@ async def lifespan(app: FastAPI):
         auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
-    _recompute_buyout_indicators()
     yield
 
 
@@ -183,6 +182,39 @@ def _context(request: Request) -> dict:
             "prior_fchl_team": player.prior_fchl_team,
         })
 
+    # Compute projected standings (lightweight, no extra MILP solves)
+    available_pool = sorted(
+        auction_state.available_players.values(),
+        key=lambda p: -p.projected_points,
+    )
+    projections = {}
+    for code, t in auction_state.teams.items():
+        current = t.current_roster_points
+        if code == MY_TEAM and milp_solution and milp_solution.status == "Optimal":
+            projected = int(milp_solution.total_points)
+        else:
+            spots = t.total_spots_remaining
+            if spots > 0 and available_pool:
+                affordable = [
+                    p for p in available_pool
+                    if market_prices.get(p.name, MIN_SALARY) <= t.physical_max_bid
+                ]
+                sample = min(len(affordable), spots * 3)
+                if sample > 0:
+                    avg_pts = sum(p.projected_points for p in affordable[:sample]) / sample
+                    projected = current + int(spots * avg_pts)
+                else:
+                    projected = current
+            else:
+                projected = current
+        projections[code] = {"current": current, "projected": projected}
+
+    # Add rank (sorted by projected descending)
+    for rank, (code, _) in enumerate(
+        sorted(projections.items(), key=lambda x: -x[1]["projected"]), 1
+    ):
+        projections[code]["rank"] = rank
+
     return {
         "request": request,
         "team": team,
@@ -197,6 +229,7 @@ def _context(request: Request) -> dict:
         "my_team": MY_TEAM,
         "buyout_indicators": buyout_indicators,
         "market_prices": market_prices,
+        "projections": projections,
     }
 
 
@@ -258,7 +291,6 @@ async def assign_player(
 
     auction_state.advance_nomination()
     _recompute()
-    _recompute_buyout_indicators()
     _save_state()
     return _render(request, "partials/all_panels.html")
 
@@ -450,6 +482,14 @@ async def undo(request: Request):
     return _render(request, "partials/all_panels.html")
 
 
+@app.get("/buyout-indicators", response_class=HTMLResponse)
+async def buyout_indicators_endpoint(request: Request):
+    """Compute buyout indicators lazily, loaded via HTMX after page render."""
+    _recompute_buyout_indicators()
+    ctx = _context(request)
+    return _render(request, "partials/buyout_dots.html", ctx)
+
+
 @app.post("/reset", response_class=HTMLResponse)
 async def reset(request: Request):
     """Reset to fresh state from CSV data."""
@@ -457,7 +497,6 @@ async def reset(request: Request):
     auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
-    _recompute_buyout_indicators()
     _save_state()
     return _render(request, "partials/all_panels.html")
 
@@ -623,7 +662,6 @@ async def adjust_salary(
     auction_state.save_snapshot()
     t.adjust_salary(player_name, clamped)
     _recompute()
-    _recompute_buyout_indicators()
     _save_state()
     ctx = _context(request)
     ctx["view_team"] = t
@@ -663,7 +701,6 @@ async def trade_between(
         except ValueError:
             pass
     _recompute()
-    _recompute_buyout_indicators()
     _save_state()
     return _render(request, "partials/all_panels.html")
 

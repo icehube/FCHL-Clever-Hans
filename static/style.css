@@ -80,6 +80,7 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 }
 .light-green { background: var(--green); }
 .light-red { background: var(--red); }
+.light-grey { background: var(--border); opacity: 0.5; }
 
 /* Price chart */
 .price-chart { width: 100%; max-width: 500px; height: auto; }

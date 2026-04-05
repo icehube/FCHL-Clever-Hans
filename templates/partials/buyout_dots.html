@@ -1,0 +1,6 @@
+{# Buyout indicator dots — loaded lazily via HTMX OOB swap.
+   Each span targets the placeholder dot by ID and replaces it. #}
+{% for p in team.roster_players %}
+{% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined else "keep" %}
+<span id="bo-{{ p.name|replace(' ', '-') }}" class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}" hx-swap-oob="true"></span>
+{% endfor %}

@@ -11,6 +11,8 @@
                 <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Remaining</th>
                 <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Spendable</th>
                 <th data-sort-col="7" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
+                <th data-sort-col="8" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
+                <th data-sort-col="9" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Proj</th>
                 <th>Done</th>
             </tr>
         </thead>
@@ -35,6 +37,9 @@
             <td>${{ "%.1f"|format(t.remaining_budget) }}M</td>
             <td>${{ "%.1f"|format(t.spendable_budget) }}M</td>
             <td>${{ "%.1f"|format(t.physical_max_bid) }}M</td>
+            {% set proj = projections.get(code, {}) if projections is defined else {} %}
+            <td>{{ proj.get("current", 0) }}</td>
+            <td class="font-semibold {% if code == my_team %}text-info{% endif %}">{{ proj.get("projected", 0) }}{% if code == my_team and proj.get("rank") %} <span class="badge badge-info badge-xs">#{{ proj.rank }}</span>{% endif %}</td>
             <td>
                 <form hx-post="/team-done" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ code }}">

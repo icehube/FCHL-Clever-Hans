@@ -355,7 +355,7 @@ def recommend_nomination(
     ufas = {n: p for n, p in available.items() if not p.is_rfa and p.projected_points > 0}
 
     rfa_pick = _pick_best_rfa(rfas, wanted_names, market_prices, model_prices)
-    ufa_pick = _pick_best_ufa(ufas, wanted_names, team, market_prices, model_prices, market_info)
+    ufa_pick = _pick_best_ufa(ufas, wanted_names, team, market_prices, model_prices, market_info, state)
 
     return rfa_pick, ufa_pick
 
@@ -398,6 +398,34 @@ def _pick_best_rfa(
     )
 
 
+def _score_drain_candidate(
+    player: Player,
+    model_price: float,
+    state: AuctionState,
+) -> float:
+    """Score a drain candidate by how effectively it drains opponent budgets.
+
+    Higher score = better drain target. Considers price, position demand,
+    and how many opponents can afford the player.
+    """
+    opponents = [
+        t for code, t in state.teams.items()
+        if code != MY_TEAM and not t.is_done and t.total_spots_remaining > 0
+    ]
+    if not opponents:
+        return model_price
+
+    needing_position = sum(
+        1 for t in opponents if t.roster_needs.get(player.position, 0) > 0
+    )
+    can_afford = sum(
+        1 for t in opponents if t.physical_max_bid >= model_price
+    )
+
+    # Price × demand / competition: expensive + needed + scarce = bidding war
+    return model_price * max(needing_position, 1) / max(can_afford, 1)
+
+
 def _pick_best_ufa(
     ufas: dict[str, Player],
     wanted: set[str],
@@ -405,6 +433,7 @@ def _pick_best_ufa(
     market_prices: dict[str, float],
     model_prices: dict[str, float],
     market_info: MarketInfo,
+    state: AuctionState,
 ) -> NominationPick | None:
     """Pick the best UFA to nominate."""
     if not ufas:
@@ -424,19 +453,25 @@ def _pick_best_ufa(
             expected_price=market_prices.get(best_name, MIN_SALARY),
         )
 
-    # Strategy 2: Drain — nominate an expensive player BOT doesn't want
-    # Pick player with highest model price that BOT doesn't want
+    # Strategy 2: Drain — nominate player that forces opponents into bidding wars
     unwanted = [(n, p) for n, p in ufas.items() if n not in wanted]
     if unwanted:
         drain_name, drain = max(
             unwanted,
-            key=lambda x: model_prices.get(x[0], 0),
+            key=lambda x: _score_drain_candidate(x[1], model_prices.get(x[0], 0), state),
         )
-        if model_prices.get(drain_name, 0) > 2.0:
+        mprice = model_prices.get(drain_name, 0)
+        if mprice > 2.0:
+            opponents = [
+                t for code, t in state.teams.items()
+                if code != MY_TEAM and not t.is_done and t.total_spots_remaining > 0
+            ]
+            needing = sum(1 for t in opponents if t.roster_needs.get(drain.position, 0) > 0)
+            can_afford = sum(1 for t in opponents if t.physical_max_bid >= mprice)
             return NominationPick(
                 player=drain,
                 strategy="drain",
-                reasoning=f"{drain.name} (${model_prices.get(drain_name, 0):.1f}M model) — drains opponent budgets",
+                reasoning=f"{drain.name} (${mprice:.1f}M, {needing} need {drain.position}, {can_afford} can afford) — drains opponent budgets",
                 expected_price=model_prices.get(drain_name, MIN_SALARY),
             )
 

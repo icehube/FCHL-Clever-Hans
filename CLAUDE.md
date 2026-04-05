@@ -37,6 +37,39 @@ Browser (HTMX)              FastAPI Server                    Engine
 
 All state-modifying endpoints trigger: update state -> recompute market prices -> re-solve MILP -> save snapshot -> return HTML partials.
 
+### Full endpoint reference
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/` | Main page with all panels |
+| POST | `/assign` | Draft player to team (validates team, clamps salary) |
+| POST | `/bid-check` | Live bidding advice (BID/CAUTION/DROP) |
+| GET | `/nominate` | Nomination recommendations (target/drain/depth) |
+| GET | `/explain/{name}` | Counterfactual: roster with vs without player |
+| POST | `/trade-evaluate` | Evaluate proposed trade (ACCEPT/DECLINE) |
+| POST | `/trade-execute` | Execute previously evaluated trade |
+| GET | `/buyout-check/{name}` | Preview buyout impact (BUYOUT/KEEP) |
+| POST | `/buyout` | Execute buyout (50% penalty) |
+| GET | `/buyout-indicators` | Lazy-load buyout dots via HTMX OOB swap |
+| POST | `/team-done` | Toggle team drafting status |
+| POST | `/undo` | Restore previous snapshot |
+| POST | `/reset` | Reset to fresh state from CSV |
+| GET | `/player-chart/{name}` | SVG price distribution visualization |
+| POST | `/set-nominator` | Override nomination turn |
+| GET | `/team-view/{code}` | Detailed team roster view |
+| GET | `/team-players/{code}` | JSON player list (for trade dropdowns) |
+| POST | `/toggle-bench` | Toggle player active/bench status |
+| POST | `/adjust-salary` | Correct a player's salary |
+| POST | `/trade-between` | Execute trade between non-BOT teams |
+| GET | `/state` | JSON state dump for debugging |
+
+### UI patterns
+
+- **Toast notifications**: Mutation endpoints return `HX-Trigger: {"showToast": {...}}` header. JS listener in `shortcuts.js` shows auto-dismissing alerts.
+- **Lazy buyout indicators**: Roster panel renders grey placeholder dots, then `hx-trigger="load"` fires `GET /buyout-indicators` which returns OOB-swapped green/red dots.
+- **Atomic saves**: `_save_state()` writes to `.tmp` then `os.replace()` (POSIX atomic). Previous state kept as `.backup`.
+- **Responsive layout**: CSS grid with 1-col (mobile), 2-col (768px+), 3-col (1024px+) breakpoints.
+
 ## Auction rules (from CBA)
 
 - UFA: circular bidding, $0.1M increments, drop out = permanent for that player

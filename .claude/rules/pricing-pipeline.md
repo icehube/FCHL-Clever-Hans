@@ -19,9 +19,10 @@ prediction           reality         engine
 
 **Opponent physical max** (absolute ceiling any team can bid):
 ```
-physical_max = remaining_budget - (remaining_spots_after * MIN_SALARY)
-capped at MAX_SALARY
+spendable_budget = remaining_budget - (total_spots_remaining * MIN_SALARY)
+physical_max = min(spendable_budget + MIN_SALARY, MAX_SALARY)
 ```
+The `+ MIN_SALARY` accounts for the spot being filled by this bid -- one reserved slot is replaced by the actual bid amount.
 
 **Market ceiling** (highest bidding can realistically reach):
 ```
@@ -36,8 +37,15 @@ market_price = min(model_price, market_ceiling)
 
 **Final bid recommendation**:
 ```
-recommended_bid = min(marginal_value, market_ceiling + 0.1, spendable_budget)
+recommended_bid = min(marginal_value, market_ceiling + 0.1, physical_max_bid)
 ```
+
+**MILP budget** (different from single-bid budget):
+```
+milp_budget = remaining_budget (not spendable_budget)
+milp_constraint: must fill exactly remaining_spots players
+```
+The MILP uses `remaining_budget` because the `== spots` constraint forces filling all slots, so min-salary reservation is implicit. Using `spendable_budget` would double-count the reserve.
 
 ## Critical rule
 

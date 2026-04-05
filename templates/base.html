@@ -65,7 +65,9 @@
             <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-xs btn-outline btn-info" title="Undo (Ctrl+Z)">
                 ↩ Undo
             </button>
-
+            <button hx-post="/reset" hx-target="#app" hx-swap="innerHTML" hx-confirm="Reset to fresh state from CSV? All auction progress will be lost." class="btn btn-xs btn-outline btn-error" title="Reset to fresh state">
+                Reset
+            </button>
         </div>
     </div>
     <main id="app">

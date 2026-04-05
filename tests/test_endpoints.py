@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 def client():
     from main import app
     with TestClient(app) as c:
+        # Reset to fresh state in case other test modules modified globals
+        c.post("/reset")
         yield c
 
 
@@ -174,7 +176,7 @@ class TestLognormalPdfPath:
 class TestPlayerChart:
     def test_player_chart_valid(self, client):
         """Player chart should return SVG visualization."""
-        r = client.get("/player-chart/Sidney Crosby")
+        r = client.get("/player-chart/Steven Stamkos")
         assert r.status_code == 200
         assert "Price Model" in r.text
         assert "<svg" in r.text

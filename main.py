@@ -450,6 +450,18 @@ async def undo(request: Request):
     return _render(request, "partials/all_panels.html")
 
 
+@app.post("/reset", response_class=HTMLResponse)
+async def reset(request: Request):
+    """Reset to fresh state from CSV data."""
+    global auction_state, model_prices
+    auction_state = build_initial_state()
+    model_prices = predict_all_prices(auction_state.available_players, model_params)
+    _recompute()
+    _recompute_buyout_indicators()
+    _save_state()
+    return _render(request, "partials/all_panels.html")
+
+
 _TWO_PI_SQRT = math.sqrt(2.0 * math.pi)
 
 

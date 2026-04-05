@@ -38,41 +38,38 @@
     </div>
     {% endif %}
 
-    <!-- Roster: current players + MILP targets integrated -->
+    <!-- Roster: current players + MILP targets merged, sorted by position then points -->
     {% set acquired_names = team.acquired_players|map(attribute='name')|list %}
     {% set roster_names = (team.keeper_players + team.acquired_players)|map(attribute='name')|list %}
-    {% set all_roster = (team.keeper_players + team.acquired_players)|sort(attribute='projected_points', reverse=True) %}
+    {% set pos_order = {'F': 0, 'D': 1, 'G': 2} %}
+    {% set milp_targets = [] %}
+    {% if milp and milp.status == "Optimal" and milp.roster %}
+    {% for p in milp.roster if p.name not in roster_names %}
+    {% set _ = milp_targets.append(p) %}
+    {% endfor %}
+    {% endif %}
+    {% set combined = [] %}
+    {% for p in team.keeper_players + team.acquired_players %}
+    {% set _ = combined.append({'name': p.name, 'position': p.position, 'nhl_team': p.nhl_team, 'salary': p.salary, 'projected_points': p.projected_points, 'is_target': false, 'is_acquired': p.name in acquired_names, 'pos_rank': pos_order.get(p.position, 9)}) %}
+    {% endfor %}
+    {% for p in milp_targets %}
+    {% set _ = combined.append({'name': p.name, 'position': p.position, 'nhl_team': p.nhl_team, 'salary': market_prices.get(p.name, 0.5) if market_prices else 0.5, 'projected_points': p.projected_points, 'is_target': true, 'is_acquired': false, 'pos_rank': pos_order.get(p.position, 9)}) %}
+    {% endfor %}
     <h3 class="font-semibold text-sm mt-2 mb-1">Roster</h3>
     <table class="table table-xs table-zebra">
         <thead><tr><th></th><th>Pos</th><th>Player</th><th>NHL</th><th>Salary</th><th>PTS</th></tr></thead>
         <tbody>
-        {% for p in all_roster %}
-        {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined else "keep" %}
-        {% set is_acquired = p.name in acquired_names %}
-        <tr class="{{ 'text-success' if is_acquired else '' }}">
-            <td><span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span></td>
+        {% for p in combined|sort(attribute='projected_points', reverse=True)|sort(attribute='pos_rank') %}
+        {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined and not p.is_target else "keep" %}
+        <tr class="{{ 'text-info opacity-50 italic' if p.is_target else ('text-success' if p.is_acquired else '') }}">
+            <td>{% if not p.is_target %}<span class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}"></span>{% endif %}</td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
-            <td><img src="/nhl_logos/{{ p.nhl_team }}.png" alt="{{ p.nhl_team }}" class="h-4 inline object-contain" title="{{ p.nhl_team }}"></td>
+            <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
         </tr>
         {% endfor %}
-        {% if milp and milp.status == "Optimal" and milp.roster %}
-        <tr><td colspan="6" class="text-xs opacity-50 text-center py-1">— MILP Targets —</td></tr>
-        {% for p in milp.roster|sort(attribute='projected_points', reverse=True) %}
-        {% if p.name not in roster_names %}
-        <tr class="opacity-50 italic">
-            <td></td>
-            <td>{{ p.position }}</td>
-            <td>{{ p.name }}</td>
-            <td><img src="/nhl_logos/{{ p.nhl_team }}.png" alt="{{ p.nhl_team }}" class="h-4 inline object-contain" title="{{ p.nhl_team }}"></td>
-            <td>${{ "%.1f"|format(market_prices.get(p.name, 0.5) if market_prices else 0.5) }}M</td>
-            <td>{{ p.projected_points }}</td>
-        </tr>
-        {% endif %}
-        {% endfor %}
-        {% endif %}
         </tbody>
     </table>
 </section>

@@ -35,7 +35,7 @@
         <div class="card bg-base-300 p-3 text-sm">
             <div class="font-bold text-accent">{{ rfa_pick.player.name }}</div>
             <div class="text-xs opacity-70">
-                {{ rfa_pick.player.position }} · <img src="/nhl_logos/{{ rfa_pick.player.nhl_team }}.png" alt="{{ rfa_pick.player.nhl_team }}" class="h-4 inline object-contain" title="{{ rfa_pick.player.nhl_team }}"> · {{ rfa_pick.player.projected_points }}pts
+                {{ rfa_pick.player.position }} · <img src="/nhl_logos/{{ rfa_pick.player.nhl_team }}.svg" alt="{{ rfa_pick.player.nhl_team }}" class="h-5 inline object-contain" title="{{ rfa_pick.player.nhl_team }}"> · {{ rfa_pick.player.projected_points }}pts
                 {% if rfa_pick.player.prior_fchl_team %}
                 · Prior: {{ rfa_pick.player.prior_fchl_team }} @ ${{ rfa_pick.player.salary }}M
                 {% endif %}
@@ -53,7 +53,7 @@
         <div class="card bg-base-300 p-3 text-sm">
             <div class="font-bold text-accent">{{ ufa_pick.player.name }}</div>
             <div class="text-xs opacity-70">
-                {{ ufa_pick.player.position }} · <img src="/nhl_logos/{{ ufa_pick.player.nhl_team }}.png" alt="{{ ufa_pick.player.nhl_team }}" class="h-4 inline object-contain" title="{{ ufa_pick.player.nhl_team }}"> · {{ ufa_pick.player.projected_points }}pts
+                {{ ufa_pick.player.position }} · <img src="/nhl_logos/{{ ufa_pick.player.nhl_team }}.svg" alt="{{ ufa_pick.player.nhl_team }}" class="h-5 inline object-contain" title="{{ ufa_pick.player.nhl_team }}"> · {{ ufa_pick.player.projected_points }}pts
             </div>
             <div class="badge badge-sm badge-outline mt-1">{{ ufa_pick.strategy }}</div>
             <div class="text-xs opacity-80 mt-1">{{ ufa_pick.reasoning }}</div>

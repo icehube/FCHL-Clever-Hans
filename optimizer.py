@@ -92,8 +92,10 @@ def solve_optimal_roster(
     }
 
     # Budget available after forced players
+    # Use remaining_budget (not spendable) because the MILP fills ALL spots,
+    # so min-salary reservation is already handled by the == spots constraint.
     forced_cost = sum(forced_players.values())
-    budget = team.spendable_budget - forced_cost
+    budget = team.remaining_budget - forced_cost
 
     # Spots remaining after forced players
     spots = team.total_spots_remaining - len(forced_players)
@@ -133,8 +135,8 @@ def solve_optimal_roster(
         market_prices.get(name, MIN_SALARY) * x[name] for name in candidates
     ) <= budget
 
-    # Total players constraint
-    prob += pulp.lpSum(x[name] for name in candidates) <= spots
+    # Total players constraint (must fill all remaining spots)
+    prob += pulp.lpSum(x[name] for name in candidates) == spots
 
     # Position minimum constraints
     for pos, need in needs.items():

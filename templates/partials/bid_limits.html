@@ -24,7 +24,7 @@
             <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
                 <td>{{ p.position }}</td>
                 <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>
-                <td><img src="/nhl_logos/{{ p.nhl_team }}.png" alt="{{ p.nhl_team }}" class="h-4 inline object-contain" title="{{ p.nhl_team }}"></td>
+                <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
                 <td>{{ p.projected_points }}</td>
                 <td>${{ p.model_price }}M</td>
                 <td>${{ p.market_price }}M</td>

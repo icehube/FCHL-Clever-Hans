@@ -74,7 +74,9 @@ def load_players(
             team_prob = _get_team_probability(nhl_team, team_odds)
 
             if fchl_team in _PLACEHOLDER_TEAMS and status == "":
-                # Biddable player (UFA or RFA)
+                # Biddable player (UFA or RFA) — skip zero-point players
+                if pts == 0:
+                    continue
                 is_rfa = group in RFA_GROUPS
                 biddable[name] = Player(
                     name=name,

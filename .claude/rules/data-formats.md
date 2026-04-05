@@ -11,11 +11,11 @@ paths:
 Single source for all players: keepers, auction-eligible, and minor leaguers.
 
 ```csv
-PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS
-Nikita Kucherov,F,3,START,LGN,TBL,31,8.5,0,144
-Connor McDavid,F,RFA2,,RFA,EDM,27,11.4,0,132
-Artemi Panarin,F,3,,UFA,NYR,32,7.3,0,120
-Connor Ingram,G,3,MINOR,BOT,UTA,27,0.5,0,30
+PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS,PRIOR FCHL TEAM
+Nikita Kucherov,F,3,START,LGN,TBL,31,8.5,0,144,
+Connor McDavid,F,RFA2,,RFA,EDM,27,11.4,0,132,SRL
+Artemi Panarin,F,3,,UFA,NYR,32,7.3,0,120,
+Connor Ingram,G,3,MINOR,BOT,UTH,27,0.5,0,30,
 ```
 
 ### Column meanings

@@ -94,7 +94,7 @@ class TestSolveOptimalRoster:
         team = _make_team()
         sol = solve_optimal_roster(team, players, prices)
         assert sol.status == "Optimal"
-        assert sol.total_cost <= team.spendable_budget + 0.01
+        assert sol.total_cost <= team.remaining_budget + 0.01
 
     def test_accounts_for_existing_keepers(self):
         """Keepers reduce spots and budget needed."""
@@ -188,7 +188,7 @@ class TestSolveWithRealData:
         sol = solve_optimal_roster(state.teams[MY_TEAM], state.available_players, mp)
         assert sol.status == "Optimal"
         assert sol.total_points > 0
-        assert sol.total_cost <= state.teams[MY_TEAM].spendable_budget + 0.01
+        assert sol.total_cost <= state.teams[MY_TEAM].remaining_budget + 0.01
 
     def test_real_data_performance(self):
         """MILP should solve in well under 1 second."""

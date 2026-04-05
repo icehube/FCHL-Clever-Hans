@@ -20,8 +20,8 @@ Browser (HTMX)              FastAPI Server                    Engine
 | Auction control  |--->| POST /assign        |--->| price_model.py       |
 | Bidding advisor  |<---| POST /bid-check     |    |       |              |
 | Nomination helper|    | GET  /nominate      |    | market.py            |
-| Trade evaluator  |    | POST /trade-eval    |    |       |              |
-| My team view     |    | POST /buyout-check  |    | optimizer.py         |
+| Trade evaluator  |    | POST /trade-evaluate|    |       |              |
+| My team view     |    | GET  /buyout-check  |    | optimizer.py         |
 | League dashboard |    | POST /team-done     |    |       |              |
 +-----------------+     | POST /undo          |    | trade.py             |
         ^               +---------------------+    +----------------------+

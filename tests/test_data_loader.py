@@ -56,14 +56,14 @@ class TestLoadPlayers:
         return team_players, biddable
 
     def test_biddable_count(self, loaded):
-        # 1910 rows but 1909 unique names (two Matt Murrays — different people)
+        # Zero-point players excluded from biddable pool
         _, biddable = loaded
-        assert len(biddable) == 1909
+        assert len(biddable) == 704
 
     def test_biddable_ufa_count(self, loaded):
         _, biddable = loaded
         ufas = [p for p in biddable.values() if not p.is_rfa]
-        assert len(ufas) == 1887
+        assert len(ufas) == 682
 
     def test_biddable_rfa_count(self, loaded):
         _, biddable = loaded
@@ -159,7 +159,7 @@ class TestBuildInitialState:
         assert state.snake_draft is True
 
     def test_available_players(self, state):
-        assert len(state.available_players) == 1909
+        assert len(state.available_players) == 704
 
     def test_total_picks_needed(self, state):
         total = sum(t.total_spots_remaining for t in state.teams.values())

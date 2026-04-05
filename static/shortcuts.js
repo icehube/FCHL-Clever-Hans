@@ -1,3 +1,14 @@
+/* Toast notifications triggered by HTMX HX-Trigger response header */
+document.body.addEventListener('showToast', function(e) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var div = document.createElement('div');
+    div.className = 'alert alert-' + (e.detail.type || 'info') + ' text-sm py-2 px-3 shadow-lg';
+    div.textContent = e.detail.message;
+    container.appendChild(div);
+    setTimeout(function() { div.remove(); }, 4000);
+});
+
 /* Keyboard shortcuts for auction day */
 
 document.addEventListener('keydown', function(e) {

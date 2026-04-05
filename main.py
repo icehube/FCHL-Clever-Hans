@@ -140,10 +140,23 @@ def _recompute_buyout_indicators():
 
 
 def _save_state():
-    """Save auction state to disk."""
+    """Save auction state to disk atomically with backup rotation."""
     path = os.path.join(STATE_DIR, "auction_state.json")
-    with open(path, "w") as f:
+    backup_path = path + ".backup"
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
         f.write(auction_state.to_json())
+    if os.path.exists(path):
+        os.replace(path, backup_path)
+    os.replace(tmp_path, path)
+
+
+def _toast(response: HTMLResponse, message: str, toast_type: str = "info") -> HTMLResponse:
+    """Attach a toast notification to an HTMX response via HX-Trigger header."""
+    response.headers["HX-Trigger"] = json.dumps(
+        {"showToast": {"message": message, "type": toast_type}}
+    )
+    return response
 
 
 def _render(request: Request, template: str, extra: dict | None = None) -> HTMLResponse:
@@ -249,11 +262,24 @@ async def assign_player(
     salary: float = Form(...),
 ):
     """Player drafted: assign to team at salary."""
+    # Validate team
+    if team not in auction_state.teams:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Unknown team: {team}", "error",
+        )
+
+    # Clamp salary to valid range
+    salary = max(MIN_SALARY, min(salary, MAX_SALARY))
+
     auction_state.save_snapshot()
 
     p = auction_state.available_players.pop(player, None)
     if p is None:
-        return _render(request, "partials/all_panels.html")
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Player not found: {player}", "warning",
+        )
 
     # RFA group conversion: RFA1→GROUP 2, RFA2→GROUP 3
     group = p.group
@@ -292,7 +318,10 @@ async def assign_player(
     auction_state.advance_nomination()
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    return _toast(
+        _render(request, "partials/all_panels.html"),
+        f"{p.name} → {team} at ${salary}M", "success",
+    )
 
 
 @app.post("/bid-check", response_class=HTMLResponse)
@@ -421,7 +450,15 @@ async def trade_execute(request: Request):
     buyout_names = form.getlist("buyout_player")
 
     auction_state.save_snapshot()
-    execute_trade(auction_state, last_trade_eval.give, last_trade_eval.receive, buyout_names)
+    try:
+        execute_trade(auction_state, last_trade_eval.give, last_trade_eval.receive, buyout_names)
+    except ValueError as e:
+        auction_state.restore_snapshot()
+        last_trade_eval = None
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Trade failed: {e}", "error",
+        )
     last_trade_eval = None
 
     # Recompute model prices for any newly available players
@@ -429,7 +466,10 @@ async def trade_execute(request: Request):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    return _toast(
+        _render(request, "partials/all_panels.html"),
+        "Trade executed", "success",
+    )
 
 
 @app.get("/buyout-check/{player_name}", response_class=HTMLResponse)
@@ -452,11 +492,18 @@ async def buyout(request: Request, player: str = Form(...)):
     try:
         execute_buyout(auction_state, player)
     except ValueError:
-        pass
+        auction_state.restore_snapshot()
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Buyout failed: {player} not found", "error",
+        )
 
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    return _toast(
+        _render(request, "partials/all_panels.html"),
+        f"Bought out {player}", "success",
+    )
 
 
 @app.post("/team-done", response_class=HTMLResponse)

@@ -1,5 +1,16 @@
 /* FCHL Auction Manager — Nord theme overrides for DaisyUI */
 
+/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop */
+.auction-grid { display: grid; grid-template-columns: 1fr; }
+@media (min-width: 768px) {
+    .auction-grid { grid-template-columns: 1fr 1fr; }
+    .area-team { grid-column: span 2; }
+}
+@media (min-width: 1024px) {
+    .auction-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .area-team { grid-column: span 1; }
+}
+
 :root {
     --bg: #2e3440;
     --bg-panel: #3b4252;

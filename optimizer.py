@@ -108,7 +108,7 @@ def solve_optimal_roster(
             if needs.get(pos, 0) > 0:
                 needs[pos] -= 1
 
-    if spots <= 0 or budget < 0:
+    if spots <= 0 or budget < 0 or budget < spots * MIN_SALARY:
         return MILPSolution(
             total_points=sum(p.projected_points for p in team.roster_players),
             roster=[],
@@ -116,6 +116,19 @@ def solve_optimal_roster(
             by_position={"F": [], "D": [], "G": []},
             status="Infeasible",
         )
+
+    # Cap position needs so their sum doesn't exceed spots
+    # (e.g., team with all-F keepers may need 7D+3G=10 but only have 8 spots)
+    total_needs = sum(needs.values())
+    if total_needs > spots:
+        excess = total_needs - spots
+        # Reduce largest needs first (they have the most flexibility)
+        for pos in sorted(needs, key=lambda p: -needs[p]):
+            if excess <= 0:
+                break
+            reduction = min(needs[pos], excess)
+            needs[pos] -= reduction
+            excess -= reduction
 
     # Build MILP
     prob = pulp.LpProblem("roster_optimizer", pulp.LpMaximize)
@@ -253,12 +266,12 @@ def compute_bid_recommendation(
     """
     Compute max bid and recommend BID / CAUTION / DROP.
 
-    max_bid = min(marginal_value, market_ceiling + INCREMENT, spendable_budget)
+    max_bid = min(marginal_value, market_ceiling + INCREMENT, physical_max_bid)
     """
     marginal = compute_marginal_value(player, team, available_players, market_prices)
     ceiling = market_info.market_ceiling
 
-    max_bid = min(marginal, ceiling + SALARY_INCREMENT, team.spendable_budget)
+    max_bid = min(marginal, ceiling + SALARY_INCREMENT, team.physical_max_bid)
     max_bid = round(max(max_bid, MIN_SALARY), 1)
 
     if current_price >= max_bid:

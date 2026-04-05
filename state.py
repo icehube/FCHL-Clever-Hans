@@ -137,8 +137,15 @@ class TeamState:
 
     @property
     def physical_max_bid(self) -> float:
-        """Maximum this team can bid on any single player."""
-        return min(self.spendable_budget, MAX_SALARY)
+        """Maximum this team can bid on any single player.
+
+        This is spendable + MIN_SALARY because bidding on a player fills one
+        of the reserved spots (replacing its MIN_SALARY reservation with the
+        actual bid amount).
+        """
+        if self.total_spots_remaining <= 0:
+            return 0.0
+        return min(self.spendable_budget + MIN_SALARY, MAX_SALARY)
 
     def find_player(self, name: str) -> PlayerOnRoster | None:
         """Find a player by name across all lists."""

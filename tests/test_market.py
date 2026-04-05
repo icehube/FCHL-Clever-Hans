@@ -87,12 +87,12 @@ class TestComputeOpponentCeiling:
     def test_tight_budget_ceiling(self):
         """Team with tight budget has low ceiling."""
         # 22 keepers totaling $55.0, remaining=$1.8
-        # spots=2, reserved=2*0.5=1.0, spendable=0.8
+        # spots=2, physical_max = remaining - (spots-1)*MIN = 1.8 - 0.5 = 1.3
         team = _make_team("OPP", keeper_salary=55.0, num_keepers=22,
                           keeper_positions={"F": 14, "D": 5, "G": 3})
         ceiling = compute_opponent_ceiling(team)
         assert ceiling is not None
-        assert ceiling == pytest.approx(0.8)
+        assert ceiling == pytest.approx(1.3)
 
 
 class TestComputeMarketCeiling:

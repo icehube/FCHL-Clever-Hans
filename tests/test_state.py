@@ -144,11 +144,10 @@ class TestTeamStateBudget:
         """When budget is tight, physical max is below MAX_SALARY."""
         keepers = [_make_player_on_roster(f"P{i}", salary=2.5) for i in range(22)]
         team = _make_team(keepers=keepers)
-        # remaining = 56.8 - 55.0 = 1.8
-        # reserved = 2 * 0.5 = 1.0
-        # spendable = 0.8
+        # remaining = 56.8 - 55.0 = 1.8, spots = 2
+        # physical_max = remaining - (spots-1)*MIN = 1.8 - 0.5 = 1.3
         assert team.spendable_budget == pytest.approx(0.8)
-        assert team.physical_max_bid == pytest.approx(0.8)
+        assert team.physical_max_bid == pytest.approx(1.3)
         assert team.physical_max_bid < MAX_SALARY
 
 

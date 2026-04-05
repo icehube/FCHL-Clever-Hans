@@ -117,8 +117,8 @@ class TestBidRecommendation:
         )
         assert rec.max_bid <= info.market_ceiling + SALARY_INCREMENT + 0.01
 
-    def test_max_bid_never_exceeds_spendable(self):
-        """Max bid should never exceed team's spendable budget."""
+    def test_max_bid_never_exceeds_physical_max(self):
+        """Max bid should never exceed team's physical max bid."""
         state, mp, info = _setup_real_data()
         team = state.teams[MY_TEAM]
         player = next(
@@ -128,7 +128,7 @@ class TestBidRecommendation:
         rec = compute_bid_recommendation(
             player, team, state.available_players, mp, info,
         )
-        assert rec.max_bid <= team.spendable_budget + 0.01
+        assert rec.max_bid <= team.physical_max_bid + 0.01
 
 
 class TestCounterfactual:

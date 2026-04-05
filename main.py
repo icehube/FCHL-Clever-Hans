@@ -280,7 +280,7 @@ async def bid_check(
     # Use live ceiling from active bidders if provided
     bidder_list = [b.strip() for b in bidders.split(",") if b.strip()]
     if bidder_list:
-        live_ceil = compute_live_ceiling(bidder_list, auction_state.teams, p.position)
+        live_ceil = compute_live_ceiling(bidder_list, auction_state.teams)
         live_info = MarketInfo(
             market_ceiling=live_ceil,
             highest_bidder=highest_bidder or None,

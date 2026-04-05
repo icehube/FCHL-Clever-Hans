@@ -130,7 +130,6 @@ def compute_all_market_prices(
 def compute_live_ceiling(
     active_bidders: list[str],
     teams: dict[str, TeamState],
-    position: str,
 ) -> float:
     """
     During active bidding (Mode 3): ceiling from the specific active bidders.

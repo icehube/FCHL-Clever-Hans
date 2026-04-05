@@ -207,7 +207,7 @@ class TestComputeLiveCeiling:
             "C": _make_team("C", keeper_salary=20.0, num_keepers=5,
                             keeper_positions={"F": 5}),
         }
-        ceiling = compute_live_ceiling(["A", "B", "C"], teams, "F")
+        ceiling = compute_live_ceiling(["A", "B", "C"], teams)
         # A has most budget, C second, B least
         assert ceiling == teams["C"].physical_max_bid
 
@@ -217,12 +217,12 @@ class TestComputeLiveCeiling:
             "A": _make_team("A", keeper_salary=10.0, num_keepers=5,
                             keeper_positions={"F": 5}),
         }
-        ceiling = compute_live_ceiling(["A"], teams, "F")
+        ceiling = compute_live_ceiling(["A"], teams)
         assert ceiling == teams["A"].physical_max_bid
 
     def test_no_active_bidders(self):
         """With no valid bidders, ceiling is MIN_SALARY."""
-        ceiling = compute_live_ceiling([], {}, "F")
+        ceiling = compute_live_ceiling([], {})
         assert ceiling == MIN_SALARY
 
     def test_done_bidder_excluded(self):
@@ -233,7 +233,7 @@ class TestComputeLiveCeiling:
             "B": _make_team("B", keeper_salary=20.0, num_keepers=5,
                             keeper_positions={"F": 5}),
         }
-        ceiling = compute_live_ceiling(["A", "B"], teams, "F")
+        ceiling = compute_live_ceiling(["A", "B"], teams)
         assert ceiling == teams["B"].physical_max_bid
 
 

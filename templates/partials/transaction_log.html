@@ -2,6 +2,21 @@
     <h2 class="card-title text-accent text-base mb-2">Transaction Log ({{ transaction_log|length }})</h2>
 
     {% if transaction_log %}
+    {% set draft_txns = transaction_log|selectattr('transaction_type', 'equalto', 'draft')|list %}
+    {% if draft_txns %}
+    <div class="text-xs opacity-80 mb-2 flex flex-wrap gap-3">
+        <span>Picks: <strong>{{ draft_txns|length }}</strong></span>
+        <span>Avg: <strong>${{ "%.1f"|format(draft_txns|map(attribute='salary')|sum / draft_txns|length) }}M</strong></span>
+        {% set f_txns = draft_txns|selectattr('position', 'equalto', 'F')|list %}
+        {% set d_txns = draft_txns|selectattr('position', 'equalto', 'D')|list %}
+        {% set g_txns = draft_txns|selectattr('position', 'equalto', 'G')|list %}
+        {% if f_txns %}<span>F: <strong>${{ "%.1f"|format(f_txns|map(attribute='salary')|sum / f_txns|length) }}M</strong> ({{ f_txns|length }})</span>{% endif %}
+        {% if d_txns %}<span>D: <strong>${{ "%.1f"|format(d_txns|map(attribute='salary')|sum / d_txns|length) }}M</strong> ({{ d_txns|length }})</span>{% endif %}
+        {% if g_txns %}<span>G: <strong>${{ "%.1f"|format(g_txns|map(attribute='salary')|sum / g_txns|length) }}M</strong> ({{ g_txns|length }})</span>{% endif %}
+        {% set total_dev = draft_txns|map(attribute='salary')|sum - draft_txns|map(attribute='market_price')|sum %}
+        <span class="{{ 'text-error' if total_dev > 0 else 'text-success' }}">Dev: {{ "%+.1f"|format(total_dev) }}M</span>
+    </div>
+    {% endif %}
     <div class="scroll-container">
     <table class="table table-xs table-zebra">
         <thead>

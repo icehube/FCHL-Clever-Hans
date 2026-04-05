@@ -71,6 +71,33 @@ document.addEventListener('click', function(e) {
     }
 });
 
+/* Filter available players by position */
+function filterPosition(pos) {
+    var rows = document.querySelectorAll('#bid-limits tbody tr');
+    rows.forEach(function(row) {
+        row.style.display = (pos === 'all' || row.dataset.position === pos) ? '' : 'none';
+    });
+    document.querySelectorAll('[data-pos]').forEach(function(b) {
+        b.classList.remove('btn-primary');
+        b.classList.add('btn-outline');
+    });
+    var active = document.querySelector('[data-pos="' + pos + '"]');
+    if (active) {
+        active.classList.add('btn-primary');
+        active.classList.remove('btn-outline');
+    }
+}
+
+/* Adjust bid price by increment and auto-submit */
+function adjustPrice(delta) {
+    var input = document.getElementById('bid-price');
+    if (!input) return;
+    var val = parseFloat(input.value) || 0.5;
+    input.value = Math.max(0.5, (val + delta)).toFixed(1);
+    var form = input.closest('form');
+    if (form) htmx.trigger(form, 'submit');
+}
+
 /* Select team for assign form (single-select logo grid) */
 function selectAssignTeam(btn) {
     btn.closest('.assign-logos').querySelectorAll('.bidder-logo-btn').forEach(function(b) {

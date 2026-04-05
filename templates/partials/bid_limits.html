@@ -1,6 +1,12 @@
 <section class="card bg-base-200 shadow-md p-4" id="bid-limits">
     <h2 class="card-title text-accent text-base mb-1">Available Players ({{ bid_limits|length }})</h2>
-    <div class="flex gap-4 text-xs mb-2">
+    <div class="flex items-center gap-4 text-xs mb-2">
+        <div class="flex gap-1">
+            <button class="btn btn-xs btn-primary" onclick="filterPosition('all')" data-pos="all">All</button>
+            <button class="btn btn-xs btn-outline" onclick="filterPosition('F')" data-pos="F">F</button>
+            <button class="btn btn-xs btn-outline" onclick="filterPosition('D')" data-pos="D">D</button>
+            <button class="btn btn-xs btn-outline" onclick="filterPosition('G')" data-pos="G">G</button>
+        </div>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm inline-block" style="background:rgba(163,190,140,0.25)"></span> In optimal roster</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm inline-block border-l-2 border-warning"></span> RFA</span>
     </div>
@@ -21,7 +27,7 @@
             </thead>
             <tbody>
             {% for p in bid_limits %}
-            <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}">
+            <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}" data-position="{{ p.position }}">
                 <td>{{ p.position }}</td>
                 <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>
                 <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>

@@ -220,7 +220,7 @@ def compute_marginal_value(
     # Binary search for the break-even salary
     # Search in discrete increments of SALARY_INCREMENT
     lo = MIN_SALARY
-    hi = min(team.spendable_budget, MAX_SALARY)
+    hi = min(team.spendable_budget + MIN_SALARY, MAX_SALARY)
 
     while hi - lo > SALARY_INCREMENT:
         mid = round(lo + (hi - lo) / 2, 1)

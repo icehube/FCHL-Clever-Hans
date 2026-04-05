@@ -2,7 +2,7 @@
 
 import pytest
 
-from config import RFA_GROUPS, SALARY_CAP
+from config import SALARY_CAP
 from data_loader import (
     build_initial_state,
     load_players,

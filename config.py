@@ -8,21 +8,13 @@ SALARY_INCREMENT = 0.1
 
 # Roster sizes
 ROSTER_SIZE = 24
-PLAYING_ROSTER = 20
-BENCH_SIZE = 4
 
 # Position minimums (active roster)
 MIN_FORWARDS = 14
 MIN_DEFENSE = 7
 MIN_GOALIES = 3
 
-# Playing roster positions
-STARTING_FORWARDS = 12
-STARTING_DEFENSE = 6
-STARTING_GOALIES = 2
-
 # League
-NUM_TEAMS = 11
 MY_TEAM = "BOT"
 
 # Buyout

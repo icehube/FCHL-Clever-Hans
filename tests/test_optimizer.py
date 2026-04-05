@@ -2,7 +2,7 @@
 
 import pytest
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_INCREMENT
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM
 from optimizer import MILPSolution, solve_optimal_roster
 from state import Player, PlayerOnRoster, TeamState
 

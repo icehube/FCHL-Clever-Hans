@@ -256,6 +256,7 @@ async def assign_player(
         transaction_type="draft",
     ))
 
+    auction_state.advance_nomination()
     _recompute()
     _recompute_buyout_indicators()
     _save_state()
@@ -301,7 +302,6 @@ async def bid_check(
     ctx["bid_advice"] = rec
     ctx["bid_player"] = p
     ctx["bid_price"] = price
-    ctx["bid_highest"] = highest_bidder
     ctx["active_bidders"] = bidder_list
     return _render(request, "partials/auction_control.html", ctx)
 

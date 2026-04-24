@@ -1,6 +1,10 @@
 <section class="card bg-base-200 shadow-md p-4" id="buyout-panel">
     <h2 class="card-title text-accent text-base mb-2">Buyout Analyzer</h2>
 
+    <button hx-get="/buyout-indicators" hx-swap="none" class="btn btn-xs btn-warning mb-2">
+        Scan Roster for Buyout Opportunities
+    </button>
+
     <div class="flex flex-wrap gap-1 mb-2">
         {% for p in team.roster_players|sort(attribute='projected_points') %}
         <button hx-get="/buyout-check/{{ p.name }}" hx-target="#buyout-panel" hx-swap="outerHTML"

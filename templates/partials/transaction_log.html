@@ -41,12 +41,18 @@
             <td>{{ t.player_name }}</td>
             <td>{{ t.team_code }}</td>
             <td>${{ "%.1f"|format(t.salary) }}M</td>
+            {% if t.transaction_type == 'draft' %}
             <td>${{ "%.1f"|format(t.model_price) }}M</td>
             <td>${{ "%.1f"|format(t.market_price) }}M</td>
             <td class="{% if deviation > 0.5 %}text-error{% elif deviation < -0.5 %}text-success{% endif %}">
                 {{ "%+.1f"|format(deviation) }}
             </td>
-            <td><span class="badge badge-xs badge-ghost">{{ t.transaction_type }}</span></td>
+            {% else %}
+            <td class="opacity-30">—</td>
+            <td class="opacity-30">—</td>
+            <td class="opacity-30">—</td>
+            {% endif %}
+            <td><span class="badge badge-xs {% if t.transaction_type == 'buyout' %}badge-warning{% elif t.transaction_type in ['trade_out', 'trade_in', 'trade'] %}badge-info{% else %}badge-ghost{% endif %}">{{ t.transaction_type }}</span></td>
         </tr>
         {% endfor %}
         </tbody>

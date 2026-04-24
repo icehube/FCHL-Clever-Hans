@@ -1,5 +1,6 @@
 <section class="card bg-base-200 shadow-md p-4" id="league-state">
     <h2 class="card-title text-accent text-base mb-2">League State</h2>
+    {% set any_penalties = teams.values()|selectattr('penalties', 'gt', 0)|list|length > 0 %}
     <table class="table table-xs table-zebra">
         <thead>
             <tr>
@@ -8,11 +9,12 @@
                 <th data-sort-col="2" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Roster</th>
                 <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Needs</th>
                 <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Cap Used</th>
-                <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Remaining</th>
-                <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Spendable</th>
-                <th data-sort-col="7" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
-                <th data-sort-col="8" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
-                <th data-sort-col="9" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Proj</th>
+                {% if any_penalties %}<th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Penalty</th>{% endif %}
+                <th data-sort-col="{{ 6 if any_penalties else 5 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Remaining</th>
+                <th data-sort-col="{{ 7 if any_penalties else 6 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Spendable</th>
+                <th data-sort-col="{{ 8 if any_penalties else 7 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
+                <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
+                <th data-sort-col="{{ 10 if any_penalties else 9 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Proj</th>
                 <th>Done</th>
             </tr>
         </thead>
@@ -34,6 +36,7 @@
             <td>{{ t.roster_count }}/24</td>
             <td class="text-xs">{{ t.roster_needs.get("F", 0) }}F {{ t.roster_needs.get("D", 0) }}D {{ t.roster_needs.get("G", 0) }}G</td>
             <td>${{ "%.1f"|format(t.total_salary) }}M</td>
+            {% if any_penalties %}<td class="{% if t.penalties > 0 %}text-warning{% endif %}">${{ "%.1f"|format(t.penalties) }}M</td>{% endif %}
             <td>${{ "%.1f"|format(t.remaining_budget) }}M</td>
             <td>${{ "%.1f"|format(t.spendable_budget) }}M</td>
             <td>${{ "%.1f"|format(t.physical_max_bid) }}M</td>

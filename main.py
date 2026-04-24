@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM
+from config import BUYOUT_PENALTY_RATE, MAX_SALARY, MIN_SALARY, MY_TEAM
 from data_loader import build_initial_state
 from market import (
     MarketInfo,
@@ -449,9 +449,13 @@ async def trade_execute(request: Request):
     form = await request.form()
     buyout_names = form.getlist("buyout_player")
 
+    # Capture trade details before clearing
+    trade_give = last_trade_eval.give
+    trade_receive = last_trade_eval.receive
+
     auction_state.save_snapshot()
     try:
-        execute_trade(auction_state, last_trade_eval.give, last_trade_eval.receive, buyout_names)
+        execute_trade(auction_state, trade_give, trade_receive, buyout_names)
     except ValueError as e:
         auction_state.restore_snapshot()
         last_trade_eval = None
@@ -460,6 +464,21 @@ async def trade_execute(request: Request):
             f"Trade failed: {e}", "error",
         )
     last_trade_eval = None
+
+    # Log trade transactions
+    now = datetime.now().isoformat()
+    for p in trade_give:
+        auction_state.transaction_log.append(TransactionRecord(
+            player_name=p.name, position=p.position, team_code=MY_TEAM,
+            salary=p.salary, model_price=0, market_price=0,
+            timestamp=now, transaction_type="trade_out",
+        ))
+    for p in trade_receive:
+        auction_state.transaction_log.append(TransactionRecord(
+            player_name=p.name, position=p.position, team_code=MY_TEAM,
+            salary=p.salary, model_price=0, market_price=0,
+            timestamp=now, transaction_type="trade_in",
+        ))
 
     # Recompute model prices for any newly available players
     global model_prices
@@ -488,6 +507,13 @@ async def buyout_check(request: Request, player_name: str):
 @app.post("/buyout", response_class=HTMLResponse)
 async def buyout(request: Request, player: str = Form(...)):
     """Execute a buyout."""
+    # Capture player info before execute_buyout removes them
+    team = auction_state.teams[MY_TEAM]
+    p = team.find_player(player)
+    if p:
+        bo_position = p.position
+        bo_salary = p.salary
+
     auction_state.save_snapshot()
     try:
         execute_buyout(auction_state, player)
@@ -497,6 +523,19 @@ async def buyout(request: Request, player: str = Form(...)):
             _render(request, "partials/all_panels.html"),
             f"Buyout failed: {player} not found", "error",
         )
+
+    # Log buyout transaction
+    if p:
+        auction_state.transaction_log.append(TransactionRecord(
+            player_name=player,
+            position=bo_position,
+            team_code=MY_TEAM,
+            salary=bo_salary * BUYOUT_PENALTY_RATE,
+            model_price=0,
+            market_price=0,
+            timestamp=datetime.now().isoformat(),
+            transaction_type="buyout",
+        ))
 
     _recompute()
     _save_state()
@@ -733,11 +772,17 @@ async def trade_between(
     if not ta or not tb:
         return _render(request, "partials/all_panels.html")
     auction_state.save_snapshot()
+    now = datetime.now().isoformat()
     for name in names_a:
         try:
             p = ta.remove_player(name)
             p.is_minor = False
             tb.add_acquired_player(p)
+            auction_state.transaction_log.append(TransactionRecord(
+                player_name=p.name, position=p.position, team_code=f"{team_a}→{team_b}",
+                salary=p.salary, model_price=0, market_price=0,
+                timestamp=now, transaction_type="trade",
+            ))
         except ValueError:
             pass
     for name in names_b:
@@ -745,6 +790,11 @@ async def trade_between(
             p = tb.remove_player(name)
             p.is_minor = False
             ta.add_acquired_player(p)
+            auction_state.transaction_log.append(TransactionRecord(
+                player_name=p.name, position=p.position, team_code=f"{team_b}→{team_a}",
+                salary=p.salary, model_price=0, market_price=0,
+                timestamp=now, transaction_type="trade",
+            ))
         except ValueError:
             pass
     _recompute()

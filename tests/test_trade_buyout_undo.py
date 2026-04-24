@@ -132,6 +132,23 @@ class TestBuyoutFlow:
             f"Net cap freed should be ${expected_penalty}M (50% of salary)"
         )
 
+    def test_04_buyout_logs_transaction(self, client):
+        """Buyout from test_03 should appear in transaction_log with full salary."""
+        state = _get_state(client)
+        log = state["transaction_log"]
+
+        buyout_entries = [t for t in log if t["transaction_type"] == "buyout"
+                          and t["player_name"] == "Dougie Hamilton"]
+        assert len(buyout_entries) == 1, (
+            f"Expected 1 buyout log entry for Dougie Hamilton, got {len(buyout_entries)}"
+        )
+        entry = buyout_entries[0]
+        assert entry["team_code"] == "BOT"
+        # Full salary, not penalty — reader uses badge to know it's 50%
+        assert abs(entry["salary"] - 4.2) < 0.01, (
+            f"Buyout log salary should be player's full salary $4.2M, got ${entry['salary']}M"
+        )
+
 
 # ── Undo ────────────────────────────────────────────────────────────
 
@@ -449,3 +466,87 @@ class TestTradeFlow:
         assert "Chandler Stephenson" in _roster_names(bot)
         # Sidney Crosby should be in available pool
         assert "Sidney Crosby" in state["available_players"]
+
+    def test_07_trade_execute_logs_transactions(self, client):
+        """Execute a trade and verify trade_out + trade_in records are logged."""
+        state_before = _get_state(client)
+        log_before_count = len(state_before["transaction_log"])
+
+        give_name = "Artemi Panarin"  # on BOT from test_00
+        assert give_name in _roster_names(state_before["teams"]["BOT"])
+
+        # Pick any available forward dynamically
+        receive_name = next(
+            n for n, p in state_before["available_players"].items()
+            if p["position"] == "F"
+        )
+
+        client.post("/trade-evaluate", data={
+            "give_player": [give_name],
+            "receive_player": [json.dumps({
+                "name": receive_name,
+                "position": "F",
+                "salary": 3.0,
+                "projected_points": 50,
+            })],
+        })
+        r = client.post("/trade-execute")
+        assert r.status_code == 200
+
+        state_after = _get_state(client)
+        new_entries = state_after["transaction_log"][log_before_count:]
+
+        trade_outs = [e for e in new_entries if e["transaction_type"] == "trade_out"]
+        trade_ins = [e for e in new_entries if e["transaction_type"] == "trade_in"]
+
+        assert len(trade_outs) == 1 and trade_outs[0]["player_name"] == give_name, (
+            f"Expected one trade_out for {give_name}, got {trade_outs}"
+        )
+        assert len(trade_ins) == 1 and trade_ins[0]["player_name"] == receive_name, (
+            f"Expected one trade_in for {receive_name}, got {trade_ins}"
+        )
+
+    def test_08_trade_with_buyout_logs_buyout_not_trade_in(self, client):
+        """Received player bought out via trade flow should log as `buyout`, not `trade_in`."""
+        state_before = _get_state(client)
+        log_before_count = len(state_before["transaction_log"])
+
+        # Give the player received in test_07 (last trade_in on BOT)
+        give_name = next(
+            p["name"] for p in state_before["teams"]["BOT"]["acquired_players"]
+        )
+        # Pick any available forward for receive+buyout
+        receive_name = next(
+            n for n, p in state_before["available_players"].items()
+            if p["position"] == "F"
+        )
+        receive_salary = 6.0
+
+        client.post("/trade-evaluate", data={
+            "give_player": [give_name],
+            "receive_player": [json.dumps({
+                "name": receive_name,
+                "position": "F",
+                "salary": receive_salary,
+                "projected_points": 82,
+            })],
+        })
+        r = client.post("/trade-execute", data={"buyout_player": [receive_name]})
+        assert r.status_code == 200
+
+        state_after = _get_state(client)
+        new_entries = state_after["transaction_log"][log_before_count:]
+
+        # Should have: 1 trade_out (give) + 1 buyout (receive+buyout), NOT trade_in
+        types = [e["transaction_type"] for e in new_entries]
+        assert types.count("trade_out") == 1
+        assert types.count("buyout") == 1
+        assert "trade_in" not in types, (
+            f"Received-and-bought-out player should log as buyout, not trade_in; got {types}"
+        )
+
+        buyout_entry = next(e for e in new_entries if e["transaction_type"] == "buyout")
+        assert buyout_entry["player_name"] == receive_name
+        assert abs(buyout_entry["salary"] - receive_salary) < 0.01, (
+            "Buyout log should record player's full salary"
+        )

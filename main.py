@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import BUYOUT_PENALTY_RATE, MAX_SALARY, MIN_SALARY, MY_TEAM
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM
 from data_loader import build_initial_state
 from market import (
     MarketInfo,
@@ -474,10 +474,11 @@ async def trade_execute(request: Request):
             timestamp=now, transaction_type="trade_out",
         ))
     for p in trade_receive:
+        txn_type = "buyout" if p.name in buyout_names else "trade_in"
         auction_state.transaction_log.append(TransactionRecord(
             player_name=p.name, position=p.position, team_code=MY_TEAM,
             salary=p.salary, model_price=0, market_price=0,
-            timestamp=now, transaction_type="trade_in",
+            timestamp=now, transaction_type=txn_type,
         ))
 
     # Recompute model prices for any newly available players
@@ -530,7 +531,7 @@ async def buyout(request: Request, player: str = Form(...)):
             player_name=player,
             position=bo_position,
             team_code=MY_TEAM,
-            salary=bo_salary * BUYOUT_PENALTY_RATE,
+            salary=bo_salary,
             model_price=0,
             market_price=0,
             timestamp=datetime.now().isoformat(),

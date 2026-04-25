@@ -7,10 +7,13 @@ A live auction draft tool for an 11-team fantasy hockey league. During a multi-h
 ## Quick start
 
 ```bash
-pip install -r requirements.txt
-uvicorn main:app --reload
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn main:app --reload
 # Opens at http://localhost:8000
 ```
+
+Run tests with `.venv/bin/pytest tests/`.
 
 ## Architecture
 

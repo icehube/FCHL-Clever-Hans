@@ -118,8 +118,32 @@ def _recompute():
     milp_solution = solve_optimal_roster(team, auction_state.available_players, market_prices)
 
 
+def _log_transaction(
+    player_name: str,
+    position: str,
+    team_code: str,
+    salary: float,
+    txn_type: str,
+    *,
+    model_price: float = 0,
+    market_price: float = 0,
+    timestamp: str | None = None,
+) -> None:
+    """Append a TransactionRecord to the auction state's transaction log."""
+    auction_state.transaction_log.append(TransactionRecord(
+        player_name=player_name,
+        position=position,
+        team_code=team_code,
+        salary=salary,
+        model_price=model_price,
+        market_price=market_price,
+        timestamp=timestamp or datetime.now().isoformat(),
+        transaction_type=txn_type,
+    ))
+
+
 def _recompute_buyout_indicators():
-    """Recompute buyout indicators for BOT's roster. Called after player assignment."""
+    """Recompute buyout indicators for BOT's roster. Called on-demand from /buyout-indicators."""
     global buyout_indicators
     from copy import deepcopy
     from config import BUYOUT_PENALTY_RATE
@@ -304,16 +328,10 @@ async def assign_player(
     model_prices.pop(player, None)
 
     # Log transaction
-    auction_state.transaction_log.append(TransactionRecord(
-        player_name=p.name,
-        position=p.position,
-        team_code=team,
-        salary=salary,
-        model_price=model_price_val,
-        market_price=market_price_val,
-        timestamp=datetime.now().isoformat(),
-        transaction_type="draft",
-    ))
+    _log_transaction(
+        p.name, p.position, team, salary, "draft",
+        model_price=model_price_val, market_price=market_price_val,
+    )
 
     auction_state.advance_nomination()
     _recompute()
@@ -468,18 +486,10 @@ async def trade_execute(request: Request):
     # Log trade transactions
     now = datetime.now().isoformat()
     for p in trade_give:
-        auction_state.transaction_log.append(TransactionRecord(
-            player_name=p.name, position=p.position, team_code=MY_TEAM,
-            salary=p.salary, model_price=0, market_price=0,
-            timestamp=now, transaction_type="trade_out",
-        ))
+        _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_out", timestamp=now)
     for p in trade_receive:
         txn_type = "buyout" if p.name in buyout_names else "trade_in"
-        auction_state.transaction_log.append(TransactionRecord(
-            player_name=p.name, position=p.position, team_code=MY_TEAM,
-            salary=p.salary, model_price=0, market_price=0,
-            timestamp=now, transaction_type=txn_type,
-        ))
+        _log_transaction(p.name, p.position, MY_TEAM, p.salary, txn_type, timestamp=now)
 
     # Recompute model prices for any newly available players
     global model_prices
@@ -527,16 +537,7 @@ async def buyout(request: Request, player: str = Form(...)):
 
     # Log buyout transaction
     if p:
-        auction_state.transaction_log.append(TransactionRecord(
-            player_name=player,
-            position=bo_position,
-            team_code=MY_TEAM,
-            salary=bo_salary,
-            model_price=0,
-            market_price=0,
-            timestamp=datetime.now().isoformat(),
-            transaction_type="buyout",
-        ))
+        _log_transaction(player, bo_position, MY_TEAM, bo_salary, "buyout")
 
     _recompute()
     _save_state()
@@ -779,11 +780,7 @@ async def trade_between(
             p = ta.remove_player(name)
             p.is_minor = False
             tb.add_acquired_player(p)
-            auction_state.transaction_log.append(TransactionRecord(
-                player_name=p.name, position=p.position, team_code=f"{team_a}→{team_b}",
-                salary=p.salary, model_price=0, market_price=0,
-                timestamp=now, transaction_type="trade",
-            ))
+            _log_transaction(p.name, p.position, f"{team_a}→{team_b}", p.salary, "trade", timestamp=now)
         except ValueError:
             pass
     for name in names_b:
@@ -791,11 +788,7 @@ async def trade_between(
             p = tb.remove_player(name)
             p.is_minor = False
             ta.add_acquired_player(p)
-            auction_state.transaction_log.append(TransactionRecord(
-                player_name=p.name, position=p.position, team_code=f"{team_b}→{team_a}",
-                salary=p.salary, model_price=0, market_price=0,
-                timestamp=now, transaction_type="trade",
-            ))
+            _log_transaction(p.name, p.position, f"{team_b}→{team_a}", p.salary, "trade", timestamp=now)
         except ValueError:
             pass
     _recompute()

@@ -67,7 +67,7 @@
         <tbody>
         {% for p in combined|sort(attribute='projected_points', reverse=True)|sort(attribute='pos_rank') %}
         <tr class="{{ 'text-info opacity-50 italic' if p.is_target else ('text-success' if p.is_acquired else '') }}">
-            <td>{% if not p.is_target %}<span id="bo-{{ p.name|replace(' ', '-')|replace("'", '')|replace('.', '') }}" class="buyout-light light-grey" title="Loading..."></span>{% endif %}</td>
+            <td>{% if not p.is_target %}<span id="bo-{{ p.name|replace(' ', '-')|replace("'", '')|replace('.', '') }}" class="buyout-light light-grey" title="Not analyzed — click 'Scan Roster for Buyout Opportunities' in the Buyout Analyzer"></span>{% endif %}</td>
             <td>{{ p.position }}</td>
             <td>{{ p.name }}</td>
             <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>

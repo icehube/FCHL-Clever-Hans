@@ -13,8 +13,6 @@
         {% if f_txns %}<span>F: <strong>${{ "%.1f"|format(f_txns|map(attribute='salary')|sum / f_txns|length) }}M</strong> ({{ f_txns|length }})</span>{% endif %}
         {% if d_txns %}<span>D: <strong>${{ "%.1f"|format(d_txns|map(attribute='salary')|sum / d_txns|length) }}M</strong> ({{ d_txns|length }})</span>{% endif %}
         {% if g_txns %}<span>G: <strong>${{ "%.1f"|format(g_txns|map(attribute='salary')|sum / g_txns|length) }}M</strong> ({{ g_txns|length }})</span>{% endif %}
-        {% set total_dev = draft_txns|map(attribute='salary')|sum - draft_txns|map(attribute='market_price')|sum %}
-        <span class="{{ 'text-error' if total_dev > 0 else 'text-success' }}">Dev: {{ "%+.1f"|format(total_dev) }}M</span>
     </div>
     {% endif %}
     <div class="scroll-container">
@@ -26,32 +24,17 @@
                 <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
                 <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Team</th>
                 <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Salary</th>
-                <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Model $</th>
-                <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Market $</th>
-                <th data-sort-col="7" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Deviation</th>
-                <th data-sort-col="8" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Type</th>
+                <th data-sort-col="5" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Type</th>
             </tr>
         </thead>
         <tbody>
         {% for t in transaction_log|reverse %}
-        {% set deviation = t.salary - t.market_price if t.market_price > 0 else 0 %}
         <tr>
             <td>{{ loop.revindex }}</td>
             <td>{{ t.position }}</td>
             <td>{{ t.player_name }}</td>
             <td>{{ t.team_code }}</td>
             <td>${{ "%.1f"|format(t.salary) }}M</td>
-            {% if t.transaction_type == 'draft' %}
-            <td>${{ "%.1f"|format(t.model_price) }}M</td>
-            <td>${{ "%.1f"|format(t.market_price) }}M</td>
-            <td class="{% if deviation > 0.5 %}text-error{% elif deviation < -0.5 %}text-success{% endif %}">
-                {{ "%+.1f"|format(deviation) }}
-            </td>
-            {% else %}
-            <td class="opacity-30">—</td>
-            <td class="opacity-30">—</td>
-            <td class="opacity-30">—</td>
-            {% endif %}
             <td><span class="badge badge-xs {% if t.transaction_type == 'buyout' %}badge-warning{% elif t.transaction_type in ['trade_out', 'trade_in', 'trade'] %}badge-info{% else %}badge-ghost{% endif %}">{{ t.transaction_type }}</span></td>
         </tr>
         {% endfor %}

@@ -82,6 +82,12 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 .bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 12px; }
 .bid-reasoning { color: var(--text-muted); font-size: 12px; }
 
+/* Collapsible panel chevron */
+.collapse-chevron { display: inline-block; transition: transform 0.15s ease; font-size: 0.75em; }
+details[open] > summary .collapse-chevron { transform: rotate(90deg); }
+summary { list-style: none; }
+summary::-webkit-details-marker { display: none; }
+
 /* Buyout indicator lights */
 .buyout-light {
     display: inline-block;

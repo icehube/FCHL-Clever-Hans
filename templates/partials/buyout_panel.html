@@ -1,37 +1,41 @@
 <section class="card bg-base-200 shadow-md p-4" id="buyout-panel">
-    <h2 class="card-title text-accent text-base mb-2">Buyout Analyzer</h2>
+    <details {% if buyout_result is defined and buyout_result %}open{% endif %}>
+        <summary class="card-title text-accent text-base mb-2 cursor-pointer select-none flex items-center gap-2">
+            <span class="collapse-chevron">▶</span> Buyout Analyzer
+        </summary>
 
-    <button hx-get="/buyout-indicators" hx-swap="none" class="btn btn-xs btn-warning mb-2">
-        Scan Roster for Buyout Opportunities
-    </button>
-
-    <div class="flex flex-wrap gap-1 mb-2">
-        {% for p in team.roster_players|sort(attribute='projected_points') %}
-        <button hx-get="/buyout-check/{{ p.name }}" hx-target="#buyout-panel" hx-swap="outerHTML"
-                class="btn btn-xs btn-outline">
-            {{ p.name }} (${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)
+        <button hx-get="/buyout-indicators" hx-swap="none" class="btn btn-xs btn-warning mb-2">
+            Scan Roster for Buyout Opportunities
         </button>
-        {% endfor %}
-    </div>
 
-    {% if buyout_result is defined and buyout_result %}
-    <div class="p-3 rounded-lg {% if buyout_result.recommendation == 'buyout' %}bg-error/10 border border-error/30{% else %}bg-success/10 border border-success/30{% endif %}">
-        <h3 class="font-bold text-sm">{{ buyout_result.player_name }}: <span class="{% if buyout_result.recommendation == 'buyout' %}text-error{% else %}text-success{% endif %}">{{ buyout_result.recommendation|upper }}</span></h3>
-        <div class="flex gap-4 text-xs mt-1">
-            <span>Salary freed: ${{ "%.1f"|format(buyout_result.salary_freed) }}M</span>
-            <span>Penalty: ${{ "%.1f"|format(buyout_result.penalty_added) }}M</span>
-            <span>Net cap freed: ${{ "%.1f"|format(buyout_result.net_cap_freed) }}M</span>
+        <div class="flex flex-wrap gap-1 mb-2">
+            {% for p in team.roster_players|sort(attribute='projected_points') %}
+            <button hx-get="/buyout-check/{{ p.name }}" hx-target="#buyout-panel" hx-swap="outerHTML"
+                    class="btn btn-xs btn-outline">
+                {{ p.name }} (${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)
+            </button>
+            {% endfor %}
         </div>
-        <div class="text-xs mt-1">
-            Points: {{ "%.0f"|format(buyout_result.current_points) }} → {{ "%.0f"|format(buyout_result.buyout_points) }}
-            ({{ "%+.0f"|format(buyout_result.delta_points) }})
+
+        {% if buyout_result is defined and buyout_result %}
+        <div class="p-3 rounded-lg {% if buyout_result.recommendation == 'buyout' %}bg-error/10 border border-error/30{% else %}bg-success/10 border border-success/30{% endif %}">
+            <h3 class="font-bold text-sm">{{ buyout_result.player_name }}: <span class="{% if buyout_result.recommendation == 'buyout' %}text-error{% else %}text-success{% endif %}">{{ buyout_result.recommendation|upper }}</span></h3>
+            <div class="flex gap-4 text-xs mt-1">
+                <span>Salary freed: ${{ "%.1f"|format(buyout_result.salary_freed) }}M</span>
+                <span>Penalty: ${{ "%.1f"|format(buyout_result.penalty_added) }}M</span>
+                <span>Net cap freed: ${{ "%.1f"|format(buyout_result.net_cap_freed) }}M</span>
+            </div>
+            <div class="text-xs mt-1">
+                Points: {{ "%.0f"|format(buyout_result.current_points) }} → {{ "%.0f"|format(buyout_result.buyout_points) }}
+                ({{ "%+.0f"|format(buyout_result.delta_points) }})
+            </div>
+            {% if buyout_result.recommendation == "buyout" %}
+            <form hx-post="/buyout" hx-target="#app" hx-swap="innerHTML" class="mt-2">
+                <input type="hidden" name="player" value="{{ buyout_result.player_name }}">
+                <button type="submit" class="btn btn-sm btn-error">Execute Buyout</button>
+            </form>
+            {% endif %}
         </div>
-        {% if buyout_result.recommendation == "buyout" %}
-        <form hx-post="/buyout" hx-target="#app" hx-swap="innerHTML" class="mt-2">
-            <input type="hidden" name="player" value="{{ buyout_result.player_name }}">
-            <button type="submit" class="btn btn-sm btn-error">Execute Buyout</button>
-        </form>
         {% endif %}
-    </div>
-    {% endif %}
+    </details>
 </section>

@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(*)"
+      "Bash(.venv/bin/pytest tests/*)",
+      "Bash(.venv/bin/uvicorn main:app *)",
+      "Bash(curl -s http://127.0.0.1:8000/*)",
+      "Bash(curl -sf http://127.0.0.1:8000/*)"
     ],
     "deny": []
   }

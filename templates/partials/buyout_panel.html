@@ -1,3 +1,4 @@
+{% from "macros/player.html" import player_label %}
 <section class="card bg-base-200 shadow-md p-4" id="buyout-panel">
     <details {% if buyout_result is defined and buyout_result %}open{% endif %}>
         <summary class="card-title text-accent text-base mb-2 cursor-pointer select-none flex items-center gap-2">
@@ -12,7 +13,7 @@
             {% for p in team.roster_players|sort(attribute='projected_points') %}
             <button hx-get="/buyout-check/{{ p.name }}" hx-target="#buyout-panel" hx-swap="outerHTML"
                     class="btn btn-xs btn-outline">
-                {{ p.name }} (${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)
+                {{ player_label(p, with_position=false) }}
             </button>
             {% endfor %}
         </div>

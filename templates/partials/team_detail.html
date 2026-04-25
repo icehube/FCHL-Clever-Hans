@@ -126,7 +126,7 @@
                 <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto"
                         onchange="updateTradeHidden(this, 'trade-from-a-{{ view_team.code }}')">
                     {% for p in view_team.roster_players|sort(attribute='projected_points', reverse=True) %}
-                    <option value="{{ p.name }}">{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M)</option>
+                    <option value="{{ p.name }}">{{ player_label(p, with_points=false) }}</option>
                     {% endfor %}
                 </select>
             </div>

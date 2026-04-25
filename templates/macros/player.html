@@ -1,0 +1,3 @@
+{% macro player_label(p, with_position=true, with_points=true) -%}
+{{ p.name }} ({% if with_position %}{{ p.position }}, {% endif %}${{ "%.1f"|format(p.salary) }}M{% if with_points %}, {{ p.projected_points }}pts{% endif %})
+{%- endmacro %}

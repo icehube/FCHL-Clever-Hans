@@ -1,3 +1,4 @@
+{% from "macros/player.html" import player_label %}
 <section class="card bg-base-200 shadow-md p-4" id="trade-panel">
     <details {% if trade_result is defined and trade_result %}open{% endif %}>
         <summary class="card-title text-accent text-base mb-2 cursor-pointer select-none flex items-center gap-2">
@@ -10,7 +11,7 @@
                     <h3 class="font-semibold text-sm mb-1">I Give</h3>
                     <select name="give_player" multiple size="5" class="select select-bordered select-sm bg-base-300 w-full h-auto">
                         {% for p in team.roster_players|sort(attribute='projected_points', reverse=True) %}
-                        <option value="{{ p.name }}">{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)</option>
+                        <option value="{{ p.name }}">{{ player_label(p) }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -41,13 +42,13 @@
                 <div>
                     <div class="opacity-70">I give:</div>
                     {% for p in trade_result.give %}
-                    <div>{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)</div>
+                    <div>{{ player_label(p) }}</div>
                     {% endfor %}
                 </div>
                 <div>
                     <div class="opacity-70">I receive:</div>
                     {% for p in trade_result.receive %}
-                    <div>{{ p.name }} ({{ p.position }}, ${{ "%.1f"|format(p.salary) }}M, {{ p.projected_points }}pts)</div>
+                    <div>{{ player_label(p) }}</div>
                     {% endfor %}
                 </div>
             </div>

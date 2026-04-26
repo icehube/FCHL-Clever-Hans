@@ -174,26 +174,6 @@ class TestExecuteTrade:
         # Roster count should be the same (1 out, 1 in)
         assert bot.roster_count == initial_roster_count
 
-    def test_execute_with_buyout(self):
-        """Executing a trade with buyout should add penalty instead of player."""
-        state, mp = _setup()
-        bot = state.teams[MY_TEAM]
-        keeper = bot.keeper_players[0]
-        avail = next(p for p in state.available_players.values() if p.projected_points > 0)
-
-        give = [PlayerTrade(keeper.name, keeper.position, keeper.salary, keeper.projected_points)]
-        receive = [PlayerTrade(avail.name, avail.position, 2.0, avail.projected_points)]
-
-        initial_penalties = bot.penalties
-        execute_trade(state, give, receive, buyout_players=[avail.name])
-
-        # Bought-out player should NOT be on roster
-        assert bot.find_player(avail.name) is None
-        # Penalty should increase by buyout amount
-        assert bot.penalties == pytest.approx(initial_penalties + 2.0 * BUYOUT_PENALTY_RATE)
-        # Roster count should decrease by 1 (gave one, received was bought out)
-        assert bot.roster_count == len(state.teams[MY_TEAM].keeper_players) + len(state.teams[MY_TEAM].acquired_players)
-
 
 class TestExecuteBuyout:
     def test_execute_removes_player_adds_penalty(self):

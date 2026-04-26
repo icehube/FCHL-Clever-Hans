@@ -240,17 +240,8 @@ def execute_trade(
     state: AuctionState,
     give: list[PlayerTrade],
     receive: list[PlayerTrade],
-    buyout_players: list[str] | None = None,
 ) -> None:
-    """
-    Execute a trade on the live state.
-
-    Removes given players from BOT, adds received players,
-    optionally buys out specified received players.
-    """
-    if buyout_players is None:
-        buyout_players = []
-
+    """Execute a trade on the live state: remove given players, add received."""
     team = state.teams[MY_TEAM]
 
     # Remove players BOT gives
@@ -271,21 +262,15 @@ def execute_trade(
 
     # Add players BOT receives
     for p in receive:
-        # Remove from available pool
         state.available_players.pop(p.name, None)
-
-        if p.name in buyout_players:
-            # Buyout: don't add to roster, just add penalty
-            team.penalties += p.salary * BUYOUT_PENALTY_RATE
-        else:
-            team.add_acquired_player(PlayerOnRoster(
-                name=p.name,
-                position=p.position,
-                group="3",
-                salary=p.salary,
-                projected_points=p.projected_points,
-                nhl_team=getattr(p, "nhl_team", ""),
-            ))
+        team.add_acquired_player(PlayerOnRoster(
+            name=p.name,
+            position=p.position,
+            group="3",
+            salary=p.salary,
+            projected_points=p.projected_points,
+            nhl_team=getattr(p, "nhl_team", ""),
+        ))
 
 
 def execute_buyout(

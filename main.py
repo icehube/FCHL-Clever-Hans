@@ -464,16 +464,13 @@ async def trade_execute(request: Request):
     if last_trade_eval is None:
         return _render(request, "partials/all_panels.html")
 
-    form = await request.form()
-    buyout_names = form.getlist("buyout_player")
-
     # Capture trade details before clearing
     trade_give = last_trade_eval.give
     trade_receive = last_trade_eval.receive
 
     auction_state.save_snapshot()
     try:
-        execute_trade(auction_state, trade_give, trade_receive, buyout_names)
+        execute_trade(auction_state, trade_give, trade_receive)
     except ValueError as e:
         auction_state.restore_snapshot()
         last_trade_eval = None
@@ -488,8 +485,7 @@ async def trade_execute(request: Request):
     for p in trade_give:
         _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_out", timestamp=now)
     for p in trade_receive:
-        txn_type = "buyout" if p.name in buyout_names else "trade_in"
-        _log_transaction(p.name, p.position, MY_TEAM, p.salary, txn_type, timestamp=now)
+        _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_in", timestamp=now)
 
     # Recompute model prices for any newly available players
     global model_prices

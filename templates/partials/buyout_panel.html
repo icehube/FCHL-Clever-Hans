@@ -19,8 +19,9 @@
         </div>
 
         {% if buyout_result is defined and buyout_result %}
-        <div class="p-3 rounded-lg {% if buyout_result.recommendation == 'buyout' %}bg-error/10 border border-error/30{% else %}bg-success/10 border border-success/30{% endif %}">
-            <h3 class="font-bold text-sm">{{ buyout_result.player_name }}: <span class="{% if buyout_result.recommendation == 'buyout' %}text-error{% else %}text-success{% endif %}">{{ buyout_result.recommendation|upper }}</span></h3>
+        {% set verdict_class = 'error' if buyout_result.recommendation == 'buyout' else 'success' %}
+        <div class="p-3 rounded-lg bg-{{ verdict_class }}/10 border border-{{ verdict_class }}/30">
+            <h3 class="font-bold text-sm">{{ buyout_result.player_name }}: <span class="text-{{ verdict_class }}">{{ buyout_result.recommendation|upper }}</span></h3>
             <div class="flex gap-4 text-xs mt-1">
                 <span>Salary freed: ${{ "%.1f"|format(buyout_result.salary_freed) }}M</span>
                 <span>Penalty: ${{ "%.1f"|format(buyout_result.penalty_added) }}M</span>

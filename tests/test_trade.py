@@ -228,7 +228,7 @@ class TestExecuteTrade:
 
     def test_execute_rejects_self_trade(self):
         state, mp = _setup()
-        with pytest.raises(ValueError, match="self"):
+        with pytest.raises(ValueError, match="Cannot trade with self"):
             execute_trade(state, [], [], source_team_code=MY_TEAM)
 
 

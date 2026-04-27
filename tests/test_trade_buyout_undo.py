@@ -445,3 +445,73 @@ class TestTradeFlow:
             f"Expected one trade_in for {receive_name}, got {trade_ins}"
         )
 
+
+# ── Two-team trade ──────────────────────────────────────────────────
+
+
+class TestTwoTeamTradeFlow:
+    """Trade between BOT and a specific source team: both rosters must mutate
+    and both teams must appear in the transaction log."""
+
+    def test_two_team_trade_swaps_rosters_and_logs_both(self, client):
+        client.post("/reset")
+        state_before = _get_state(client)
+
+        # Find a non-BOT team with at least one keeper.
+        source_code, source_before = next(
+            (code, t) for code, t in state_before["teams"].items()
+            if code != "BOT" and t.get("keeper_players")
+        )
+        receive_player = source_before["keeper_players"][0]
+        receive_name = receive_player["name"]
+
+        # Acquire any forward to BOT to use as the give-side.
+        give_name = next(
+            n for n, p in state_before["available_players"].items()
+            if p["position"] == "F"
+        )
+        client.post("/assign", data={
+            "player": give_name,
+            "team": "BOT",
+            "salary": "1.0",
+        })
+
+        log_before_count = len(_get_state(client)["transaction_log"])
+
+        client.post("/trade-evaluate", data={
+            "give_player": [give_name],
+            "source_team": source_code,
+            "receive_player": [json.dumps({
+                "name": receive_name,
+                "position": receive_player["position"],
+                "salary": receive_player["salary"],
+                "projected_points": receive_player["projected_points"],
+            })],
+        })
+        r = client.post("/trade-execute")
+        assert r.status_code == 200
+
+        state_after = _get_state(client)
+        bot_after = state_after["teams"]["BOT"]
+        source_after = state_after["teams"][source_code]
+        bot_roster = _roster_names(bot_after)
+        source_roster = _roster_names(source_after)
+
+        # Receive player moved BOT-ward.
+        assert receive_name in bot_roster
+        assert receive_name not in source_roster
+        # Give player moved source-ward.
+        assert give_name not in bot_roster
+        assert give_name in source_roster
+        # Neither traded player touched the available pool.
+        assert give_name not in state_after["available_players"]
+        assert receive_name not in state_after["available_players"]
+
+        # Both teams logged: BOT trade_out + trade_in, source trade_in + trade_out.
+        new_entries = state_after["transaction_log"][log_before_count:]
+        by_team = {}
+        for e in new_entries:
+            by_team.setdefault(e["team_code"], []).append(e["transaction_type"])
+        assert sorted(by_team["BOT"]) == ["trade_in", "trade_out"], by_team
+        assert sorted(by_team[source_code]) == ["trade_in", "trade_out"], by_team
+

@@ -73,9 +73,9 @@
     <div class="bid-result bid-{{ bid_advice.action|lower }}">
         <div class="bid-action">{{ bid_advice.action }}</div>
         <div class="bid-details">
-            <span title="Highest bid you should make on this player given your roster, budget, and market state">Max bid: <strong>${{ bid_advice.max_bid }}M</strong></span>
-            <span title="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
-            <span title="Highest realistic price the auction can reach: second-highest physical max bid among active opponents (auction ends when 2nd-to-last bidder drops out)">Ceiling: ${{ bid_advice.market_ceiling }}M</span>
+            <span class="tooltip tooltip-bottom" data-tip="Highest bid you should make on this player given your roster, budget, and market state">Max bid: <strong>${{ bid_advice.max_bid }}M</strong></span>
+            <span class="tooltip tooltip-bottom" data-tip="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
+            <span class="tooltip tooltip-bottom" data-tip="Highest realistic price the auction can reach: second-highest physical max bid among active opponents (auction ends when 2nd-to-last bidder drops out)">Ceiling: ${{ bid_advice.market_ceiling }}M</span>
         </div>
         {% if bid_advice.action != "BID" %}
         <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>

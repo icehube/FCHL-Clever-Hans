@@ -14,12 +14,13 @@
 
     {% set ci_x1 = x_off + chart_data.ci_low * scale %}
     {% set ci_x2 = x_off + chart_data.ci_high * scale %}
+    {% set ci_x2_clamped = ci_x2 if ci_x2 <= 385 else 385 %}
     <svg viewBox="0 0 400 130" class="price-chart" xmlns="http://www.w3.org/2000/svg">
         <!-- 95% CI band (drawn first so curve and markers sit on top) -->
-        <rect x="{{ ci_x1 }}" y="50" width="{{ ci_x2 - ci_x1 }}" height="50"
+        <rect x="{{ ci_x1 }}" y="50" width="{{ ci_x2_clamped - ci_x1 }}" height="50"
               fill="#a3be8c" opacity="0.18"/>
         <line x1="{{ ci_x1 }}" y1="50" x2="{{ ci_x1 }}" y2="100" stroke="#a3be8c" stroke-width="1" stroke-opacity="0.6"/>
-        <line x1="{{ ci_x2 }}" y1="50" x2="{{ ci_x2 }}" y2="100" stroke="#a3be8c" stroke-width="1" stroke-opacity="0.6"/>
+        <line x1="{{ ci_x2_clamped }}" y1="50" x2="{{ ci_x2_clamped }}" y2="100" stroke="#a3be8c" stroke-width="1" stroke-opacity="0.6"/>
 
         <!-- Axis line -->
         <line x1="{{ x_off }}" y1="75" x2="385" y2="75" stroke="#d8dee9" stroke-width="1"/>

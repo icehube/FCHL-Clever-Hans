@@ -83,8 +83,14 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 .bid-reasoning { color: var(--text-muted); font-size: 12px; }
 
 /* Collapsible panel chevron */
-.collapse-chevron { display: inline-block; transition: transform 0.15s ease; font-size: 0.75em; }
-details[open] > summary .collapse-chevron { transform: rotate(90deg); }
+.collapse-chevron {
+    display: inline-block;
+    transition: transform 0.15s ease;
+    font-size: 0.75em;
+    transform: rotate(0deg);
+    transform-origin: center;
+}
+details[open] .collapse-chevron { transform: rotate(90deg); }
 summary { list-style: none; }
 summary::-webkit-details-marker { display: none; }
 

@@ -73,11 +73,13 @@
     <div class="bid-result bid-{{ bid_advice.action|lower }}">
         <div class="bid-action">{{ bid_advice.action }}</div>
         <div class="bid-details">
-            <span>Max bid: <strong>${{ bid_advice.max_bid }}M</strong></span>
-            <span>Marginal: ${{ bid_advice.marginal_value }}M</span>
-            <span>Ceiling: ${{ bid_advice.market_ceiling }}M</span>
+            <span title="Highest bid you should make on this player given your roster, budget, and market state">Max bid: <strong>${{ bid_advice.max_bid }}M</strong></span>
+            <span title="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
+            <span title="Highest realistic price the auction can reach: second-highest physical max bid among active opponents (auction ends when 2nd-to-last bidder drops out)">Ceiling: ${{ bid_advice.market_ceiling }}M</span>
         </div>
+        {% if bid_advice.action != "BID" %}
         <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>
+        {% endif %}
         {% if bid_advice.action == "DROP" %}
         <a hx-get="/explain/{{ bid_advice.player_name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML"
            class="link link-info text-xs">Why not bid?</a>
@@ -134,7 +136,7 @@
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
             <input type="number" name="price" step="0.1" min="0.5" value="0.5" id="bid-price" class="input input-xs input-bordered bg-base-300 w-16">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
-            <button type="submit" class="btn btn-xs btn-secondary">Get Advice</button>
+            <button type="submit" class="btn btn-xs btn-secondary">Start Auction</button>
         </div>
         <input type="hidden" name="bidders" id="bidders-hidden" value="">
         <div class="bidder-logos" id="bidder-logos">

@@ -382,6 +382,7 @@ async def bid_check(
     ctx["bid_player"] = p
     ctx["bid_price"] = price
     ctx["active_bidders"] = bidder_list
+    ctx["highest_bidder"] = highest_bidder
     return _render(request, "partials/auction_control.html", ctx)
 
 

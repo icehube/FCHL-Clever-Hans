@@ -115,11 +115,3 @@ function adjustPrice(delta) {
     if (form) htmx.trigger(form, 'submit');
 }
 
-/* Select team for assign form (single-select logo grid) */
-function selectAssignTeam(btn) {
-    btn.closest('.assign-logos').querySelectorAll('.bidder-logo-btn').forEach(function(b) {
-        b.classList.remove('active');
-    });
-    btn.classList.add('active');
-    document.getElementById('assign-team-hidden').value = btn.dataset.team;
-}

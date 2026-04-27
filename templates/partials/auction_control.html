@@ -86,7 +86,7 @@
         {% endif %}
     </div>
 
-    <!-- Update at new price -->
+    <!-- Update bid advice at a new price -->
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
@@ -96,35 +96,27 @@
             <button type="submit" class="btn btn-xs btn-secondary">Update</button>
         </div>
         <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else '' }}">
-        <div class="bidder-logos" id="bidder-logos">
-            {% for code in nomination_order %}
-            {% if code != my_team %}
-            <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
-                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
-                <span class="bidder-code">{{ code }}</span>
-            </button>
-            {% endif %}
-            {% endfor %}
-        </div>
     </form>
 
-    <div class="divider my-1"></div>
+    <!-- Single opponent grid: click toggles bidding state; last-clicked-active marks the assign winner. -->
+    <div class="bidder-logos" id="bidder-logos">
+        {% for code in nomination_order %}
+        {% if code != my_team %}
+        <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}" data-team="{{ code }}" onclick="auctionTeamClick(this)" title="{{ teams[code].name }} ({{ code }})">
+            <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+            <span class="bidder-code">{{ code }}</span>
+        </button>
+        {% endif %}
+        {% endfor %}
+    </div>
 
-    <!-- Assign the auctioned player -->
-    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="assign-form">
+    <!-- Assign the auctioned player. team defaults to BOT; opponent grid clicks override via JS. -->
+    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="assign-form mt-2">
         <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" placeholder="Player name" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
-            <input type="hidden" name="team" id="assign-team-hidden" value="{{ my_team }}">
+            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <input type="hidden" name="team" id="assign-team-hidden" value="{{ my_team }}" data-default-team="{{ my_team }}">
             <input type="number" name="salary" step="0.1" min="0.5" max="11.4" value="{{ bid_price if bid_price is defined else 0.5 }}" required class="input input-xs input-bordered bg-base-300 w-16">
-            <button type="submit" class="btn btn-xs btn-primary">Assign</button>
-        </div>
-        <div class="assign-logos">
-            {% for code in nomination_order %}
-            <button type="button" class="bidder-logo-btn {% if code == my_team %}active{% endif %}" data-team="{{ code }}" onclick="selectAssignTeam(this)" title="{{ teams[code].name }} ({{ code }})">
-                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
-                <span class="bidder-code">{{ code }}</span>
-            </button>
-            {% endfor %}
+            <button type="submit" class="btn btn-xs btn-primary">Assign to <span id="assign-target-label">{{ my_team }}</span></button>
         </div>
     </form>
 
@@ -145,13 +137,31 @@
     {% endif %}
 
     <script>
-    function toggleBidder(btn) {
+    function auctionTeamClick(btn) {
+        var becameActive = !btn.classList.contains('active');
         btn.classList.toggle('active');
+
+        var grid = document.getElementById('bidder-logos');
         var codes = [];
-        document.querySelectorAll('#bidder-logos .bidder-logo-btn.active').forEach(function(b) {
+        grid.querySelectorAll('.bidder-logo-btn.active').forEach(function(b) {
             codes.push(b.dataset.team);
         });
-        document.getElementById('bidders-hidden').value = codes.join(',');
+        var biddersInput = document.getElementById('bidders-hidden');
+        if (biddersInput) biddersInput.value = codes.join(',');
+
+        // Last team clicked-to-active is the assign winner; clicking it back off
+        // clears the override and the assign target falls back to BOT.
+        var defaultTeam = document.getElementById('assign-team-hidden').dataset.defaultTeam;
+        if (becameActive) {
+            grid.querySelectorAll('.is-winner').forEach(function(b) { b.classList.remove('is-winner'); });
+            btn.classList.add('is-winner');
+            document.getElementById('assign-team-hidden').value = btn.dataset.team;
+            document.getElementById('assign-target-label').textContent = btn.dataset.team;
+        } else if (btn.classList.contains('is-winner')) {
+            btn.classList.remove('is-winner');
+            document.getElementById('assign-team-hidden').value = defaultTeam;
+            document.getElementById('assign-target-label').textContent = defaultTeam;
+        }
     }
     </script>
 </section>

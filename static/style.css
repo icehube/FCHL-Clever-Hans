@@ -68,6 +68,9 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
     border-color: var(--accent);
     background: var(--bg-hover);
 }
+.bidder-logo-btn.is-winner {
+    box-shadow: 0 0 0 2px var(--green);
+}
 .bidder-logo-btn:hover { opacity: 0.7; }
 .bidder-logo-btn.active:hover { opacity: 1; }
 .bidder-code { font-size: 10px; color: var(--text-muted); }

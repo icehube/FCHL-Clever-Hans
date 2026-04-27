@@ -129,7 +129,9 @@
     </form>
 
     {% else %}
-    <!-- No auction active: bid advisor form -->
+    <!-- No auction active: bid advisor form. Bidder grid is intentionally
+         omitted until a player is introduced -- pre-toggling teams without a
+         player has no actionable meaning. -->
     <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="bid-form">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
@@ -138,17 +140,7 @@
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
             <button type="submit" class="btn btn-xs btn-secondary">Start Auction</button>
         </div>
-        <input type="hidden" name="bidders" id="bidders-hidden" value="">
-        <div class="bidder-logos" id="bidder-logos">
-            {% for code in nomination_order %}
-            {% if code != my_team %}
-            <button type="button" class="bidder-logo-btn active" data-team="{{ code }}" onclick="toggleBidder(this)" title="{{ teams[code].name }} ({{ code }})">
-                <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
-                <span class="bidder-code">{{ code }}</span>
-            </button>
-            {% endif %}
-            {% endfor %}
-        </div>
+        <input type="hidden" name="bidders" value="">
     </form>
     {% endif %}
 

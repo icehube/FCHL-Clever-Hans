@@ -19,7 +19,7 @@
                     <h3 class="font-semibold text-sm mb-1">I Receive</h3>
                     <div class="mb-1">
                         <label class="text-xs opacity-70">From team:</label>
-                        <select id="trade-source-team" onchange="loadTeamPlayers(this.value)" class="select select-bordered select-xs bg-base-300 w-full">
+                        <select id="trade-source-team" name="source_team" onchange="loadTeamPlayers(this.value)" class="select select-bordered select-xs bg-base-300 w-full">
                             <option value="">Select team...</option>
                             {% for code, t in teams.items() %}
                             {% if code != my_team %}

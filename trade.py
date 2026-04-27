@@ -60,6 +60,7 @@ class TradeEvaluation:
     best_scenario: TradeScenario
     recommendation: str  # "accept" or "decline"
     reasoning: str
+    source_team_code: str | None = None  # The team BOT is trading with, if any
 
 
 def evaluate_trade(
@@ -68,6 +69,7 @@ def evaluate_trade(
     receive: list[PlayerTrade],
     market_prices: dict[str, float],
     auto_check_buyouts: bool = True,
+    source_team_code: str | None = None,
 ) -> TradeEvaluation:
     """
     Evaluate a proposed trade by comparing MILP solutions.
@@ -187,6 +189,7 @@ def evaluate_trade(
         best_scenario=best,
         recommendation=recommendation,
         reasoning=reasoning,
+        source_team_code=source_team_code,
     )
 
 
@@ -240,14 +243,51 @@ def execute_trade(
     state: AuctionState,
     give: list[PlayerTrade],
     receive: list[PlayerTrade],
+    source_team_code: str | None = None,
 ) -> None:
-    """Execute a trade on the live state: remove given players, add received."""
-    team = state.teams[MY_TEAM]
+    """
+    Execute a trade on the live state.
 
-    # Remove players BOT gives
+    With source_team_code set: a real two-team trade -- give players move to
+    that team's roster, receive players come from that team's roster.
+    Without it: legacy free-agent flow -- give players return to the available
+    pool, receive players are pulled from it.
+    """
+    bot = state.teams[MY_TEAM]
+
+    if source_team_code:
+        if source_team_code == MY_TEAM:
+            raise ValueError("Cannot trade with self")
+        if source_team_code not in state.teams:
+            raise ValueError(f"Unknown team {source_team_code}")
+        other = state.teams[source_team_code]
+
+        for p in give:
+            removed = bot.remove_player(p.name)
+            other.add_acquired_player(PlayerOnRoster(
+                name=p.name,
+                position=p.position,
+                group=removed.group,
+                salary=p.salary,
+                projected_points=p.projected_points,
+                nhl_team=removed.nhl_team,
+            ))
+
+        for p in receive:
+            removed = other.remove_player(p.name)
+            bot.add_acquired_player(PlayerOnRoster(
+                name=p.name,
+                position=p.position,
+                group="3",
+                salary=p.salary,
+                projected_points=p.projected_points,
+                nhl_team=removed.nhl_team,
+            ))
+        return
+
+    # Legacy free-agent flow
     for p in give:
-        removed = team.remove_player(p.name)
-        # Add back to available pool
+        removed = bot.remove_player(p.name)
         state.available_players[p.name] = Player(
             name=p.name,
             position=p.position,
@@ -260,10 +300,9 @@ def execute_trade(
             team_probability=0.0,
         )
 
-    # Add players BOT receives
     for p in receive:
         state.available_players.pop(p.name, None)
-        team.add_acquired_player(PlayerOnRoster(
+        bot.add_acquired_player(PlayerOnRoster(
             name=p.name,
             position=p.position,
             group="3",

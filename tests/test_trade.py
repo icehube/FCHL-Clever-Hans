@@ -174,6 +174,43 @@ class TestExecuteTrade:
         # Roster count should be the same (1 out, 1 in)
         assert bot.roster_count == initial_roster_count
 
+    def test_execute_two_team_trade_swaps_rosters(self):
+        """With source_team_code, players move between rosters -- not via available pool."""
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        # Pick any non-BOT team that has at least one keeper
+        other_code = next(c for c, t in state.teams.items() if c != MY_TEAM and t.keeper_players)
+        other = state.teams[other_code]
+
+        bot_give = bot.keeper_players[0]
+        other_give = other.keeper_players[0]
+
+        give = [PlayerTrade(bot_give.name, bot_give.position, bot_give.salary, bot_give.projected_points)]
+        receive = [PlayerTrade(other_give.name, other_give.position, other_give.salary, other_give.projected_points)]
+
+        bot_count_before = bot.roster_count
+        other_count_before = other.roster_count
+        avail_before = set(state.available_players.keys())
+
+        execute_trade(state, give, receive, source_team_code=other_code)
+
+        # BOT lost the give player, gained the receive player
+        assert bot.find_player(bot_give.name) is None
+        assert bot.find_player(other_give.name) is not None
+        # Source team mirror: gained the give, lost the receive
+        assert other.find_player(bot_give.name) is not None
+        assert other.find_player(other_give.name) is None
+        # Roster counts unchanged on both sides
+        assert bot.roster_count == bot_count_before
+        assert other.roster_count == other_count_before
+        # Neither traded player touched the available pool
+        assert set(state.available_players.keys()) == avail_before
+
+    def test_execute_rejects_self_trade(self):
+        state, mp = _setup()
+        with pytest.raises(ValueError, match="self"):
+            execute_trade(state, [], [], source_team_code=MY_TEAM)
+
 
 class TestExecuteBuyout:
     def test_execute_removes_player_adds_penalty(self):

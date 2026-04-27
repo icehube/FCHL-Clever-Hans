@@ -425,6 +425,7 @@ async def trade_evaluate(request: Request):
 
     give_names = form.getlist("give_player")
     receive_json = form.getlist("receive_player")
+    source_team = (form.get("source_team") or "").strip() or None
 
     give = []
     for name in give_names:
@@ -447,7 +448,9 @@ async def trade_evaluate(request: Request):
                 pass
 
     if give or receive:
-        result = evaluate_trade(auction_state, give, receive, market_prices)
+        result = evaluate_trade(
+            auction_state, give, receive, market_prices, source_team_code=source_team,
+        )
         last_trade_eval = result
     else:
         result = None
@@ -467,10 +470,11 @@ async def trade_execute(request: Request):
     # Capture trade details before clearing
     trade_give = last_trade_eval.give
     trade_receive = last_trade_eval.receive
+    source_team = last_trade_eval.source_team_code
 
     auction_state.save_snapshot()
     try:
-        execute_trade(auction_state, trade_give, trade_receive)
+        execute_trade(auction_state, trade_give, trade_receive, source_team_code=source_team)
     except ValueError as e:
         auction_state.restore_snapshot()
         last_trade_eval = None
@@ -480,12 +484,16 @@ async def trade_execute(request: Request):
         )
     last_trade_eval = None
 
-    # Log trade transactions
+    # Log trade transactions for both teams (when source_team is known)
     now = datetime.now().isoformat()
     for p in trade_give:
         _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_out", timestamp=now)
+        if source_team:
+            _log_transaction(p.name, p.position, source_team, p.salary, "trade_in", timestamp=now)
     for p in trade_receive:
         _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_in", timestamp=now)
+        if source_team:
+            _log_transaction(p.name, p.position, source_team, p.salary, "trade_out", timestamp=now)
 
     # Recompute model prices for any newly available players
     global model_prices

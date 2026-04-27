@@ -99,6 +99,26 @@ class TestEvaluateTrade:
         # Should have: keep_all + buyout_p1 + buyout_p2 = 3 scenarios
         assert len(result.scenarios) == 3
 
+    def test_two_team_trade_does_not_reuse_give_in_milp(self):
+        """Free-agent flow can re-acquire give-player; two-team flow cannot."""
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        other_code = next(c for c, t in state.teams.items() if c != MY_TEAM and t.keeper_players)
+        bot_give = max(bot.keeper_players, key=lambda p: p.projected_points)
+        other_give = state.teams[other_code].keeper_players[0]
+        give = [PlayerTrade(bot_give.name, bot_give.position, bot_give.salary, bot_give.projected_points)]
+        receive = [PlayerTrade(other_give.name, other_give.position, other_give.salary, other_give.projected_points)]
+
+        fa = evaluate_trade(state, give, receive, mp, source_team_code=None)
+        two = evaluate_trade(state, give, receive, mp, source_team_code=other_code)
+
+        fa_keep = next(s for s in fa.scenarios if s.description == "Keep all received players")
+        two_keep = next(s for s in two.scenarios if s.description == "Keep all received players")
+        assert fa_keep.total_points >= two_keep.total_points, (
+            "Free-agent simulation can rebuy bot_give and should be at least as good "
+            "as two-team simulation, where bot_give is unavailable."
+        )
+
     def test_no_buyout_scenarios_when_disabled(self):
         """Without auto_check_buyouts, should have only keep-all scenario."""
         state, mp = _setup()

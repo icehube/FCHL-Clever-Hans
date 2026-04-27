@@ -118,19 +118,22 @@ def evaluate_trade(
     for p in receive:
         trade_available.pop(p.name, None)
 
-    # Add given players back to available pool
-    for p in give:
-        trade_available[p.name] = Player(
-            name=p.name,
-            position=p.position,
-            group="3",
-            nhl_team="",
-            age=0,
-            projected_points=p.projected_points,
-            is_rfa=False,
-            salary=p.salary,
-            team_probability=0.0,
-        )
+    # Free-agent flow only: given players return to the auction pool so the
+    # post-trade MILP can model re-acquiring them. In a two-team trade they
+    # live on the source team's roster and are not re-acquireable.
+    if source_team_code is None:
+        for p in give:
+            trade_available[p.name] = Player(
+                name=p.name,
+                position=p.position,
+                group="3",
+                nhl_team="",
+                age=0,
+                projected_points=p.projected_points,
+                is_rfa=False,
+                salary=p.salary,
+                team_probability=0.0,
+            )
 
     # Scenario: keep all received players
     keep_sol = solve_optimal_roster(trade_team, trade_available, market_prices)

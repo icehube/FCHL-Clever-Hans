@@ -69,16 +69,22 @@ function sortTable(th) {
 /* Add player to live bidding form (delegated to avoid inline JS with player names) */
 document.addEventListener('click', function(e) {
     var btn = e.target.closest('.btn-add-bid');
-    if (btn) {
-        var name = btn.dataset.player;
-        var bidForm = document.querySelector('.bid-form');
-        if (bidForm) {
-            var input = bidForm.querySelector('input[name="player"]');
-            if (input) {
-                input.value = name;
-                input.focus();
-            }
-        }
+    if (!btn) return;
+    var name = btn.dataset.player;
+    var bidForm = document.querySelector('.bid-form');
+    if (!bidForm) {
+        document.body.dispatchEvent(new CustomEvent('showToast', {
+            detail: {
+                type: 'warning',
+                message: 'Finish the current auction before starting another.',
+            },
+        }));
+        return;
+    }
+    var input = bidForm.querySelector('input[name="player"]');
+    if (input) {
+        input.value = name;
+        input.focus();
     }
 });
 

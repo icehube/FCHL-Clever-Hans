@@ -12,7 +12,15 @@
     {% set scale = 360.0 / chart_scale_max %}
     {% set x_off = 20 %}
 
+    {% set ci_x1 = x_off + chart_data.ci_low * scale %}
+    {% set ci_x2 = x_off + chart_data.ci_high * scale %}
     <svg viewBox="0 0 400 130" class="price-chart" xmlns="http://www.w3.org/2000/svg">
+        <!-- 95% CI band (drawn first so curve and markers sit on top) -->
+        <rect x="{{ ci_x1 }}" y="50" width="{{ ci_x2 - ci_x1 }}" height="50"
+              fill="#a3be8c" opacity="0.18"/>
+        <line x1="{{ ci_x1 }}" y1="50" x2="{{ ci_x1 }}" y2="100" stroke="#a3be8c" stroke-width="1" stroke-opacity="0.6"/>
+        <line x1="{{ ci_x2 }}" y1="50" x2="{{ ci_x2 }}" y2="100" stroke="#a3be8c" stroke-width="1" stroke-opacity="0.6"/>
+
         <!-- Axis line -->
         <line x1="{{ x_off }}" y1="75" x2="385" y2="75" stroke="#d8dee9" stroke-width="1"/>
 
@@ -39,12 +47,13 @@
         {% endif %}
 
         <!-- CI bounds labels -->
-        {% set ci_x1 = x_off + chart_data.ci_low * scale %}
-        {% set ci_x2 = x_off + chart_data.ci_high * scale %}
-        <text x="{{ ci_x1 }}" y="48" fill="#81a1c1" font-size="9" text-anchor="middle">
+        <text x="{{ ci_x1 }}" y="48" fill="#a3be8c" font-size="9" text-anchor="middle">
             ${{ "%.1f"|format(chart_data.ci_low) }}M
         </text>
-        <text x="{{ ci_x2 }}" y="48" fill="#81a1c1" font-size="9" text-anchor="middle">
+        <text x="{{ (ci_x1 + ci_x2) / 2 }}" y="48" fill="#a3be8c" font-size="9" text-anchor="middle" font-weight="bold">
+            95%
+        </text>
+        <text x="{{ ci_x2 }}" y="48" fill="#a3be8c" font-size="9" text-anchor="middle">
             ${{ "%.1f"|format(chart_data.ci_high) }}M
         </text>
 
@@ -72,6 +81,7 @@
 
     <div class="chart-legend">
         <span class="chart-leg"><span style="color:#81a1c1">&#9608;</span> Distribution</span>
+        <span class="chart-leg"><span style="color:#a3be8c">&#9608;</span> 95% range</span>
         <span class="chart-leg"><span style="color:#ebcb8b">|</span> Median</span>
         <span class="chart-leg"><span style="color:#a3be8c">&#9679;</span> Expected</span>
         <span class="chart-leg"><span style="color:#bf616a">&#9482;</span> Market</span>

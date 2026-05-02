@@ -129,6 +129,18 @@ function adjustPrice(delta) {
     if (form) htmx.trigger(form, 'submit');
 }
 
+/* Toggle a bidder logo on/off and auto-resubmit the bid-check form so
+   /bid-check re-renders advice + the conditional Assign block. */
+function auctionTeamClick(btn) {
+    btn.classList.toggle('active');
+    var codes = [];
+    document.querySelectorAll('#bidder-logos .bidder-logo-btn.active').forEach(function(b) {
+        codes.push(b.dataset.team);
+    });
+    document.getElementById('bidders-hidden').value = codes.join(',');
+    htmx.trigger(document.getElementById('bid-form'), 'submit');
+}
+
 /* Sync a multi-select's selected values into a hidden CSV input
    (used by the Trade Between Teams form). */
 function updateTradeHidden(sel, hiddenId) {

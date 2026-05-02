@@ -86,25 +86,28 @@
         {% endif %}
     </div>
 
-    <!-- Update bid advice at a new price -->
-    <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
+    {# Single bid form: visible player + price; hidden bidders synced from grid.
+       Bidder clicks and price changes auto-resubmit /bid-check. #}
+    <form id="bid-form" hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
         <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" readonly class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
-            <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" id="bid-price" class="input input-xs input-bordered bg-base-300 w-16">
+            <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" id="bid-price"
+                   hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML"
+                   hx-trigger="change" hx-include="closest form"
+                   class="input input-xs input-bordered bg-base-300 w-16">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
-            <button type="submit" class="btn btn-xs btn-secondary">Update</button>
         </div>
-        <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else '' }}">
+        <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else default_bidders }}">
         <input type="hidden" name="highest_bidder" id="highest-bidder-hidden" value="{{ highest_bidder if highest_bidder is defined else '' }}">
     </form>
 
-    {% set winner = highest_bidder if highest_bidder is defined and highest_bidder else '' %}
-    <!-- Single opponent grid: click toggles bidding state; last-clicked-active marks the assign winner. -->
+    {# Bidder grid: every non-done team (including BOT). Click toggles active. #}
     <div class="bidder-logos" id="bidder-logos">
         {% for code in nomination_order %}
-        {% if code != my_team %}
-        <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %} {% if code == winner %}is-winner{% endif %}" data-team="{{ code }}" onclick="auctionTeamClick(this)" title="{{ teams[code].name }} ({{ code }})">
+        {% if not teams[code].is_done %}
+        <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}"
+                data-team="{{ code }}" onclick="auctionTeamClick(this)" title="{{ teams[code].name }} ({{ code }})">
             <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
             <span class="bidder-code">{{ code }}</span>
         </button>
@@ -112,15 +115,18 @@
         {% endfor %}
     </div>
 
-    <!-- Assign the auctioned player. team defaults to BOT; opponent grid clicks override via JS. -->
-    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="assign-form mt-2">
-        <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
-            <input type="hidden" name="team" id="assign-team-hidden" value="{{ winner or my_team }}" data-default-team="{{ my_team }}">
-            <input type="number" name="salary" step="0.1" min="0.5" max="11.4" value="{{ bid_price if bid_price is defined else 0.5 }}" required class="input input-xs input-bordered bg-base-300 w-16">
-            <button type="submit" class="btn btn-xs btn-primary">Assign to <span id="assign-target-label">{{ winner or my_team }}</span></button>
-        </div>
+    {# Assign appears only when one team is left bidding — the auction winner. #}
+    {% if active_bidders is defined and active_bidders|length == 1 %}
+    {% set winner_code = active_bidders[0] %}
+    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="mt-2">
+        <input type="hidden" name="player" value="{{ bid_advice.player_name }}">
+        <input type="hidden" name="team" value="{{ winner_code }}">
+        <input type="hidden" name="salary" value="{{ bid_price if bid_price is defined else 0.5 }}">
+        <button type="submit" class="btn btn-primary btn-sm w-full">
+            Assign to {{ winner_code }} (${{ "%.1f"|format(bid_price if bid_price is defined else 0.5) }}M)
+        </button>
     </form>
+    {% endif %}
 
     {% else %}
     <!-- No auction active: bid advisor form. Bidder grid is intentionally
@@ -134,40 +140,7 @@
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
             <button type="submit" class="btn btn-xs btn-secondary">Start Auction</button>
         </div>
-        <input type="hidden" name="bidders" value="">
+        <input type="hidden" name="bidders" value="{{ default_bidders }}">
     </form>
     {% endif %}
-
-    <script>
-    function auctionTeamClick(btn) {
-        var becameActive = !btn.classList.contains('active');
-        btn.classList.toggle('active');
-
-        var grid = document.getElementById('bidder-logos');
-        var codes = [];
-        grid.querySelectorAll('.bidder-logo-btn.active').forEach(function(b) {
-            codes.push(b.dataset.team);
-        });
-        var biddersInput = document.getElementById('bidders-hidden');
-        if (biddersInput) biddersInput.value = codes.join(',');
-
-        // Last team clicked-to-active is the assign winner; clicking it back off
-        // clears the override and the assign target falls back to BOT.
-        var assignInput = document.getElementById('assign-team-hidden');
-        var winnerInput = document.getElementById('highest-bidder-hidden');
-        var defaultTeam = assignInput.dataset.defaultTeam;
-        if (becameActive) {
-            grid.querySelectorAll('.is-winner').forEach(function(b) { b.classList.remove('is-winner'); });
-            btn.classList.add('is-winner');
-            assignInput.value = btn.dataset.team;
-            if (winnerInput) winnerInput.value = btn.dataset.team;
-            document.getElementById('assign-target-label').textContent = btn.dataset.team;
-        } else if (btn.classList.contains('is-winner')) {
-            btn.classList.remove('is-winner');
-            assignInput.value = defaultTeam;
-            if (winnerInput) winnerInput.value = '';
-            document.getElementById('assign-target-label').textContent = defaultTeam;
-        }
-    }
-    </script>
 </section>

@@ -252,6 +252,10 @@ def _context(request: Request) -> dict:
     ):
         projections[code]["rank"] = rank
 
+    default_bidders = ",".join(
+        c for c in auction_state.nomination_order if not auction_state.teams[c].is_done
+    )
+
     return {
         "request": request,
         "team": team,
@@ -267,6 +271,7 @@ def _context(request: Request) -> dict:
         "buyout_indicators": buyout_indicators,
         "market_prices": market_prices,
         "projections": projections,
+        "default_bidders": default_bidders,
     }
 
 

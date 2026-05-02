@@ -1,4 +1,4 @@
-<div id="player-chart-container" class="card bg-base-300 p-3 mb-2">
+<div id="player-chart-container" class="card bg-base-300 p-2 mb-2">
     <div class="flex items-center justify-between mb-1">
         <h3 class="font-semibold text-sm">Price Model: {{ chart_player.name }}</h3>
         <button onclick="document.getElementById('player-chart-container').innerHTML=''" class="btn btn-xs btn-ghost">&times;</button>
@@ -9,12 +9,12 @@
         · Sigma: {{ "%.2f"|format(chart_data.sigma) }}
     </div>
 
-    {% set scale = 360.0 / chart_scale_max %}
-    {% set x_off = 20 %}
+    {% set scale = 380.0 / chart_scale_max %}
+    {% set x_off = 10 %}
 
     {% set ci_x1 = x_off + chart_data.ci_low * scale %}
     {% set ci_x2 = x_off + chart_data.ci_high * scale %}
-    {% set ci_x2_clamped = ci_x2 if ci_x2 <= 385 else 385 %}
+    {% set ci_x2_clamped = ci_x2 if ci_x2 <= 395 else 395 %}
     <svg viewBox="0 0 400 130" class="price-chart" xmlns="http://www.w3.org/2000/svg">
         <!-- 95% CI band (drawn first so curve and markers sit on top) -->
         <rect x="{{ ci_x1 }}" y="50" width="{{ ci_x2_clamped - ci_x1 }}" height="50"
@@ -23,12 +23,12 @@
         <line x1="{{ ci_x2_clamped }}" y1="50" x2="{{ ci_x2_clamped }}" y2="100" stroke="var(--green)" stroke-width="1" stroke-opacity="0.6"/>
 
         <!-- Axis line -->
-        <line x1="{{ x_off }}" y1="75" x2="385" y2="75" stroke="var(--text-muted)" stroke-width="1"/>
+        <line x1="{{ x_off }}" y1="75" x2="395" y2="75" stroke="var(--text-muted)" stroke-width="1"/>
 
         <!-- Tick marks -->
         {% for tick in range((chart_scale_max + 0.5)|int + 1) %}
         {% set tx = x_off + tick * scale %}
-        {% if tx <= 385 %}
+        {% if tx <= 395 %}
         <line x1="{{ tx }}" y1="73" x2="{{ tx }}" y2="77" stroke="var(--text-muted)" stroke-width="1"/>
         <text x="{{ tx }}" y="88" fill="var(--text-muted)" font-size="9" text-anchor="middle">${{ tick }}M</text>
         {% endif %}

@@ -609,8 +609,8 @@ def _lognormal_pdf_path(
     scale_max: float,
     min_salary: float,
     n_points: int = 60,
-    x_off: float = 20.0,
-    chart_width: float = 360.0,
+    x_off: float = 10.0,
+    chart_width: float = 380.0,
     y_axis: float = 75.0,
     max_height: float = 55.0,
 ) -> tuple[str, tuple[float, float, float, float] | None]:

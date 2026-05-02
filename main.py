@@ -618,6 +618,28 @@ async def reset(request: Request):
     return _render(request, "partials/all_panels.html")
 
 
+@app.post("/load-scenario", response_class=HTMLResponse)
+async def load_scenario(request: Request, name: str = Form(...)):
+    """Load a pre-baked test scenario."""
+    import scenarios as _scenarios
+
+    global auction_state, model_prices
+    try:
+        auction_state = _scenarios.load(name)
+    except KeyError:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Unknown scenario: {name}", "error",
+        )
+    model_prices = predict_all_prices(auction_state.available_players, model_params)
+    _recompute()
+    _save_state()
+    return _toast(
+        _render(request, "partials/all_panels.html"),
+        f"Loaded scenario: {name}", "success",
+    )
+
+
 _TWO_PI_SQRT = math.sqrt(2.0 * math.pi)
 
 

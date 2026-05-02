@@ -47,21 +47,26 @@
               fill="var(--accent)" opacity="0.35"/>
         {% endif %}
 
-        <!-- CI bounds labels -->
+        <!-- CI bounds labels: collapse to a single combined label when the
+             range is tight enough that endpoints would visually stack. -->
+        {% set ci_tight = (chart_data.ci_high - chart_data.ci_low) < 0.6 %}
+        {% if ci_tight %}
+        <text x="{{ (ci_x1 + ci_x2) / 2 }}" y="48" fill="var(--green)" font-size="9" text-anchor="middle">
+            ${{ "%.1f"|format(chart_data.ci_low) }}–${{ "%.1f"|format(chart_data.ci_high) }}M
+        </text>
+        {% else %}
         <text x="{{ ci_x1 }}" y="48" fill="var(--green)" font-size="9" text-anchor="middle">
             ${{ "%.1f"|format(chart_data.ci_low) }}M
-        </text>
-        <text x="{{ (ci_x1 + ci_x2) / 2 }}" y="48" fill="var(--green)" font-size="9" text-anchor="middle" font-weight="bold">
-            95%
         </text>
         <text x="{{ ci_x2 }}" y="48" fill="var(--green)" font-size="9" text-anchor="middle">
             ${{ "%.1f"|format(chart_data.ci_high) }}M
         </text>
+        {% endif %}
 
         <!-- Median marker -->
         {% set med_x = x_off + chart_data.median_price * scale %}
         <line x1="{{ med_x }}" y1="50" x2="{{ med_x }}" y2="100" stroke="var(--yellow)" stroke-width="2"/>
-        <text x="{{ med_x }}" y="42" fill="var(--yellow)" font-size="10" text-anchor="middle">
+        <text x="{{ med_x }}" y="36" fill="var(--yellow)" font-size="10" text-anchor="middle">
             Median ${{ "%.1f"|format(chart_data.median_price) }}M
         </text>
 

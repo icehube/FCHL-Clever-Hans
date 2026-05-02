@@ -399,6 +399,9 @@ async def bid_check(
     ctx["bid_price"] = price
     ctx["active_bidders"] = bidder_list
     ctx["highest_bidder"] = highest_bidder
+    chart = _chart_context(player)
+    if chart is not None:
+        ctx.update(chart)
     return _render(request, "partials/auction_control.html", ctx)
 
 
@@ -674,17 +677,20 @@ def _lognormal_pdf_path(
     return curve_d, floor_bar
 
 
-@app.get("/player-chart/{player_name}", response_class=HTMLResponse)
-async def player_chart(request: Request, player_name: str):
-    """Show price model visualization for a player."""
+def _chart_context(player_name: str) -> dict | None:
+    """Build the template variables needed by player_chart.html.
+
+    Returns None if the player isn't priceable (unknown or missing model
+    prediction). Used by both /player-chart/{name} and /bid-check (which
+    embeds the chart inline during an active auction).
+    """
     p = auction_state.available_players.get(player_name)
     if p is None:
-        return _render(request, "partials/explanation.html")
+        return None
     pred = model_prices.get(player_name)
     if pred is None:
-        return _render(request, "partials/explanation.html")
+        return None
     mp = market_prices.get(player_name, MIN_SALARY)
-    # Fixed x-axis 0 → MAX_SALARY so charts are visually comparable across players.
     curve_d, floor_bar = _lognormal_pdf_path(
         log_mu=pred.log_mu,
         sigma=pred.sigma,
@@ -692,13 +698,24 @@ async def player_chart(request: Request, player_name: str):
         scale_max=MAX_SALARY,
         min_salary=MIN_SALARY,
     )
+    return {
+        "chart_player": p,
+        "chart_data": pred,
+        "chart_market_price": mp,
+        "chart_scale_max": MAX_SALARY,
+        "chart_curve_d": curve_d,
+        "chart_floor_bar": floor_bar,
+    }
+
+
+@app.get("/player-chart/{player_name}", response_class=HTMLResponse)
+async def player_chart(request: Request, player_name: str):
+    """Show price model visualization for a player."""
+    chart = _chart_context(player_name)
+    if chart is None:
+        return _render(request, "partials/explanation.html")
     ctx = _context(request)
-    ctx["chart_player"] = p
-    ctx["chart_data"] = pred
-    ctx["chart_market_price"] = mp
-    ctx["chart_scale_max"] = MAX_SALARY
-    ctx["chart_curve_d"] = curve_d
-    ctx["chart_floor_bar"] = floor_bar
+    ctx.update(chart)
     return _render(request, "partials/player_chart.html", ctx)
 
 

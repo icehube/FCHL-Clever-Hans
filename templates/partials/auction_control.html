@@ -66,6 +66,9 @@
 
     <!-- Bid advisor -->
     {% if bid_advice is defined and bid_advice %}
+    {% if chart_player is defined and chart_player %}
+    {% include "partials/player_chart.html" %}
+    {% endif %}
     <div class="alert alert-info py-2 text-sm mb-2">
         <span class="loading loading-spinner loading-xs"></span>
         <span>Bidding on <strong>{{ bid_advice.player_name }}</strong></span>

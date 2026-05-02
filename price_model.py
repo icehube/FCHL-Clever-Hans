@@ -68,6 +68,12 @@ def predict_price(
         pos_params["sigma_floor"],
         pos_params["sigma_intercept"] + pos_params["sigma_slope"] * pts,
     )
+    # Defensive cap: log-normal mean = exp(log_mu + sigma^2 / 2) blows up past
+    # sigma~1.5. The metadata's `goalie_quadratic: <= 0` constraint expresses
+    # the same intent (diminishing returns) for the points^2 coef; we extend
+    # it here to sigma so a positive sigma_slope (e.g. G's +0.0412) can't push
+    # high-point goalies into the regime where mean_above clamps to max_bid.
+    sigma = min(sigma, _SIGMA_CAP)
 
     # Derived values
     median_above = math.exp(log_mu)
@@ -125,6 +131,9 @@ def predict_all_prices(
 # Standard normal quantiles for CIs
 _Z_10 = -1.2816  # 10th percentile
 _Z_90 = 1.2816  # 90th percentile
+
+# Defensive sigma ceiling — see comment in predict_price.
+_SIGMA_CAP = 1.0
 
 
 def _sigmoid(x: float) -> float:

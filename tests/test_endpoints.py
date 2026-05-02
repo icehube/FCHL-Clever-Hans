@@ -188,6 +188,27 @@ class TestPlayerChart:
         assert r.status_code == 200
 
 
+class TestTeamView:
+    """The success path of /team-view renders partials/team_detail.html, which
+    imports the player_label macro. test_edge_cases.test_team_view_nonexistent
+    only exercises the t-is-None fallback (roster_panel.html), so a missing
+    macro import in team_detail.html slips past CI. These tests hit a real
+    team to lock the rendered template in place."""
+
+    def test_team_view_valid_renders_team_detail(self, client):
+        r = client.get("/team-view/BOT")
+        assert r.status_code == 200
+        # team_detail.html section headers — proves we hit the success path,
+        # not the roster_panel.html fallback.
+        assert "Trade Between Teams" in r.text
+
+    @pytest.mark.parametrize("code", ["BOT", "SRL", "MAC", "LGN", "JHN"])
+    def test_team_view_each_real_team(self, client, code):
+        r = client.get(f"/team-view/{code}")
+        assert r.status_code == 200
+        assert code in r.text
+
+
 class TestSetNominator:
     def test_set_nominator_valid(self, client):
         """Setting a valid nominator should update auction control."""

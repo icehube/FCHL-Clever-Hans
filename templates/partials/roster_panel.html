@@ -77,4 +77,23 @@
         {% endfor %}
         </tbody>
     </table>
+
+    {% if team.minor_players %}
+    <h3 class="font-semibold text-sm mt-3 mb-1 opacity-70">Minors ({{ team.minor_players|length }})</h3>
+    <table class="table table-xs table-zebra">
+        <thead><tr><th>Pos</th><th>Player</th><th>NHL</th><th>Salary</th><th>PTS</th><th>On Cap</th></tr></thead>
+        <tbody>
+        {% for p in team.minor_players|sort(attribute='projected_points', reverse=True) %}
+        <tr class="opacity-70">
+            <td>{{ p.position }}</td>
+            <td>{{ p.name }}</td>
+            <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
+            <td>${{ "%.1f"|format(p.salary) }}M</td>
+            <td>{{ p.projected_points }}</td>
+            <td>{{ "Yes" if p.counts_on_cap else "No" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
 </section>

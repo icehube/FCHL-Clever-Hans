@@ -1,30 +1,38 @@
-/* FCHL Auction Manager — Nord theme overrides for DaisyUI */
+/* FCHL Auction Manager — Tokyo Night theme overrides for DaisyUI */
 
-/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop */
+/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop, 4 col wide */
 .auction-grid { display: grid; grid-template-columns: 1fr; }
 @media (min-width: 768px) {
     .auction-grid { grid-template-columns: 1fr 1fr; }
-    .area-team { grid-column: span 2; }
+    .area-team, .area-team-detail { grid-column: span 2; }
 }
 @media (min-width: 1024px) {
     .auction-grid { grid-template-columns: 1fr 1fr 1fr; }
     .area-team { grid-column: span 1; }
+    .area-team-detail { grid-column: span 3; }
 }
+@media (min-width: 1440px) {
+    .auction-grid { grid-template-columns: 1fr 1fr 1fr 1fr; }
+    .area-team-detail { grid-column: span 1; }
+}
+/* Hide the empty 4th column wrapper when no team is selected, so it doesn't
+   reserve whitespace at desktop widths. */
+.area-team-detail:has(#team-detail:empty) { display: none; }
 
 :root {
-    --bg: #2e3440;
-    --bg-panel: #3b4252;
-    --bg-hover: #434c5e;
-    --text: #eceff4;
-    --text-muted: #d8dee9;
-    --accent: #88c0d0;
-    --accent-secondary: #d08770;
-    --green: #a3be8c;
-    --red: #bf616a;
-    --yellow: #ebcb8b;
-    --blue: #81a1c1;
-    --border: #4c566a;
-    --input-bg: #2e3440;
+    --bg: #1a1b26;
+    --bg-panel: #24283b;
+    --bg-hover: #292e42;
+    --text: #c0caf5;
+    --text-muted: #a9b1d6;
+    --accent: #7aa2f7;
+    --accent-secondary: #ff9e64;
+    --green: #9ece6a;
+    --red: #f7768e;
+    --yellow: #e0af68;
+    --blue: #7dcfff;
+    --border: #414868;
+    --input-bg: #16161e;
 }
 
 /* Scroll container for long tables */
@@ -40,7 +48,7 @@
 }
 
 /* Player table row highlights */
-tr.in-optimal { background: rgba(163, 190, 140, 0.12) !important; }
+tr.in-optimal { background: rgba(158, 206, 106, 0.12) !important; }
 tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 
 /* Bidder/assign logo grid */
@@ -73,17 +81,17 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 }
 .bidder-logo-btn:hover { opacity: 0.7; }
 .bidder-logo-btn.active:hover { opacity: 1; }
-.bidder-code { font-size: 10px; color: var(--text-muted); }
+.bidder-code { font-size: 0.625rem; color: var(--text-muted); }
 .team-logo-xs { width: 20px; height: 20px; }
 
 /* Bid result */
 .bid-result { padding: 8px; border-radius: 4px; margin-top: 8px; }
-.bid-bid { background: rgba(163, 190, 140, 0.15); border-left: 4px solid var(--green); }
-.bid-caution { background: rgba(235, 203, 139, 0.15); border-left: 4px solid var(--yellow); }
-.bid-drop { background: rgba(191, 97, 106, 0.15); border-left: 4px solid var(--red); }
-.bid-action { font-size: 18px; font-weight: bold; }
-.bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 12px; }
-.bid-reasoning { color: var(--text-muted); font-size: 12px; }
+.bid-bid { background: rgba(158, 206, 106, 0.15); border-left: 4px solid var(--green); }
+.bid-caution { background: rgba(224, 175, 104, 0.15); border-left: 4px solid var(--yellow); }
+.bid-drop { background: rgba(247, 118, 142, 0.15); border-left: 4px solid var(--red); }
+.bid-action { font-size: 1.125rem; font-weight: bold; }
+.bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 0.75rem; }
+.bid-reasoning { color: var(--text-muted); font-size: 0.75rem; }
 
 /* Collapsible panel chevron */
 .collapse-chevron {
@@ -109,15 +117,15 @@ summary::-webkit-details-marker { display: none; }
 .light-grey { background: var(--border); opacity: 0.5; }
 
 /* Price chart */
-.price-chart { width: 100%; max-width: 500px; height: auto; }
-.chart-meta { font-size: 13px; color: var(--text-muted); margin: 4px 0; }
-.chart-legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.price-chart { width: 100%; height: auto; display: block; }
+.chart-meta { font-size: 0.8125rem; color: var(--text-muted); margin: 4px 0; }
+.chart-legend { display: flex; gap: 12px; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
 .chart-leg { display: flex; gap: 4px; align-items: center; }
 
 /* Sortable headers */
 th[data-sort-col] { cursor: pointer; user-select: none; }
 th[data-sort-col]:hover { color: var(--accent); }
-th[data-sort-col]::after { content: ' \21C5'; font-size: 10px; opacity: 0.3; }
+th[data-sort-col]::after { content: ' \21C5'; font-size: 0.625rem; opacity: 0.3; }
 th.sort-asc::after { content: ' \25B2'; opacity: 1; }
 th.sort-desc::after { content: ' \25BC'; opacity: 1; }
 

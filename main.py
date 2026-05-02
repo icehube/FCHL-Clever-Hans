@@ -663,19 +663,19 @@ async def player_chart(request: Request, player_name: str):
     if pred is None:
         return _render(request, "partials/explanation.html")
     mp = market_prices.get(player_name, MIN_SALARY)
-    scale_max = max(pred.ci_high, mp, pred.expected_price) * 1.2
+    # Fixed x-axis 0 → MAX_SALARY so charts are visually comparable across players.
     curve_d, floor_bar = _lognormal_pdf_path(
         log_mu=pred.log_mu,
         sigma=pred.sigma,
         p_floor=pred.p_floor,
-        scale_max=max(scale_max, 1.0),
+        scale_max=MAX_SALARY,
         min_salary=MIN_SALARY,
     )
     ctx = _context(request)
     ctx["chart_player"] = p
     ctx["chart_data"] = pred
     ctx["chart_market_price"] = mp
-    ctx["chart_scale_max"] = max(scale_max, 1.0)
+    ctx["chart_scale_max"] = MAX_SALARY
     ctx["chart_curve_d"] = curve_d
     ctx["chart_floor_bar"] = floor_bar
     return _render(request, "partials/player_chart.html", ctx)

@@ -64,6 +64,18 @@ function sortTable(th) {
     });
 
     rows.forEach(function(row) { tbody.appendChild(row); });
+    renumberRows(tbody);
+}
+
+/* Renumber the leading # cell of every visible row 1..N. Only the Available
+   Players table has this column, so other tables are skipped. */
+function renumberRows(tbody) {
+    if (!tbody || !tbody.closest('#bid-limits')) return;
+    var i = 1;
+    tbody.querySelectorAll('tr').forEach(function(row) {
+        if (row.style.display === 'none') return;
+        if (row.cells.length > 0) row.cells[0].textContent = i++;
+    });
 }
 
 /* Add player to live bidding form (delegated to avoid inline JS with player names) */
@@ -90,8 +102,9 @@ document.addEventListener('click', function(e) {
 
 /* Filter available players by position */
 function filterPosition(pos) {
-    var rows = document.querySelectorAll('#bid-limits tbody tr');
-    rows.forEach(function(row) {
+    var tbody = document.querySelector('#bid-limits tbody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr').forEach(function(row) {
         row.style.display = (pos === 'all' || row.dataset.position === pos) ? '' : 'none';
     });
     document.querySelectorAll('[data-pos]').forEach(function(b) {
@@ -103,6 +116,7 @@ function filterPosition(pos) {
         active.classList.add('btn-primary');
         active.classList.remove('btn-outline');
     }
+    renumberRows(tbody);
 }
 
 /* Adjust bid price by increment and auto-submit */

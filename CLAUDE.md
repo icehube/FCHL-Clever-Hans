@@ -35,7 +35,7 @@ Browser (HTMX)              FastAPI Server                    Engine
 ```
 
 <!-- Pricing pipeline details in .claude/rules/pricing-pipeline.md (always loaded) -->
-<!-- Nord theme rules in .claude/rules/nord-theme.md (loaded when editing CSS/HTML) -->
+<!-- Tokyo Night theme rules in .claude/rules/tokyo-night-theme.md (loaded when editing CSS/HTML) -->
 <!-- Data format specs in .claude/rules/data-formats.md (loaded when editing data/) -->
 
 All state-modifying endpoints trigger: update state -> recompute market prices -> re-solve MILP -> save snapshot -> return HTML partials.

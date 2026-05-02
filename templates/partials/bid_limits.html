@@ -15,19 +15,21 @@
         <table class="table table-xs table-zebra">
             <thead>
                 <tr>
-                    <th data-sort-col="0" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
-                    <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
-                    <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
-                    <th data-sort-col="3" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">PTS</th>
-                    <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Model $</th>
-                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Market $</th>
-                    <th data-sort-col="6" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">RFA</th>
+                    <th class="opacity-60 cursor-default">#</th>
+                    <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
+                    <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
+                    <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
+                    <th data-sort-col="4" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">PTS</th>
+                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Model $</th>
+                    <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Market $</th>
+                    <th data-sort-col="7" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">RFA</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
             {% for p in bid_limits %}
             <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}" data-position="{{ p.position }}">
+                <td class="opacity-60">{{ loop.index }}</td>
                 <td>{{ p.position }}</td>
                 <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>
                 <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>

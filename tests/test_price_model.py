@@ -60,16 +60,25 @@ class TestPredictPrice:
         rfa = predict_price("F", 30, 0.05, True, params)
         assert rfa.p_floor < ufa.p_floor
 
-    def test_goalie_sigma_wider_than_forward(self, params):
-        """Goalie predictions should have wider sigma than forwards."""
-        fwd = predict_price("F", 75, 0.05, False, params)
+    def test_goalie_sigma_capped(self, params):
+        """The defensive sigma cap (predict_price._SIGMA_CAP) keeps goalie
+        sigma from blowing past 1.0 even when sigma_intercept + sigma_slope*pts
+        would otherwise climb to ~3.0 at 75 pts."""
+        from price_model import _SIGMA_CAP
         goalie = predict_price("G", 75, 0.05, False, params)
-        assert goalie.sigma > fwd.sigma
+        assert goalie.sigma == pytest.approx(_SIGMA_CAP)
 
-    def test_goalie_high_points_clamps_to_max(self, params):
-        """High-sigma goalie prediction clamps to max_bid."""
+    def test_goalie_high_points_below_max(self, params):
+        """Sigma cap keeps goalie predictions below max_bid even at high points.
+
+        Without the sigma <= 1.0 cap in predict_price, G's positive sigma_slope
+        pushes mean_above past max_bid for any goalie >~12 pts, producing a wall
+        of $10.5M predictions. The cap should keep a top goalie meaningfully
+        above the floor but well below the position cap.
+        """
         pred = predict_price("G", 75, 0.0974, False, params)
-        assert pred.expected_price == params["G"]["max_bid"]
+        assert pred.expected_price < params["G"]["max_bid"]
+        assert pred.expected_price > 1.0
 
     def test_defense_prediction(self, params):
         """Defense prediction should be reasonable for a good player."""

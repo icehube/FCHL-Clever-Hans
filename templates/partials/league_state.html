@@ -21,7 +21,7 @@
         <tbody>
         {% for code in nomination_order %}
         {% set t = teams[code] %}
-        <tr class="hover {% if t.is_done %}opacity-50 line-through{% endif %} {% if code == my_team %}bg-info/10{% endif %}">
+        <tr class="hover {% if t.is_done %}text-error{% endif %} {% if code == my_team %}bg-info/10{% endif %}">
             <td>
                 <a hx-get="/team-view/{{ code }}" hx-target="#team-detail" hx-swap="innerHTML" class="cursor-pointer inline-block hover:opacity-80">
                     <img src="/fchl_logos/{{ t.logo }}" alt="{{ code }}" class="w-5 h-5">
@@ -56,8 +56,6 @@
         {% endfor %}
         </tbody>
     </table>
-
-    <div id="team-detail"></div>
 
     {% if market_info %}
     <div class="alert alert-sm mt-2 py-2 text-xs">

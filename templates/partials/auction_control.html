@@ -88,7 +88,7 @@
 
     {# Single bid form: visible player + price; hidden bidders synced from grid.
        Bidder clicks and price changes auto-resubmit /bid-check. #}
-    <form id="bid-form" hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
+    <form id="bid-form" hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" hx-sync="this:replace" class="mt-2">
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" readonly class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>

@@ -99,10 +99,15 @@
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <button type="submit" class="btn btn-xs btn-ghost" title="{{ 'Activate' if p.is_bench else 'Bench' }}">{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
+                {# Auto-submits on change/blur so the user doesn't have to
+                   click the $ button. Button stays as a fallback. #}
                 <form hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML" class="flex items-center gap-1">
                     <input type="hidden" name="team_code" value="{{ team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
-                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input input-xs input-bordered bg-base-200 w-16">
+                    <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}"
+                           hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML"
+                           hx-trigger="change" hx-include="closest form"
+                           class="input input-xs input-bordered bg-base-200 w-16">
                     <button type="submit" class="btn btn-xs btn-ghost" title="Adjust salary">$</button>
                 </form>
                 {% if p.is_acquired %}

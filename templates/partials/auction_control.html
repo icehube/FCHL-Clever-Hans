@@ -43,6 +43,12 @@
             <div class="badge badge-sm badge-outline mt-1">{{ rfa_pick.strategy }}</div>
             <div class="text-xs opacity-80 mt-1">{{ rfa_pick.reasoning }}</div>
             <div class="text-xs font-semibold mt-1">Expected: ~${{ "%.1f"|format(rfa_pick.expected_price) }}M</div>
+            <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
+                <input type="hidden" name="player" value="{{ rfa_pick.player.name }}">
+                <input type="hidden" name="price" value="0.5">
+                <input type="hidden" name="bidders" value="{{ default_bidders }}">
+                <button type="submit" class="btn btn-primary btn-xs w-full">Bid on {{ rfa_pick.player.name }}</button>
+            </form>
         </div>
     </div>
     {% endif %}
@@ -58,6 +64,12 @@
             <div class="badge badge-sm badge-outline mt-1">{{ ufa_pick.strategy }}</div>
             <div class="text-xs opacity-80 mt-1">{{ ufa_pick.reasoning }}</div>
             <div class="text-xs font-semibold mt-1">Expected: ~${{ "%.1f"|format(ufa_pick.expected_price) }}M</div>
+            <form hx-post="/bid-check" hx-target="#auction-control" hx-swap="outerHTML" class="mt-2">
+                <input type="hidden" name="player" value="{{ ufa_pick.player.name }}">
+                <input type="hidden" name="price" value="0.5">
+                <input type="hidden" name="bidders" value="{{ default_bidders }}">
+                <button type="submit" class="btn btn-primary btn-xs w-full">Bid on {{ ufa_pick.player.name }}</button>
+            </form>
         </div>
     </div>
     {% endif %}

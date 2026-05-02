@@ -624,13 +624,19 @@ async def load_scenario(request: Request, name: str = Form(...)):
     import scenarios as _scenarios
 
     global auction_state, model_prices
+    # Capture prior state so /undo can roll back the scenario load. Snapshots
+    # live on AuctionState._snapshots, which gets wiped when we replace the
+    # global — copy it onto the new state explicitly.
+    prior = auction_state.to_json(include_snapshots=False)
     try:
-        auction_state = _scenarios.load(name)
+        new_state = _scenarios.load(name)
     except KeyError:
         return _toast(
             _render(request, "partials/all_panels.html"),
             f"Unknown scenario: {name}", "error",
         )
+    new_state._snapshots.append(prior)
+    auction_state = new_state
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()

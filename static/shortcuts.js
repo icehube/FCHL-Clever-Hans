@@ -129,3 +129,30 @@ function adjustPrice(delta) {
     if (form) htmx.trigger(form, 'submit');
 }
 
+/* Sync a multi-select's selected values into a hidden CSV input
+   (used by the Trade Between Teams form). */
+function updateTradeHidden(sel, hiddenId) {
+    var vals = [];
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].selected) vals.push(sel.options[i].value);
+    }
+    document.getElementById(hiddenId).value = vals.join(',');
+}
+
+/* Load the partner team's roster into the trade-receive multi-select. */
+function loadTradePartner(teamCode, viewTeamCode) {
+    if (!teamCode) return;
+    fetch('/team-players/' + teamCode)
+        .then(function(r) { return r.json(); })
+        .then(function(players) {
+            var sel = document.getElementById('trade-partner-players-' + viewTeamCode);
+            sel.innerHTML = '';
+            players.forEach(function(p) {
+                var opt = document.createElement('option');
+                opt.value = p.name;
+                opt.textContent = p.name + ' (' + p.position + ', $' + p.salary.toFixed(1) + 'M)';
+                sel.appendChild(opt);
+            });
+        });
+}
+

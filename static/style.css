@@ -1,23 +1,15 @@
 /* FCHL Auction Manager — Tokyo Night theme overrides for DaisyUI */
 
-/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop, 4 col wide */
+/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop */
 .auction-grid { display: grid; grid-template-columns: 1fr; }
 @media (min-width: 768px) {
     .auction-grid { grid-template-columns: 1fr 1fr; }
-    .area-team, .area-team-detail { grid-column: span 2; }
+    .area-team { grid-column: span 2; }
 }
 @media (min-width: 1024px) {
     .auction-grid { grid-template-columns: 1fr 1fr 1fr; }
     .area-team { grid-column: span 1; }
-    .area-team-detail { grid-column: span 3; }
 }
-@media (min-width: 1440px) {
-    .auction-grid { grid-template-columns: 1fr 1fr 1fr 1fr; }
-    .area-team-detail { grid-column: span 1; }
-}
-/* Hide the empty 4th column wrapper when no team is selected, so it doesn't
-   reserve whitespace at desktop widths. */
-.area-team-detail:has(#team-detail:empty) { display: none; }
 
 :root {
     --bg: #1a1b26;

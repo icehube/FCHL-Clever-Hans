@@ -23,12 +23,12 @@
         {% set t = teams[code] %}
         <tr class="hover {% if t.is_done %}text-error{% endif %} {% if code == my_team %}bg-info/10{% endif %}">
             <td>
-                <a hx-get="/team-view/{{ code }}" hx-target="#team-detail" hx-swap="innerHTML" class="cursor-pointer inline-block hover:opacity-80">
+                <a hx-get="/team-view/{{ code }}" hx-target="#team-panel" hx-swap="outerHTML" class="cursor-pointer inline-block hover:opacity-80">
                     <img src="/fchl_logos/{{ t.logo }}" alt="{{ code }}" class="w-5 h-5">
                 </a>
             </td>
             <td>
-                <a hx-get="/team-view/{{ code }}" hx-target="#team-detail" hx-swap="innerHTML" class="link link-hover text-sm">
+                <a hx-get="/team-view/{{ code }}" hx-target="#team-panel" hx-swap="outerHTML" class="link link-hover text-sm">
                     <strong>{{ code }}</strong> <span class="text-xs opacity-60 ml-1">{{ t.name }}</span>
                 </a>
                 {% if t.is_my_team %}<span class="badge badge-info badge-xs ml-1">★</span>{% endif %}

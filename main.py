@@ -695,13 +695,13 @@ async def set_nominator(request: Request, team_code: str = Form(...)):
 
 @app.get("/team-view/{team_code}", response_class=HTMLResponse)
 async def team_view(request: Request, team_code: str):
-    """View another team's roster details."""
-    t = auction_state.teams.get(team_code)
-    if t is None:
-        return _render(request, "partials/roster_panel.html")
+    """Render the team panel for the given team. Falls back to default
+    (BOT) when the code is unknown so HTMX swaps still produce a valid panel."""
     ctx = _context(request)
-    ctx["view_team"] = t
-    return _render(request, "partials/team_detail.html", ctx)
+    t = auction_state.teams.get(team_code)
+    if t is not None:
+        ctx["team"] = t
+    return _render(request, "partials/team_panel.html", ctx)
 
 
 @app.get("/team-players/{team_code}")
@@ -736,8 +736,8 @@ async def toggle_bench(
         p.is_bench = not p.is_bench
     _save_state()
     ctx = _context(request)
-    ctx["view_team"] = t
-    return _render(request, "partials/team_detail.html", ctx)
+    ctx["team"] = t
+    return _render(request, "partials/team_panel.html", ctx)
 
 
 @app.post("/adjust-salary", response_class=HTMLResponse)
@@ -757,8 +757,8 @@ async def adjust_salary(
     _recompute()
     _save_state()
     ctx = _context(request)
-    ctx["view_team"] = t
-    return _render(request, "partials/team_detail.html", ctx)
+    ctx["team"] = t
+    return _render(request, "partials/team_panel.html", ctx)
 
 
 @app.post("/trade-between", response_class=HTMLResponse)

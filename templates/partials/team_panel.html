@@ -9,36 +9,38 @@
         {% endif %}
     </div>
 
-    <div class="stats stats-horizontal shadow bg-base-300 w-full text-xs mb-2">
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Total salary committed: keeper + acquired actives + minors that count on cap, plus buyout penalties">
-            <div class="stat-title text-xs">Cap Used</div>
-            <div class="stat-value text-sm">${{ "%.1f"|format(team.total_salary) }}M</div>
+    {# Custom grid (not DaisyUI .stats) — DaisyUI's .stat has min-width: 16rem
+       which forces horizontal scroll with 6-7 tiles. Grid wraps cleanly. #}
+    <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-1 bg-base-300 rounded-md p-2 mb-2">
+        <div class="tooltip tooltip-bottom" data-tip="Total salary committed: keeper + acquired actives + minors that count on cap, plus buyout penalties">
+            <div class="text-xs opacity-60">Cap Used</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(team.total_salary) }}M</div>
         </div>
         {% if team.penalties > 0 %}
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Buyout penalty: 50% of bought-out player's salary stays on the cap">
-            <div class="stat-title text-xs">Penalties</div>
-            <div class="stat-value text-sm text-warning">${{ "%.1f"|format(team.penalties) }}M</div>
+        <div class="tooltip tooltip-bottom" data-tip="Buyout penalty: 50% of bought-out player's salary stays on the cap">
+            <div class="text-xs opacity-60">Penalties</div>
+            <div class="text-sm font-semibold text-warning">${{ "%.1f"|format(team.penalties) }}M</div>
         </div>
         {% endif %}
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Cap available to spend: salary cap minus cap used">
-            <div class="stat-title text-xs">Remaining</div>
-            <div class="stat-value text-sm">${{ "%.1f"|format(team.remaining_budget) }}M</div>
+        <div class="tooltip tooltip-bottom" data-tip="Cap available to spend: salary cap minus cap used">
+            <div class="text-xs opacity-60">Remaining</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(team.remaining_budget) }}M</div>
         </div>
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Remaining minus minimum reserve for unfilled spots ($0.5M × spots remaining)">
-            <div class="stat-title text-xs">Spendable</div>
-            <div class="stat-value text-sm">${{ "%.1f"|format(team.spendable_budget) }}M</div>
+        <div class="tooltip tooltip-bottom" data-tip="Remaining minus minimum reserve for unfilled spots ($0.5M × spots remaining)">
+            <div class="text-xs opacity-60">Spendable</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(team.spendable_budget) }}M</div>
         </div>
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Roster spots remaining (out of 24 active + bench)">
-            <div class="stat-title text-xs">Spots</div>
-            <div class="stat-value text-sm">{{ team.total_spots_remaining }}</div>
+        <div class="tooltip tooltip-bottom" data-tip="Roster spots remaining (out of 24 active + bench)">
+            <div class="text-xs opacity-60">Spots</div>
+            <div class="text-sm font-semibold">{{ team.total_spots_remaining }}</div>
         </div>
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Highest single bid this team can physically afford right now (capped at $11.4M)">
-            <div class="stat-title text-xs">Max Bid</div>
-            <div class="stat-value text-sm">${{ "%.1f"|format(team.physical_max_bid) }}M</div>
+        <div class="tooltip tooltip-bottom" data-tip="Highest single bid this team can physically afford right now (capped at $11.4M)">
+            <div class="text-xs opacity-60">Max Bid</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(team.physical_max_bid) }}M</div>
         </div>
-        <div class="stat py-2 px-3 tooltip tooltip-bottom" data-tip="Sum of projected fantasy points across the active roster">
-            <div class="stat-title text-xs">Proj PTS</div>
-            <div class="stat-value text-sm text-accent">{{ team.roster_players|sum(attribute='projected_points') }}</div>
+        <div class="tooltip tooltip-bottom" data-tip="Sum of projected fantasy points across the active roster">
+            <div class="text-xs opacity-60">Proj PTS</div>
+            <div class="text-sm font-semibold text-accent">{{ team.roster_players|sum(attribute='projected_points') }}</div>
         </div>
     </div>
 

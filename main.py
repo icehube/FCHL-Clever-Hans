@@ -30,7 +30,7 @@ from optimizer import (
     solve_optimal_roster,
 )
 from price_model import PricePrediction, load_model_params, predict_all_prices
-from state import AuctionState, PlayerOnRoster, TransactionRecord
+from state import AuctionState, ChangeRecord, PlayerOnRoster, TransactionRecord
 from trade import (
     PlayerTrade,
     evaluate_buyout,
@@ -139,6 +139,16 @@ def _log_transaction(
         market_price=market_price,
         timestamp=timestamp or datetime.now().isoformat(),
         transaction_type=txn_type,
+    ))
+
+
+def _log_change(kind: str, team_code: str, description: str) -> None:
+    """Append a ChangeRecord for a non-transaction state edit."""
+    auction_state.change_log.append(ChangeRecord(
+        timestamp=datetime.now().isoformat(),
+        kind=kind,
+        team_code=team_code,
+        description=description,
     ))
 
 
@@ -262,6 +272,7 @@ def _context(request: Request) -> dict:
         "teams": auction_state.teams,
         "available_players": auction_state.available_players,
         "transaction_log": auction_state.transaction_log,
+        "change_log": auction_state.change_log,
         "milp": milp_solution,
         "market_info": market_info,
         "bid_limits": bid_limits,
@@ -564,6 +575,11 @@ async def team_done(request: Request, team_code: str = Form(...)):
     t = auction_state.teams.get(team_code)
     if t:
         t.is_done = not t.is_done
+        _log_change(
+            "team-done",
+            team_code,
+            f"{team_code} marked as {'done' if t.is_done else 'still drafting'}",
+        )
     _recompute()
     _save_state()
     return _render(request, "partials/all_panels.html")
@@ -739,10 +755,15 @@ async def toggle_bench(
     p = t.find_player(player_name)
     if p:
         p.is_bench = not p.is_bench
+        _log_change(
+            "toggle-bench",
+            team_code,
+            f"{player_name} → {'bench' if p.is_bench else 'active'}",
+        )
     _save_state()
     ctx = _context(request)
     ctx["team"] = t
-    return _render(request, "partials/team_panel.html", ctx)
+    return _render(request, "partials/all_panels.html", ctx)
 
 
 @app.post("/adjust-salary", response_class=HTMLResponse)
@@ -758,12 +779,19 @@ async def adjust_salary(
         return _render(request, "partials/all_panels.html")
     clamped = max(MIN_SALARY, min(new_salary, MAX_SALARY))
     auction_state.save_snapshot()
+    p = t.find_player(player_name)
+    old_salary = p.salary if p else 0.0
     t.adjust_salary(player_name, clamped)
+    _log_change(
+        "adjust-salary",
+        team_code,
+        f"{player_name}: ${old_salary:.1f}M → ${clamped:.1f}M",
+    )
     _recompute()
     _save_state()
     ctx = _context(request)
     ctx["team"] = t
-    return _render(request, "partials/team_panel.html", ctx)
+    return _render(request, "partials/all_panels.html", ctx)
 
 
 @app.post("/trade-between", response_class=HTMLResponse)

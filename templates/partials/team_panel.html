@@ -92,12 +92,12 @@
             <td>{{ p.projected_points }}</td>
             <td class="flex gap-1 items-center">
                 {% if not p.is_target %}
-                <form hx-post="/toggle-bench" hx-target="#team-panel" hx-swap="outerHTML" style="display:inline">
+                <form hx-post="/toggle-bench" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <button type="submit" class="btn btn-xs btn-ghost" title="{{ 'Activate' if p.is_bench else 'Bench' }}">{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
-                <form hx-post="/adjust-salary" hx-target="#team-panel" hx-swap="outerHTML" class="flex items-center gap-1">
+                <form hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML" class="flex items-center gap-1">
                     <input type="hidden" name="team_code" value="{{ team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}" class="input input-xs input-bordered bg-base-200 w-16">

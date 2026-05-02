@@ -183,6 +183,20 @@ class TeamState:
 
 
 @dataclass
+class ChangeRecord:
+    """A non-transaction state change (salary edits, bench toggles, etc.).
+
+    Separate from TransactionRecord because these don't move players between
+    teams — they're audit trail for hand-corrections during the draft.
+    """
+
+    timestamp: str
+    kind: str  # "adjust-salary" | "toggle-bench" | "move-to-minors" | "move-to-roster" | "team-done"
+    team_code: str
+    description: str
+
+
+@dataclass
 class TransactionRecord:
     """Record of a single auction transaction."""
 
@@ -203,6 +217,7 @@ class AuctionState:
     teams: dict[str, TeamState] = field(default_factory=dict)
     available_players: dict[str, Player] = field(default_factory=dict)
     transaction_log: list[TransactionRecord] = field(default_factory=list)
+    change_log: list[ChangeRecord] = field(default_factory=list)
     nomination_order: list[str] = field(default_factory=list)
     nomination_round: int = 0
     nomination_index: int = 0
@@ -266,6 +281,7 @@ class AuctionState:
                 name: _player_to_dict(p) for name, p in self.available_players.items()
             },
             "transaction_log": [_transaction_to_dict(t) for t in self.transaction_log],
+            "change_log": [_change_to_dict(c) for c in self.change_log],
             "nomination_order": self.nomination_order,
             "nomination_round": self.nomination_round,
             "nomination_index": self.nomination_index,
@@ -289,6 +305,9 @@ class AuctionState:
         }
         state.transaction_log = [
             _transaction_from_dict(d) for d in data["transaction_log"]
+        ]
+        state.change_log = [
+            _change_from_dict(d) for d in data.get("change_log", [])
         ]
         state.nomination_order = data["nomination_order"]
         state.nomination_round = data["nomination_round"]
@@ -399,6 +418,24 @@ def _transaction_to_dict(t: TransactionRecord) -> dict:
         "timestamp": t.timestamp,
         "transaction_type": t.transaction_type,
     }
+
+
+def _change_to_dict(c: ChangeRecord) -> dict:
+    return {
+        "timestamp": c.timestamp,
+        "kind": c.kind,
+        "team_code": c.team_code,
+        "description": c.description,
+    }
+
+
+def _change_from_dict(d: dict) -> ChangeRecord:
+    return ChangeRecord(
+        timestamp=d["timestamp"],
+        kind=d["kind"],
+        team_code=d["team_code"],
+        description=d["description"],
+    )
 
 
 def _transaction_from_dict(d: dict) -> TransactionRecord:

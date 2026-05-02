@@ -1,0 +1,30 @@
+<section class="card bg-base-200 shadow-md p-4" id="change-log">
+    <h2 class="card-title text-accent text-base mb-2">Change Log ({{ change_log|length }})</h2>
+
+    {% if change_log %}
+    <div class="scroll-container" style="max-height: 200px;">
+    <table class="table table-xs table-zebra">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Team</th>
+                <th>Kind</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for c in change_log|reverse %}
+        <tr>
+            <td class="opacity-60 text-xs whitespace-nowrap">{{ c.timestamp[11:19] }}</td>
+            <td>{{ c.team_code }}</td>
+            <td><span class="badge badge-xs badge-ghost">{{ c.kind }}</span></td>
+            <td class="text-xs">{{ c.description }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="text-sm opacity-50">No edits yet.</p>
+    {% endif %}
+</section>

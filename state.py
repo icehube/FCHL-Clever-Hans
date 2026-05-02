@@ -174,14 +174,19 @@ class TeamState:
         self._invalidate_cache()
 
     def send_to_minors(self, player_name: str) -> None:
-        """Move a player from active roster to minors."""
-        for src in (self.acquired_players, self.keeper_players):
-            for i, p in enumerate(src):
-                if p.name == player_name:
-                    p.is_minor = True
-                    self.minor_players.append(src.pop(i))
-                    self._invalidate_cache()
-                    return
+        """Move an acquired player to minors. Keepers cannot be sent down."""
+        for i, p in enumerate(self.acquired_players):
+            if p.name == player_name:
+                p.is_minor = True
+                self.minor_players.append(self.acquired_players.pop(i))
+                self._invalidate_cache()
+                return
+        # Distinguish keepers (explicitly disallowed) from unknown names so the
+        # caller's toast can be specific. Keepers stay in keeper_players forever
+        # so recall always lands back in acquired_players cleanly.
+        for p in self.keeper_players:
+            if p.name == player_name:
+                raise ValueError(f"Cannot send keeper '{player_name}' to minors")
         raise ValueError(f"Player '{player_name}' not on active roster of {self.code}")
 
     def recall_from_minors(self, player_name: str) -> None:

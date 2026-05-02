@@ -417,3 +417,11 @@ class TestMinorsMovement:
         team = _make_team()
         with pytest.raises(ValueError):
             team.send_to_minors("Nobody")
+
+    def test_send_keeper_raises(self):
+        keeper = _make_player_on_roster(name="Locked-In", group="A")
+        team = _make_team(keepers=[keeper])
+        with pytest.raises(ValueError, match="keeper"):
+            team.send_to_minors("Locked-In")
+        assert len(team.keeper_players) == 1
+        assert team.minor_players == []

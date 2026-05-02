@@ -794,6 +794,56 @@ async def adjust_salary(
     return _render(request, "partials/all_panels.html", ctx)
 
 
+@app.post("/move-to-minors", response_class=HTMLResponse)
+async def move_to_minors(
+    request: Request,
+    team_code: str = Form(...),
+    player_name: str = Form(...),
+):
+    """Move a player from active roster to minors."""
+    t = auction_state.teams.get(team_code)
+    if t is None:
+        return _render(request, "partials/all_panels.html")
+    auction_state.save_snapshot()
+    try:
+        t.send_to_minors(player_name)
+    except ValueError:
+        auction_state.restore_snapshot()
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"{player_name} not on active roster", "error",
+        )
+    _log_change("move-to-minors", team_code, f"{player_name} → minors")
+    _recompute()
+    _save_state()
+    return _render(request, "partials/all_panels.html")
+
+
+@app.post("/move-to-roster", response_class=HTMLResponse)
+async def move_to_roster(
+    request: Request,
+    team_code: str = Form(...),
+    player_name: str = Form(...),
+):
+    """Recall a player from minors to the active roster."""
+    t = auction_state.teams.get(team_code)
+    if t is None:
+        return _render(request, "partials/all_panels.html")
+    auction_state.save_snapshot()
+    try:
+        t.recall_from_minors(player_name)
+    except ValueError:
+        auction_state.restore_snapshot()
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"{player_name} not in minors", "error",
+        )
+    _log_change("move-to-roster", team_code, f"{player_name} → active")
+    _recompute()
+    _save_state()
+    return _render(request, "partials/all_panels.html")
+
+
 @app.post("/trade-between", response_class=HTMLResponse)
 async def trade_between(
     request: Request,

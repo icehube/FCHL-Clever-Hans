@@ -173,6 +173,27 @@ class TeamState:
         self.acquired_players.append(player)
         self._invalidate_cache()
 
+    def send_to_minors(self, player_name: str) -> None:
+        """Move a player from active roster to minors."""
+        for src in (self.acquired_players, self.keeper_players):
+            for i, p in enumerate(src):
+                if p.name == player_name:
+                    p.is_minor = True
+                    self.minor_players.append(src.pop(i))
+                    self._invalidate_cache()
+                    return
+        raise ValueError(f"Player '{player_name}' not on active roster of {self.code}")
+
+    def recall_from_minors(self, player_name: str) -> None:
+        """Move a player from minors back to acquired (active roster)."""
+        for i, p in enumerate(self.minor_players):
+            if p.name == player_name:
+                p.is_minor = False
+                self.acquired_players.append(self.minor_players.pop(i))
+                self._invalidate_cache()
+                return
+        raise ValueError(f"Player '{player_name}' not in minors on {self.code}")
+
     def adjust_salary(self, player_name: str, new_salary: float) -> None:
         """Correct a player's salary (typo fix)."""
         p = self.find_player(player_name)

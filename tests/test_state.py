@@ -385,3 +385,35 @@ class TestNominationOrder:
         assert state.nomination_round == 1
         # Round 1 is odd → reversed → first is B
         assert state.current_nominator() == "B"
+
+
+class TestMinorsMovement:
+    def test_send_to_minors_from_acquired(self):
+        p = _make_player_on_roster(name="Acq Star", group="A")
+        team = _make_team(acquired=[p])
+        team.send_to_minors("Acq Star")
+        assert team.acquired_players == []
+        assert len(team.minor_players) == 1
+        assert team.minor_players[0].is_minor is True
+
+    def test_recall_from_minors(self):
+        p = _make_player_on_roster(name="Demoted", group="A", is_minor=True)
+        team = _make_team(minors=[p])
+        team.recall_from_minors("Demoted")
+        assert team.minor_players == []
+        assert len(team.acquired_players) == 1
+        assert team.acquired_players[0].is_minor is False
+
+    def test_send_then_recall_round_trip(self):
+        p = _make_player_on_roster(name="Yo-yo", group="B")
+        team = _make_team(acquired=[p])
+        team.send_to_minors("Yo-yo")
+        team.recall_from_minors("Yo-yo")
+        assert len(team.acquired_players) == 1
+        assert team.minor_players == []
+        assert team.acquired_players[0].is_minor is False
+
+    def test_send_unknown_player_raises(self):
+        team = _make_team()
+        with pytest.raises(ValueError):
+            team.send_to_minors("Nobody")

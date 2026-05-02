@@ -233,3 +233,133 @@ class TestBuyout:
     def test_buyout_check_invalid(self, client):
         r = client.get("/buyout-check/Nobody")
         assert r.status_code == 200
+
+
+class TestRoundThreeMutators:
+    """Round 3 mutators: minors movement, scenario load, change_log + cascade."""
+
+    def _draft_to(self, client, team: str, player: str = "Artemi Panarin", salary: str = "5.0"):
+        """Draft a player to a team so it has at least one acquired player to test on."""
+        r = client.post("/assign", data={"player": player, "team": team, "salary": salary})
+        assert r.status_code == 200
+        return player
+
+    def test_move_to_minors_round_trip(self, client):
+        client.post("/reset")
+        player = self._draft_to(client, "BOT")
+
+        r = client.post("/move-to-minors", data={"team_code": "BOT", "player_name": player})
+        assert r.status_code == 200
+        state = client.get("/state").json()
+        bot = state["teams"]["BOT"]
+        assert player not in [p["name"] for p in bot["acquired_players"]]
+        assert player in [p["name"] for p in bot["minor_players"]]
+        kinds = [c["kind"] for c in state["change_log"]]
+        assert "move-to-minors" in kinds
+
+        r = client.post("/move-to-roster", data={"team_code": "BOT", "player_name": player})
+        assert r.status_code == 200
+        state = client.get("/state").json()
+        bot = state["teams"]["BOT"]
+        assert player in [p["name"] for p in bot["acquired_players"]]
+        assert player not in [p["name"] for p in bot["minor_players"]]
+        kinds = [c["kind"] for c in state["change_log"]]
+        assert kinds.count("move-to-roster") == 1
+        assert kinds.count("move-to-minors") == 1
+
+    def test_move_to_minors_invalid_player(self, client):
+        client.post("/reset")
+        before = client.get("/state").json()
+        r = client.post("/move-to-minors", data={"team_code": "BOT", "player_name": "Nobody"})
+        assert r.status_code == 200
+        after = client.get("/state").json()
+        # Roster unchanged
+        assert before["teams"]["BOT"]["acquired_players"] == after["teams"]["BOT"]["acquired_players"]
+        # No change_log entry was added
+        kinds = [c["kind"] for c in after["change_log"]]
+        assert "move-to-minors" not in kinds
+
+    def test_load_scenario_valid(self, client):
+        client.post("/reset")
+        r = client.post("/load-scenario", data={"name": "goalie-asymmetry"})
+        assert r.status_code == 200
+        state = client.get("/state").json()
+        # Some non-BOT team should have a goalie in acquired_players
+        found_goalie = False
+        for code, team in state["teams"].items():
+            if code == "BOT":
+                continue
+            if any(p["position"] == "G" for p in team["acquired_players"]):
+                found_goalie = True
+                break
+        assert found_goalie
+
+    def test_load_scenario_undo_returns_to_prior_state(self, client):
+        client.post("/reset")
+        # Baseline: how many goalies has BOT got, and total acquired across non-BOT?
+        before = client.get("/state").json()
+        before_acquired = sum(
+            len(t["acquired_players"])
+            for c, t in before["teams"].items() if c != "BOT"
+        )
+
+        client.post("/load-scenario", data={"name": "goalie-asymmetry"})
+        loaded = client.get("/state").json()
+        loaded_acquired = sum(
+            len(t["acquired_players"])
+            for c, t in loaded["teams"].items() if c != "BOT"
+        )
+        assert loaded_acquired > before_acquired
+
+        # Undo should restore the pre-scenario acquired counts
+        r = client.post("/undo")
+        assert r.status_code == 200
+        restored = client.get("/state").json()
+        restored_acquired = sum(
+            len(t["acquired_players"])
+            for c, t in restored["teams"].items() if c != "BOT"
+        )
+        assert restored_acquired == before_acquired
+
+    def test_load_scenario_unknown(self, client):
+        client.post("/reset")
+        before = client.get("/state").json()
+        r = client.post("/load-scenario", data={"name": "not-a-scenario"})
+        assert r.status_code == 200
+        after = client.get("/state").json()
+        assert before["teams"] == after["teams"]
+
+    def test_adjust_salary_returns_full_app(self, client):
+        client.post("/reset")
+        player = self._draft_to(client, "BOT", salary="3.0")
+        r = client.post("/adjust-salary", data={
+            "team_code": "BOT",
+            "player_name": player,
+            "new_salary": "4.5",
+        })
+        assert r.status_code == 200
+        # Cascade contract: response is the full panel grid, not just team panel
+        assert "League State" in r.text
+        assert "Available Players" in r.text or "bid-limits" in r.text
+
+    def test_adjust_salary_logs_change(self, client):
+        client.post("/reset")
+        player = self._draft_to(client, "BOT", salary="3.0")
+        client.post("/adjust-salary", data={
+            "team_code": "BOT", "player_name": player, "new_salary": "4.5",
+        })
+        kinds = [c["kind"] for c in client.get("/state").json()["change_log"]]
+        assert "adjust-salary" in kinds
+
+    def test_toggle_bench_logs_change(self, client):
+        client.post("/reset")
+        player = self._draft_to(client, "BOT")
+        client.post("/toggle-bench", data={"team_code": "BOT", "player_name": player})
+        kinds = [c["kind"] for c in client.get("/state").json()["change_log"]]
+        assert "toggle-bench" in kinds
+
+    def test_team_done_logs_change(self, client):
+        client.post("/reset")
+        client.post("/team-done", data={"team_code": "MAC"})
+        kinds = [c["kind"] for c in client.get("/state").json()["change_log"]]
+        assert "team-done" in kinds

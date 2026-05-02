@@ -55,7 +55,7 @@
                     hx-post="/load-scenario" hx-target="#app" hx-swap="innerHTML"
                     hx-confirm="Load this scenario? Current auction state will be replaced."
                     hx-trigger="change" name="name"
-                    onchange="this.selectedIndex=0"
+                    hx-on::after-request="this.selectedIndex=0"
                     title="Load test scenario">
                 <option value="" disabled selected>Scenario...</option>
                 <option value="goalie-asymmetry">Goalie asymmetry (others have 2G, BOT has 1)</option>

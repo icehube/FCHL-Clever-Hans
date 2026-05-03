@@ -145,6 +145,20 @@ TDD. Key validations:
 
 After every correction or mistake, update CLAUDE.md or the relevant rules file with a rule to prevent repeating it.
 
+## Deferred findings
+
+When `/grill`, `/go`, `/simplify`, `/review-changes`, or any review agent flags an issue that is **not** addressed in the current change (out of scope, judgment-call skip, valid-but-deferred refactor), append it to `BACKLOG.md` at the repo root. Don't drop it on the floor — even if you decide not to act on it now, the user should be able to see what was flagged and triage it later.
+
+Format per entry:
+
+```
+- [YYYY-MM-DD] [source] file:line — finding (one sentence) — reason deferred
+```
+
+Example: `- [2026-05-02] [simplify] main.py:852 — save_snapshot runs before validation; full JSON round-trip on rejected requests — pre-existing pattern across endpoints, fix would be cross-endpoint refactor`
+
+Before appending, scan `BACKLOG.md` for an existing entry covering the same file:line + finding — update the date instead of duplicating.
+
 ## Working with plan mode
 
 - Start every complex task in plan mode

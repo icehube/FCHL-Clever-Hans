@@ -852,11 +852,11 @@ async def move_to_minors(
     auction_state.save_snapshot()
     try:
         t.send_to_minors(player_name)
-    except ValueError:
+    except ValueError as e:
         auction_state.restore_snapshot()
         return _toast(
             _render(request, "partials/all_panels.html"),
-            f"{player_name} not on active roster", "error",
+            str(e), "error",
         )
     _log_change("move-to-minors", team_code, f"{player_name} → minors")
     _recompute()

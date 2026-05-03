@@ -110,7 +110,7 @@
                            class="input input-xs input-bordered bg-base-200 w-16">
                     <button type="submit" class="btn btn-xs btn-ghost" title="Adjust salary">$</button>
                 </form>
-                {% if p.is_acquired %}
+                {% if p.is_acquired and p.is_bench %}
                 <form hx-post="/move-to-minors" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">

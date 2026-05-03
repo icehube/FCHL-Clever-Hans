@@ -174,9 +174,14 @@ class TeamState:
         self._invalidate_cache()
 
     def send_to_minors(self, player_name: str) -> None:
-        """Move an acquired player to minors. Keepers cannot be sent down."""
+        """Move an acquired player to minors. Player must be benched first;
+        keepers cannot be sent down."""
         for i, p in enumerate(self.acquired_players):
             if p.name == player_name:
+                if not p.is_bench:
+                    raise ValueError(
+                        f"'{player_name}' must be benched before being sent to minors"
+                    )
                 p.is_minor = True
                 self.minor_players.append(self.acquired_players.pop(i))
                 self._invalidate_cache()

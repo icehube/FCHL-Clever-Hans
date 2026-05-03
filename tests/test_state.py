@@ -390,6 +390,7 @@ class TestNominationOrder:
 class TestMinorsMovement:
     def test_send_to_minors_from_acquired(self):
         p = _make_player_on_roster(name="Acq Star", group="A")
+        p.is_bench = True
         team = _make_team(acquired=[p])
         team.send_to_minors("Acq Star")
         assert team.acquired_players == []
@@ -406,12 +407,21 @@ class TestMinorsMovement:
 
     def test_send_then_recall_round_trip(self):
         p = _make_player_on_roster(name="Yo-yo", group="B")
+        p.is_bench = True
         team = _make_team(acquired=[p])
         team.send_to_minors("Yo-yo")
         team.recall_from_minors("Yo-yo")
         assert len(team.acquired_players) == 1
         assert team.minor_players == []
         assert team.acquired_players[0].is_minor is False
+
+    def test_send_active_player_raises(self):
+        p = _make_player_on_roster(name="Starter", group="A")
+        team = _make_team(acquired=[p])
+        with pytest.raises(ValueError, match="benched"):
+            team.send_to_minors("Starter")
+        assert len(team.acquired_players) == 1
+        assert team.minor_players == []
 
     def test_send_unknown_player_raises(self):
         team = _make_team()

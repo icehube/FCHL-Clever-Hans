@@ -248,6 +248,9 @@ class TestRoundThreeMutators:
         client.post("/reset")
         player = self._draft_to(client, "BOT")
 
+        r = client.post("/toggle-bench", data={"team_code": "BOT", "player_name": player})
+        assert r.status_code == 200
+
         r = client.post("/move-to-minors", data={"team_code": "BOT", "player_name": player})
         assert r.status_code == 200
         state = client.get("/state").json()
@@ -277,6 +280,19 @@ class TestRoundThreeMutators:
         assert before["teams"]["BOT"]["acquired_players"] == after["teams"]["BOT"]["acquired_players"]
         # No change_log entry was added
         kinds = [c["kind"] for c in after["change_log"]]
+        assert "move-to-minors" not in kinds
+
+    def test_move_to_minors_active_player_rejected(self, client):
+        client.post("/reset")
+        player = self._draft_to(client, "BOT")
+
+        r = client.post("/move-to-minors", data={"team_code": "BOT", "player_name": player})
+        assert r.status_code == 200
+        state = client.get("/state").json()
+        bot = state["teams"]["BOT"]
+        assert player in [p["name"] for p in bot["acquired_players"]]
+        assert player not in [p["name"] for p in bot["minor_players"]]
+        kinds = [c["kind"] for c in state["change_log"]]
         assert "move-to-minors" not in kinds
 
     def test_load_scenario_valid(self, client):

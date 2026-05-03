@@ -23,7 +23,7 @@
     </datalist>
 
     <!-- Nomination recommendations (when it's our turn) -->
-    {% if current_nominator == my_team %}
+    {% if current_nominator == my_team and not bid_advice %}
     <button hx-get="/nominate" hx-target="#auction-control" hx-swap="outerHTML" class="btn btn-primary btn-sm w-full mb-2">
         It's My Turn — Get Recommendations
     </button>

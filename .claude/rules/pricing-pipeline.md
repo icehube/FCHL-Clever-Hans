@@ -9,7 +9,18 @@ Historical           Market          Decision
 prediction           reality         engine
 ```
 
-**Layer 1 -- Model price** (`price_model.py`): What the historical model says a player typically sells for. Two-stage per-position log-normal model trained on 8 seasons of data. A starting point -- a prediction in a vacuum.
+**Layer 1 -- Model price** (`price_model.py`): What the historical model says a player typically sells for. Two-stage per-position log-normal model trained on 8 seasons of data (round-2 rebuild, July 2026). A starting point -- a prediction in a vacuum.
+
+- **Stage 1** (logistic): P(sells at $0.5M floor). **Stage 2** (OLS on log salary): price distribution for above-floor players.
+- **Skaters are piecewise-linear in points**: hinge terms `max(pts-60, 0)` (F and D) and `max(pts-80, 0)` (F only) capture star-threshold kinks; the pts^2 coefficient is exported as 0.0.
+- **Goalies are priced on projected WINS** (`Player.proj_wins`, from `data/goalie_projection_stats.csv`), not the 2W+3SO composite -- shutouts are unprojectable noise. Fallback when wins are missing: `pts / metadata.goalie_pts_per_win` (~2.31).
+- **Reputation feature**: last season's salary (`Player.salary` for biddables; 0 = new to league) feeds `log_lag`/`has_lag`.
+- **Scarcity feature**: `Player.pos_rank` = rank by projected points within position, computed once against the draft-time pool and frozen -- never re-rank the shrinking pool mid-draft.
+- **Units**: `team_probability` is in PERCENT (EDM = 11.04, league sums to ~100). `team_odds.json` stores fractions; `load_team_odds` converts.
+- **Sigma** is a function of the predicted log-price (not points): `max(sigma_intercept + sigma_slope * log_pred, sigma_floor)`; exported values are already MAD->SD corrected.
+- **Expected price** = `p_floor * 0.5 + (1 - p_floor) * clipped-lognormal MEAN` (closed form) -- never the median, which under-forecasts total spend.
+- Unused features export coefficient 0.0, so one formula serves F/D/G.
+- Golden test: `tests/fixtures/auction_predictions_current.csv` (exported by the pricer notebook alongside the params) must be reproduced within rounding by `predict_price`. When `data/model_params.json` is regenerated, copy the matching predictions CSV into the fixture too.
 
 **Layer 2 -- Market price** (`market.py`): Adjusts model prices using real-time auction state. Computes market ceilings from each opponent's exact remaining budget, roster needs, and minimum reserve requirements. We have perfect budget visibility during the draft, so these calculations are precise. Teams marked as "done" are excluded from market calculations.
 

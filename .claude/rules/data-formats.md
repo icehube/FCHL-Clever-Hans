@@ -29,7 +29,7 @@ Connor Ingram,G,3,MINOR,BOT,UTH,27,0.5,0,30,
 | `FCHL TEAM` | Team code if on a team, `RFA` if restricted free agent, `UFA` if unrestricted |
 | `NHL TEAM` | NHL team |
 | `AGE` | Player age |
-| `SALARY` | Current salary in millions. **Ignore for `FCHL TEAM = UFA`** (stale from last year) |
+| `SALARY` | Current salary in millions. For biddable players (UFA/RFA) this is **last season's salary** (0/blank = new to league) -- it feeds the price model's reputation feature (`log_lag`/`has_lag`), not the cap |
 | `BID` | Always 0 in source (populated during auction) |
 | `PTS` | Projected fantasy points |
 | `PRIOR FCHL TEAM` | For RFAs only: which FCHL team previously held this player (for ROFR) |
@@ -70,4 +70,12 @@ Team metadata, nomination order, penalties, colors, logos. Key fields: `id`, `is
 
 ## team_odds.json
 
-Vig-removed Stanley Cup probabilities by NHL team. Missing teams default to 0.031.
+Vig-removed Stanley Cup probabilities by NHL team, stored as **fractions** (0.1104). `load_team_odds` converts to **percent** (11.04) because the price model was trained on percentages. Missing teams default to 3.1 (percent, `DEFAULT_TEAM_PROBABILITY`).
+
+## goalie_projection_stats.csv
+
+Raw Dobber goalie projections (`league_year, player_name, proj_wins, proj_so, proj_gp`), copied from the FCHL-auction-pricer repo (written by its `parse_projections.py`). The loader uses only the **latest season's** rows to attach `proj_wins` to biddable goalies -- the price model prices goalies on wins, not the 2W+3SO composite. Goalies missing here fall back to `pts / goalie_pts_per_win`. Refresh this file together with `players.csv` before each draft.
+
+## model_params.json
+
+Exported by the FCHL-auction-pricer notebook (`auction_model_params.json`) -- never edit by hand. When refreshing it, also copy the notebook's `auction_predictions_current.csv` to `tests/fixtures/` so the golden test validates the new coefficients.

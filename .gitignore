@@ -24,6 +24,9 @@ env/
 # Auction state snapshots (runtime data)
 data/state/
 
+# Dropped-in copy of the pricer repo (source of model_params.json) — not part of this project
+FCHL-auction-pricer/
+
 # OS
 .DS_Store
 Thumbs.db

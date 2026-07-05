@@ -253,24 +253,24 @@ class TestOptimizerEdgeCases:
         # All at $1.0 means total cost = 24
         assert abs(sol.total_cost - ROSTER_SIZE * 1.0) < 0.01
 
-    def test_single_candidate_per_position(self):
-        """Exactly the minimum players per position — must pick them all."""
+    def test_pool_exactly_roster_size_picks_all(self):
+        """A pool of exactly ROSTER_SIZE legal players — must pick them all."""
         team = _make_team()
         players = {}
         prices = {}
-        for i in range(MIN_FORWARDS):
+        for i in range(14):
             players[f"F{i}"] = _make_player(f"F{i}", position="F", pts=50+i)
             prices[f"F{i}"] = 1.0
-        for i in range(MIN_DEFENSE):
+        for i in range(7):
             players[f"D{i}"] = _make_player(f"D{i}", position="D", pts=40+i)
             prices[f"D{i}"] = 1.0
-        for i in range(MIN_GOALIES):
+        for i in range(3):
             players[f"G{i}"] = _make_player(f"G{i}", position="G", pts=30+i)
             prices[f"G{i}"] = 1.0
 
         sol = solve_optimal_roster(team, players, prices)
         assert sol.status == "Optimal"
-        assert len(sol.roster) == MIN_FORWARDS + MIN_DEFENSE + MIN_GOALIES
+        assert len(sol.roster) == ROSTER_SIZE
 
 
 # ── Market Edge Cases ───────────────────────────────────────────────

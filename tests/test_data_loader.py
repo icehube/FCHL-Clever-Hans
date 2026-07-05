@@ -164,9 +164,10 @@ class TestBuildInitialState:
         assert bot.spendable_budget == pytest.approx(20.5)
 
     def test_bot_roster_needs(self, state):
+        # Starting-lineup needs (12F/6D/2G) minus BOT's keepers (7F/3D/2G)
         bot = state.teams["BOT"]
         needs = bot.roster_needs
-        assert needs == {"F": 7, "D": 4, "G": 1}
+        assert needs == {"F": 5, "D": 3, "G": 0}
 
     def test_jhn_penalty(self, state):
         assert state.teams["JHN"].penalties == pytest.approx(0.3)

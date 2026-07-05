@@ -9,10 +9,24 @@ SALARY_INCREMENT = 0.1
 # Roster sizes
 ROSTER_SIZE = 24
 
-# Position minimums (active roster)
-MIN_FORWARDS = 14
-MIN_DEFENSE = 7
-MIN_GOALIES = 3
+# Starting lineup — only these players score points each week. The 4 bench
+# spots are position-agnostic insurance and contribute nothing to the total.
+STARTING_LINEUP = {"F": 12, "D": 6, "G": 2}
+
+# Position minimums (active roster) = must be able to field the lineup
+MIN_FORWARDS = 12
+MIN_DEFENSE = 6
+MIN_GOALIES = 2
+
+# Bench composition preference (2F/1D/1G -> the classic 14F/7D/3G roster).
+# Soft, not a constraint: BACKUP_BONUS points of objective credit per filled
+# backup slot, so the optimizer gives up the balanced bench only when a
+# different shape wins more than ~BACKUP_BONUS starter points. BENCH_WEIGHT
+# values bench players' projected points at 10% so backups are good players,
+# not warm bodies, without letting bench depth outbid starter upgrades.
+BACKUP_TARGETS = {"F": 2, "D": 1, "G": 1}
+BACKUP_BONUS = 5.0
+BENCH_WEIGHT = 0.1
 
 # League
 MY_TEAM = "BOT"

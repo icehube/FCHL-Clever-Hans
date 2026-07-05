@@ -271,16 +271,17 @@ def _context(request: Request) -> dict:
         if code == MY_TEAM and milp_solution and milp_solution.status == "Optimal":
             projected = int(milp_solution.total_points)
         else:
-            spots = t.total_spots_remaining
-            if spots > 0 and available_pool:
+            # Only unfilled STARTER slots add points — bench scores nothing
+            starter_slots = sum(t.roster_needs.values())
+            if starter_slots > 0 and available_pool:
                 affordable = [
                     p for p in available_pool
                     if market_prices.get(p.name, MIN_SALARY) <= t.physical_max_bid
                 ]
-                sample = min(len(affordable), spots * 3)
+                sample = min(len(affordable), starter_slots * 3)
                 if sample > 0:
                     avg_pts = sum(p.projected_points for p in affordable[:sample]) / sample
-                    projected = current + int(spots * avg_pts)
+                    projected = current + int(starter_slots * avg_pts)
                 else:
                     projected = current
             else:

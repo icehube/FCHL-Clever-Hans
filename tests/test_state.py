@@ -153,9 +153,11 @@ class TestTeamStateBudget:
 
 class TestTeamStateRosterNeeds:
     def test_empty_team_needs_all(self):
+        # Needs = starting-lineup requirements (12F/6D/2G); the 4 bench
+        # spots are position-agnostic and never "needed"
         team = _make_team()
         needs = team.roster_needs
-        assert needs == {"F": 14, "D": 7, "G": 3}
+        assert needs == {"F": 12, "D": 6, "G": 2}
 
     def test_partial_roster(self):
         keepers = [
@@ -167,7 +169,7 @@ class TestTeamStateRosterNeeds:
         ]
         team = _make_team(keepers=keepers)
         needs = team.roster_needs
-        assert needs == {"F": 7, "D": 4, "G": 2}
+        assert needs == {"F": 5, "D": 3, "G": 1}
 
     def test_full_roster_needs_zero(self):
         keepers = (
@@ -182,7 +184,7 @@ class TestTeamStateRosterNeeds:
     def test_minors_dont_count_toward_needs(self):
         minors = [_make_player_on_roster(f"F{i}", position="F", is_minor=True) for i in range(5)]
         team = _make_team(minors=minors)
-        assert team.roster_needs["F"] == 14  # Minors don't help
+        assert team.roster_needs["F"] == 12  # Minors don't help
 
 
 class TestTeamStatePlayerOps:

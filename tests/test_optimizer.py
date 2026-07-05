@@ -72,7 +72,7 @@ class TestSolveOptimalRoster:
         assert "G1" in selected_names  # Best goalie
 
     def test_respects_position_minimums(self):
-        """Solution must have at least 14F, 7D, 3G."""
+        """Solution must be able to field the 12F/6D/2G starting lineup."""
         players, prices = _simple_pool()
         team = _make_team()
         sol = solve_optimal_roster(team, players, prices)
@@ -80,9 +80,53 @@ class TestSolveOptimalRoster:
         f_count = len(sol.by_position["F"])
         d_count = len(sol.by_position["D"])
         g_count = len(sol.by_position["G"])
-        assert f_count >= 14
-        assert d_count >= 7
-        assert g_count >= 3
+        assert f_count >= 12
+        assert d_count >= 6
+        assert g_count >= 2
+
+    def test_prefers_balanced_bench(self):
+        """With flat-ish points, the soft 2F/1D/1G backup preference should
+        produce the classic 14F/7D/3G shape."""
+        players, prices = _simple_pool()
+        team = _make_team()
+        sol = solve_optimal_roster(team, players, prices)
+        assert sol.status == "Optimal"
+        counts = {pos: len(ps) for pos, ps in sol.by_position.items()}
+        assert counts == {"F": 14, "D": 7, "G": 3}
+
+    def test_bench_does_not_score(self):
+        """total_points counts only the best 12F/6D/2G starting lineup."""
+        players, prices = _simple_pool()
+        team = _make_team()
+        sol = solve_optimal_roster(team, players, prices)
+        assert sol.status == "Optimal"
+        from state import lineup_points
+        assert sol.total_points == lineup_points(sol.roster)
+        # And strictly less than the sum over all 24 rostered players
+        assert sol.total_points < sum(p.projected_points for p in sol.roster)
+
+    def test_sacrifices_bench_shape_for_big_starter_gain(self):
+        """The 14/7/3 preference is soft: a starter upgrade worth far more
+        than the backup bonus must win."""
+        players = {}
+        prices = {}
+        # 16 forwards: 12 stars + 4 good ones (points beat any D/G bench value)
+        for i in range(16):
+            players[f"F{i}"] = _make_player(f"F{i}", position="F", pts=90 - i)
+            prices[f"F{i}"] = 1.0
+        # Exactly 6 D and 2 G — lineup fillable, zero backup candidates
+        for i in range(6):
+            players[f"D{i}"] = _make_player(f"D{i}", position="D", pts=40)
+            prices[f"D{i}"] = 1.0
+        for i in range(2):
+            players[f"G{i}"] = _make_player(f"G{i}", position="G", pts=30)
+            prices[f"G{i}"] = 1.0
+        team = _make_team()
+        sol = solve_optimal_roster(team, players, prices)
+        # Only one legal 24-man roster exists (16F/6D/2G) — the solver must
+        # take it rather than call the position shape infeasible
+        assert sol.status == "Optimal"
+        assert len(sol.by_position["F"]) == 16
 
     def test_respects_budget(self):
         """Total cost should not exceed spendable budget."""

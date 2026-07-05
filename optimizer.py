@@ -7,19 +7,27 @@ from dataclasses import dataclass
 import pulp
 
 from config import (
+    BACKUP_BONUS,
+    BACKUP_TARGETS,
+    BENCH_WEIGHT,
     MAX_SALARY,
     MIN_SALARY,
     MY_TEAM,
     POSITION_MINIMUMS,
     SALARY_INCREMENT,
+    STARTING_LINEUP,
 )
 from market import MarketInfo
-from state import AuctionState, Player, TeamState
+from state import AuctionState, Player, TeamState, lineup_points
 
 
 @dataclass
 class MILPSolution:
-    """Result of a MILP roster optimization."""
+    """Result of a MILP roster optimization.
+
+    total_points is STARTING LINEUP points (12F/6D/2G) — bench players
+    contribute nothing, per league scoring.
+    """
 
     total_points: float
     roster: list[Player]
@@ -108,18 +116,17 @@ def solve_optimal_roster(
             if needs.get(pos, 0) > 0:
                 needs[pos] -= 1
 
+    forced_objs = [
+        available_players[n] for n in forced_players if n in available_players
+    ]
+
     if spots == 0 and budget >= 0:
         # Forced players exactly fill the roster — a complete roster is a
         # valid outcome, not an infeasibility. (Returning Infeasible here
         # made compute_marginal_value price ANY player at the floor when
         # one spot remained.)
-        forced_pts = sum(
-            available_players[n].projected_points
-            for n in forced_players
-            if n in available_players
-        )
         return MILPSolution(
-            total_points=sum(p.projected_points for p in team.roster_players) + forced_pts,
+            total_points=lineup_points(list(team.roster_players) + forced_objs),
             roster=[],
             total_cost=forced_cost,
             by_position={"F": [], "D": [], "G": []},
@@ -128,7 +135,7 @@ def solve_optimal_roster(
 
     if spots < 0 or budget < 0 or budget < spots * MIN_SALARY:
         return MILPSolution(
-            total_points=sum(p.projected_points for p in team.roster_players),
+            total_points=lineup_points(team.roster_players),
             roster=[],
             total_cost=0.0,
             by_position={"F": [], "D": [], "G": []},
@@ -136,7 +143,7 @@ def solve_optimal_roster(
         )
 
     # Cap position needs so their sum doesn't exceed spots
-    # (e.g., team with all-F keepers may need 7D+3G=10 but only have 8 spots)
+    # (e.g., team with all-F keepers may need 6D+2G=8 but only have 6 spots)
     total_needs = sum(needs.values())
     if total_needs > spots:
         excess = total_needs - spots
@@ -148,18 +155,73 @@ def solve_optimal_roster(
             needs[pos] -= reduction
             excess -= reduction
 
-    # Build MILP
+    # Build MILP. Roster selection (x) and starter assignment (s) are chosen
+    # together: only the best 12F/6D/2G score points, so the objective is
+    # starter points, with small terms for bench quality and a soft 2F/1D/1G
+    # backup-composition preference (the classic 14/7/3 shape) — see config.
     prob = pulp.LpProblem("roster_optimizer", pulp.LpMaximize)
 
-    # Decision variables (use index for LP-safe names)
+    # Roster decision variables for candidates (use index for LP-safe names)
     x = {}
     for i, name in enumerate(candidates):
         x[name] = pulp.LpVariable(f"x_{i}", cat="Binary")
 
-    # Objective: maximize total projected points
-    prob += pulp.lpSum(
-        candidates[name].projected_points * x[name] for name in candidates
+    # Starter variables: existing roster members and forced players are
+    # locked onto the roster (s free-standing); candidates only if selected.
+    fixed_members = list(team.roster_players) + forced_objs
+    s_fixed = {
+        j: pulp.LpVariable(f"sf_{j}", cat="Binary")
+        for j in range(len(fixed_members))
+    }
+    s_cand = {}
+    for i, name in enumerate(candidates):
+        s_cand[name] = pulp.LpVariable(f"sc_{i}", cat="Binary")
+        prob += s_cand[name] <= x[name]
+
+    # Starter slots per position (12F/6D/2G)
+    for pos, slots in STARTING_LINEUP.items():
+        prob += (
+            pulp.lpSum(
+                s_fixed[j] for j, p in enumerate(fixed_members) if p.position == pos
+            )
+            + pulp.lpSum(
+                s_cand[n] for n in candidates if candidates[n].position == pos
+            )
+        ) <= slots
+
+    # Soft backup-composition credit: bk_pos counts bench players at pos,
+    # capped at the 2F/1D/1G target. rostered - starters >= bench by
+    # construction, so the constraint is always satisfiable.
+    bk = {}
+    for pos, target in BACKUP_TARGETS.items():
+        bk[pos] = pulp.LpVariable(f"bk_{pos}", lowBound=0, upBound=target)
+        rostered_pos = (
+            sum(1 for p in fixed_members if p.position == pos)
+            + pulp.lpSum(x[n] for n in candidates if candidates[n].position == pos)
+        )
+        starters_pos = (
+            pulp.lpSum(
+                s_fixed[j] for j, p in enumerate(fixed_members) if p.position == pos
+            )
+            + pulp.lpSum(
+                s_cand[n] for n in candidates if candidates[n].position == pos
+            )
+        )
+        prob += bk[pos] <= rostered_pos - starters_pos
+
+    # Objective: starter points + 10%-weighted bench points + backup credits
+    starter_pts = (
+        pulp.lpSum(
+            p.projected_points * s_fixed[j] for j, p in enumerate(fixed_members)
+        )
+        + pulp.lpSum(
+            candidates[n].projected_points * s_cand[n] for n in candidates
+        )
     )
+    bench_pts = pulp.lpSum(
+        candidates[n].projected_points * (x[n] - s_cand[n]) for n in candidates
+    )
+    prob += starter_pts + BENCH_WEIGHT * bench_pts + BACKUP_BONUS * pulp.lpSum(bk.values())
 
     # Budget constraint
     prob += pulp.lpSum(
@@ -169,7 +231,7 @@ def solve_optimal_roster(
     # Total players constraint (must fill all remaining spots)
     prob += pulp.lpSum(x[name] for name in candidates) == spots
 
-    # Position minimum constraints
+    # Position minimum constraints (must be able to field the lineup)
     for pos, need in needs.items():
         if need > 0:
             pos_players = [n for n in candidates if candidates[n].position == pos]
@@ -181,7 +243,7 @@ def solve_optimal_roster(
     status = pulp.LpStatus[prob.status]
     if status != "Optimal":
         return MILPSolution(
-            total_points=sum(p.projected_points for p in team.roster_players),
+            total_points=lineup_points(team.roster_players),
             roster=[],
             total_cost=0.0,
             by_position={"F": [], "D": [], "G": []},
@@ -191,15 +253,9 @@ def solve_optimal_roster(
     # Extract solution
     selected = [candidates[n] for n in candidates if x[n].varValue and x[n].varValue > 0.5]
     total_cost = sum(market_prices.get(p.name, MIN_SALARY) for p in selected) + forced_cost
-    total_points = (
-        sum(p.projected_points for p in team.roster_players)
-        + sum(p.projected_points for p in selected)
-        + sum(
-            available_players[n].projected_points
-            for n in forced_players
-            if n in available_players
-        )
-    )
+    # Report pure lineup points (recomputed greedily — exact for a fixed
+    # roster), not the objective value, which includes the soft-bonus terms
+    total_points = lineup_points(fixed_members + selected)
 
     by_position: dict[str, list[Player]] = {"F": [], "D": [], "G": []}
     for p in selected:

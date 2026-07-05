@@ -13,9 +13,26 @@ from config import (
     POSITION_MINIMUMS,
     ROSTER_SIZE,
     SALARY_CAP,
+    STARTING_LINEUP,
 )
 
 MAX_SNAPSHOTS = 50
+
+
+def lineup_points(players) -> int:
+    """Points from the best legal starting lineup (12F/6D/2G).
+
+    League scoring counts starters only — bench players contribute nothing.
+    Greedy top-k per position is exact for this subproblem.
+    """
+    by_pos: dict[str, list[int]] = {"F": [], "D": [], "G": []}
+    for p in players:
+        if p.position in by_pos:
+            by_pos[p.position].append(p.projected_points)
+    total = 0
+    for pos, slots in STARTING_LINEUP.items():
+        total += sum(sorted(by_pos[pos], reverse=True)[:slots])
+    return total
 
 
 @dataclass
@@ -153,8 +170,8 @@ class TeamState:
 
     @property
     def current_roster_points(self) -> int:
-        """Sum of projected points for all active roster players."""
-        return sum(p.projected_points for p in self.roster_players)
+        """Projected points from the best starting lineup (bench scores 0)."""
+        return lineup_points(self.roster_players)
 
     def find_player(self, name: str) -> PlayerOnRoster | None:
         """Find a player by name across all lists."""

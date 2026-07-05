@@ -76,6 +76,7 @@
 
             {% if trade_result.recommendation == "accept" %}
             <form hx-post="/trade-execute" hx-target="#app" hx-swap="innerHTML" class="mt-2">
+                <input type="hidden" name="trade_id" value="{{ trade_result.trade_id }}">
                 <button type="submit" class="btn btn-primary btn-sm">Execute Trade</button>
             </form>
             {% endif %}

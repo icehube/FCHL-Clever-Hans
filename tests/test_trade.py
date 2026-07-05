@@ -27,6 +27,51 @@ def _setup():
     return state, mp
 
 
+class TestTradeLegalityGuards:
+    """Regression (2026-07-05 review): the evaluator recommended ACCEPT on
+    cap-violating trades because scenarios compared raw points and ignored
+    MILP status / negative cap."""
+
+    def test_cap_violating_trade_declined(self):
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+
+        # Nearly exhaust BOT's cap so any big incoming salary busts it
+        bot.penalties += bot.remaining_budget - 1.0
+        assert bot.remaining_budget == pytest.approx(1.0)
+
+        cheap = min(bot.keeper_players, key=lambda p: p.salary)
+        star = max(state.available_players.values(), key=lambda p: p.projected_points)
+        give = [PlayerTrade(cheap.name, cheap.position, cheap.salary, cheap.projected_points)]
+        receive = [PlayerTrade(star.name, star.position, 11.0, star.projected_points)]
+
+        result = evaluate_trade(state, give, receive, mp)
+        assert result.recommendation == "decline"
+        assert "over the cap" in result.reasoning or "unsolvable" in result.reasoning
+
+    def test_two_team_receive_preserves_group_and_salary(self):
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        other_code = next(c for c in state.teams if c != MY_TEAM)
+        other = state.teams[other_code]
+
+        src = other.keeper_players[0]
+        src_group, src_salary = src.group, src.salary
+        give_p = bot.keeper_players[0]
+
+        execute_trade(
+            state,
+            give=[PlayerTrade(give_p.name, give_p.position, give_p.salary, give_p.projected_points)],
+            # Deliberately wrong client-supplied salary — roster value must win
+            receive=[PlayerTrade(src.name, src.position, 99.0, src.projected_points)],
+            source_team_code=other_code,
+        )
+        arrived = bot.find_player(src.name)
+        assert arrived is not None
+        assert arrived.group == src_group
+        assert arrived.salary == src_salary
+
+
 class TestEvaluateTrade:
     def test_good_trade_recommends_accept(self):
         """Trading a low player for a high player should recommend accept."""

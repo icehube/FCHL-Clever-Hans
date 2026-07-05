@@ -138,8 +138,13 @@ buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 
 
 def _recompute():
-    """After any state change: recompute market prices + re-solve MILP."""
-    global market_prices, market_info, milp_solution
+    """After any state change: recompute market prices + re-solve MILP.
+
+    Also invalidates any pending trade evaluation — a trade evaluated
+    against the old world must not be executable against the new one.
+    """
+    global market_prices, market_info, milp_solution, last_trade_eval
+    last_trade_eval = None
     market_info = compute_market_ceiling(auction_state.teams)
     all_market = compute_all_market_prices(
         auction_state.available_players, model_prices, auction_state.teams,
@@ -513,11 +518,20 @@ async def trade_evaluate(request: Request):
 
 
 @app.post("/trade-execute", response_class=HTMLResponse)
-async def trade_execute(request: Request):
+async def trade_execute(request: Request, trade_id: str = Form("")):
     """Execute a previously evaluated trade."""
     global last_trade_eval
     if last_trade_eval is None:
-        return _render(request, "partials/all_panels.html")
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            "No current trade evaluation — state changed since it was "
+            "evaluated. Re-evaluate the trade.", "warning",
+        )
+    if trade_id != last_trade_eval.trade_id:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            "Stale trade — re-evaluate before executing.", "warning",
+        )
 
     # Capture trade details before clearing
     trade_give = last_trade_eval.give
@@ -929,36 +943,55 @@ async def trade_between(
     players_from_a: str = Form(""),
     players_from_b: str = Form(""),
 ):
-    """Execute a trade between two non-BOT teams."""
+    """Execute a trade between two teams. Atomic: all names must resolve."""
     names_a = [n.strip() for n in players_from_a.split(",") if n.strip()]
     names_b = [n.strip() for n in players_from_b.split(",") if n.strip()]
     if not names_a and not names_b:
-        return _render(request, "partials/all_panels.html")
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            "No players selected for trade", "warning",
+        )
+    if team_a == team_b:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            "Cannot trade a team with itself", "error",
+        )
     ta = auction_state.teams.get(team_a)
     tb = auction_state.teams.get(team_b)
     if not ta or not tb:
-        return _render(request, "partials/all_panels.html")
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Unknown team: {team_a if not ta else team_b}", "error",
+        )
+    # Validate every name BEFORE mutating — a typo or stale roster must not
+    # produce a silent one-sided trade
+    missing = [n for n in names_a if ta.find_player(n) is None]
+    missing += [n for n in names_b if tb.find_player(n) is None]
+    if missing:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Trade aborted — not on roster: {', '.join(missing)}", "error",
+        )
     auction_state.save_snapshot()
     now = datetime.now().isoformat()
     for name in names_a:
-        try:
-            p = ta.remove_player(name)
-            p.is_minor = False
-            tb.add_acquired_player(p)
-            _log_transaction(p.name, p.position, f"{team_a}→{team_b}", p.salary, "trade", timestamp=now)
-        except ValueError:
-            pass
+        p = ta.remove_player(name)
+        p.is_minor = False
+        p.is_bench = False
+        tb.add_acquired_player(p)
+        _log_transaction(p.name, p.position, f"{team_a}→{team_b}", p.salary, "trade", timestamp=now)
     for name in names_b:
-        try:
-            p = tb.remove_player(name)
-            p.is_minor = False
-            ta.add_acquired_player(p)
-            _log_transaction(p.name, p.position, f"{team_b}→{team_a}", p.salary, "trade", timestamp=now)
-        except ValueError:
-            pass
+        p = tb.remove_player(name)
+        p.is_minor = False
+        p.is_bench = False
+        ta.add_acquired_player(p)
+        _log_transaction(p.name, p.position, f"{team_b}→{team_a}", p.salary, "trade", timestamp=now)
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    return _toast(
+        _render(request, "partials/all_panels.html"),
+        f"Trade executed: {team_a} ↔ {team_b}", "success",
+    )
 
 
 @app.get("/state")

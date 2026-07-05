@@ -356,7 +356,8 @@ class TestTradeFlow:
         })
 
         # Then execute
-        r = client.post("/trade-execute")
+        import main as _main
+        r = client.post("/trade-execute", data={"trade_id": _main.last_trade_eval.trade_id})
         assert r.status_code == 200
 
         state_after = _get_state(client)
@@ -429,7 +430,8 @@ class TestTradeFlow:
                 "projected_points": 50,
             })],
         })
-        r = client.post("/trade-execute")
+        import main as _main
+        r = client.post("/trade-execute", data={"trade_id": _main.last_trade_eval.trade_id})
         assert r.status_code == 200
 
         state_after = _get_state(client)
@@ -488,7 +490,8 @@ class TestTwoTeamTradeFlow:
                 "projected_points": receive_player["projected_points"],
             })],
         })
-        r = client.post("/trade-execute")
+        import main as _main
+        r = client.post("/trade-execute", data={"trade_id": _main.last_trade_eval.trade_id})
         assert r.status_code == 200
 
         state_after = _get_state(client)

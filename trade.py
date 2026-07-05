@@ -6,7 +6,7 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from config import BUYOUT_PENALTY_RATE, MY_TEAM
+from config import BUYOUT_PENALTY_RATE, DEFAULT_TEAM_PROBABILITY, MY_TEAM
 from optimizer import MILPSolution, solve_optimal_roster
 from state import AuctionState, Player, PlayerOnRoster
 
@@ -103,6 +103,18 @@ def evaluate_trade(
     trade_state = deepcopy(state)
     trade_team = trade_state.teams[MY_TEAM]
 
+    # Two-team trades: take salary/points from the source team's roster,
+    # not the client-supplied form JSON (stale if adjusted after the
+    # dropdown loaded). Mutating the PlayerTrade DTOs here also corrects
+    # the values execute_trade will apply later.
+    if source_team_code and source_team_code in trade_state.teams:
+        src_team = trade_state.teams[source_team_code]
+        for p in receive:
+            actual = src_team.find_player(p.name)
+            if actual is not None:
+                p.salary = actual.salary
+                p.projected_points = actual.projected_points
+
     # Remove players BOT gives away
     for p in give:
         try:
@@ -140,7 +152,9 @@ def evaluate_trade(
                 projected_points=p.projected_points,
                 is_rfa=False,
                 salary=p.salary,
-                team_probability=0.0,
+                # League-average odds, not 0.0 — 0% Cup probability is
+                # out-of-distribution for the price model
+                team_probability=DEFAULT_TEAM_PROBABILITY,
                 pos_rank=_pool_rank(trade_available, p.position, p.projected_points),
             )
 
@@ -172,8 +186,33 @@ def evaluate_trade(
                 buyouts=[p.name],
             ))
 
-    # Find best scenario
-    best = max(scenarios, key=lambda s: s.total_points)
+    # A scenario is only acceptable if it leaves a legal team: cap space
+    # non-negative and a solvable roster. Comparing raw total_points let
+    # cap-violating trades win (Infeasible solves still report baseline
+    # lineup points).
+    def _is_legal(s: TradeScenario) -> bool:
+        return s.cap_remaining >= 0 and s.roster.status == "Optimal"
+
+    legal = [s for s in scenarios if _is_legal(s)]
+    if not legal:
+        worst_cap = min(s.cap_remaining for s in scenarios)
+        return TradeEvaluation(
+            trade_id=trade_id,
+            give=give,
+            receive=receive,
+            current_scenario=current_scenario,
+            scenarios=scenarios,
+            best_scenario=max(scenarios, key=lambda s: s.total_points),
+            recommendation="decline",
+            reasoning=(
+                f"No legal outcome: trade leaves the roster over the cap "
+                f"(${worst_cap:.1f}M remaining) or unsolvable"
+            ),
+            source_team_code=source_team_code,
+        )
+
+    # Find best legal scenario
+    best = max(legal, key=lambda s: s.total_points)
 
     # Compare best to current
     if best.total_points > current_scenario.total_points:
@@ -277,22 +316,25 @@ def execute_trade(
         for p in give:
             removed = bot.remove_player(p.name)
             other.add_acquired_player(PlayerOnRoster(
-                name=p.name,
-                position=p.position,
+                name=removed.name,
+                position=removed.position,
                 group=removed.group,
-                salary=p.salary,
-                projected_points=p.projected_points,
+                salary=removed.salary,
+                projected_points=removed.projected_points,
                 nhl_team=removed.nhl_team,
             ))
 
         for p in receive:
             removed = other.remove_player(p.name)
+            # Carry the authoritative roster object's identity: group drives
+            # minors cap semantics (A-E don't count), salary is unchanged by
+            # a trade, and a fresh PlayerOnRoster resets is_bench/is_minor.
             bot.add_acquired_player(PlayerOnRoster(
-                name=p.name,
-                position=p.position,
-                group="3",
-                salary=p.salary,
-                projected_points=p.projected_points,
+                name=removed.name,
+                position=removed.position,
+                group=removed.group,
+                salary=removed.salary,
+                projected_points=removed.projected_points,
                 nhl_team=removed.nhl_team,
             ))
         return
@@ -301,18 +343,20 @@ def execute_trade(
     for p in give:
         removed = bot.remove_player(p.name)
         state.available_players[p.name] = Player(
-            name=p.name,
-            position=p.position,
+            name=removed.name,
+            position=removed.position,
             group=removed.group,
-            nhl_team="",
+            nhl_team=removed.nhl_team,
             age=0,
-            projected_points=p.projected_points,
+            projected_points=removed.projected_points,
             is_rfa=False,
-            salary=p.salary,
-            team_probability=0.0,
+            salary=removed.salary,
+            # League-average odds, not 0.0 — 0% Cup probability is
+            # out-of-distribution for the price model
+            team_probability=DEFAULT_TEAM_PROBABILITY,
             # Re-entering the pool: rank against the remaining pool so the
             # price model's scarcity feature doesn't treat them as rank 1
-            pos_rank=_pool_rank(state.available_players, p.position, p.projected_points),
+            pos_rank=_pool_rank(state.available_players, removed.position, removed.projected_points),
         )
 
     for p in receive:

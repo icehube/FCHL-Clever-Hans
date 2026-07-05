@@ -108,7 +108,25 @@ def solve_optimal_roster(
             if needs.get(pos, 0) > 0:
                 needs[pos] -= 1
 
-    if spots <= 0 or budget < 0 or budget < spots * MIN_SALARY:
+    if spots == 0 and budget >= 0:
+        # Forced players exactly fill the roster — a complete roster is a
+        # valid outcome, not an infeasibility. (Returning Infeasible here
+        # made compute_marginal_value price ANY player at the floor when
+        # one spot remained.)
+        forced_pts = sum(
+            available_players[n].projected_points
+            for n in forced_players
+            if n in available_players
+        )
+        return MILPSolution(
+            total_points=sum(p.projected_points for p in team.roster_players) + forced_pts,
+            roster=[],
+            total_cost=forced_cost,
+            by_position={"F": [], "D": [], "G": []},
+            status="Optimal",
+        )
+
+    if spots < 0 or budget < 0 or budget < spots * MIN_SALARY:
         return MILPSolution(
             total_points=sum(p.projected_points for p in team.roster_players),
             roster=[],
@@ -211,29 +229,43 @@ def compute_marginal_value(
     Binary search for the salary at which adding the player no longer
     improves the optimal roster. That salary is the marginal value.
     """
-    # Solve without the player
-    without = solve_optimal_roster(
-        team, available_players, market_prices,
-        excluded_players={player.name},
-    )
-
-    if without.status != "Optimal":
-        return MIN_SALARY
-
     # Check if player improves the roster at MIN_SALARY
     with_at_min = solve_optimal_roster(
         team, available_players, market_prices,
         excluded_players=set(),
         forced_players={player.name: MIN_SALARY},
     )
+    if with_at_min.status != "Optimal":
+        # Can't roster him even at the floor — worth nothing extra
+        return MIN_SALARY
 
-    if with_at_min.status != "Optimal" or with_at_min.total_points <= without.total_points:
+    # Solve without the player
+    without = solve_optimal_roster(
+        team, available_players, market_prices,
+        excluded_players={player.name},
+    )
+    if without.status != "Optimal":
+        # No legal roster exists WITHOUT this player (e.g. the last goalie
+        # in the pool) — he's a must-have, worth everything we can pay.
+        return round(max(team.physical_max_bid, MIN_SALARY), 1)
+
+    if with_at_min.total_points <= without.total_points:
         return MIN_SALARY
 
     # Binary search for the break-even salary
     # Search in discrete increments of SALARY_INCREMENT
     lo = MIN_SALARY
     hi = min(team.spendable_budget + MIN_SALARY, MAX_SALARY)
+
+    # Check the top first: a player still worth it at our absolute max is
+    # valued at hi exactly (the loop below can only ever reach hi - 0.1).
+    with_at_hi = solve_optimal_roster(
+        team, available_players, market_prices,
+        excluded_players=set(),
+        forced_players={player.name: round(hi, 1)},
+    )
+    if with_at_hi.status == "Optimal" and with_at_hi.total_points > without.total_points:
+        return round(hi, 1)
 
     while hi - lo > SALARY_INCREMENT:
         mid = round(lo + (hi - lo) / 2, 1)
@@ -272,7 +304,19 @@ def compute_bid_recommendation(
     ceiling = market_info.market_ceiling
 
     max_bid = min(marginal, ceiling + SALARY_INCREMENT, team.physical_max_bid)
-    max_bid = round(max(max_bid, MIN_SALARY), 1)
+
+    if max_bid < MIN_SALARY:
+        # We can't legally place even a floor bid (roster full or budget
+        # exhausted) — never clamp UP to a fake $0.5 recommendation.
+        return BidRecommendation(
+            player_name=player.name,
+            max_bid=0.0,
+            marginal_value=marginal,
+            market_ceiling=ceiling,
+            reasoning="No roster spot or budget for any bid",
+            action="DROP",
+        )
+    max_bid = round(max_bid, 1)
 
     if current_price >= max_bid:
         action = "DROP"

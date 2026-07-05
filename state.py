@@ -147,7 +147,9 @@ class TeamState:
         """
         if self.total_spots_remaining <= 0:
             return 0.0
-        return min(self.spendable_budget + MIN_SALARY, MAX_SALARY)
+        # Clamp at 0 so over-committed teams read as "can't bid", not a
+        # nonsense negative ceiling in templates and projections.
+        return max(0.0, min(self.spendable_budget + MIN_SALARY, MAX_SALARY))
 
     @property
     def current_roster_points(self) -> int:

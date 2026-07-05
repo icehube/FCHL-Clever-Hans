@@ -62,6 +62,95 @@ def _make_team(keepers=None, budget_used=0.0, penalties=0.0):
     return team
 
 
+class TestEndgameMarginalValue:
+    """Regression tests: the endgame advice collapse (2026-07-05 review).
+
+    With 1 spot left, forcing a candidate used to leave spots=0 -> Infeasible
+    -> marginal value $0.5 for ANY player. Must-have players (without-solve
+    infeasible) were also floor-valued instead of max-valued.
+    """
+
+    def _team_with_one_spot(self):
+        keepers = (
+            [PlayerOnRoster(name=f"F{i}", position="F", group="3", salary=1.0,
+                            projected_points=50) for i in range(13)]
+            + [PlayerOnRoster(name=f"D{i}", position="D", group="3", salary=1.0,
+                              projected_points=40) for i in range(7)]
+            + [PlayerOnRoster(name=f"G{i}", position="G", group="3", salary=1.0,
+                              projected_points=30) for i in range(3)]
+        )
+        return _make_team(keepers=keepers)  # 23 filled, 1 spot, big budget
+
+    def test_star_with_one_spot_left_not_floor_valued(self):
+        from optimizer import compute_marginal_value
+        team = self._team_with_one_spot()
+        pool = {f"P{i}": _make_player(f"P{i}", pts=100 - i * 5) for i in range(6)}
+        prices = {n: 2.0 for n in pool}
+        mv = compute_marginal_value(pool["P0"], team, pool, prices)
+        # 100-pt star vs 80-pt best alternative: worth far more than floor
+        assert mv > 5.0
+
+    def test_only_remaining_goalie_is_must_have(self):
+        from optimizer import compute_marginal_value
+        keepers = (
+            [PlayerOnRoster(name=f"F{i}", position="F", group="3", salary=1.0,
+                            projected_points=50) for i in range(13)]
+            + [PlayerOnRoster(name=f"D{i}", position="D", group="3", salary=1.0,
+                              projected_points=40) for i in range(7)]
+            + [PlayerOnRoster(name=f"G{i}", position="G", group="3", salary=1.0,
+                              projected_points=30) for i in range(2)]
+        )
+        team = _make_team(keepers=keepers)  # needs 1F + 1G
+        pool = {
+            "Fx": _make_player("Fx", pts=60),
+            "Fy": _make_player("Fy", pts=55),
+            "Glast": _make_player("Glast", position="G", pts=45),
+        }
+        prices = {n: 1.0 for n in pool}
+        mv = compute_marginal_value(pool["Glast"], team, pool, prices)
+        # Excluding the only goalie makes the roster infeasible: must-have,
+        # valued at physical max — not the floor
+        assert mv == pytest.approx(team.physical_max_bid, abs=0.11)
+
+    def test_full_roster_recommends_drop_not_bid(self):
+        from optimizer import compute_bid_recommendation
+        keepers = (
+            [PlayerOnRoster(name=f"F{i}", position="F", group="3", salary=1.0,
+                            projected_points=50) for i in range(14)]
+            + [PlayerOnRoster(name=f"D{i}", position="D", group="3", salary=1.0,
+                              projected_points=40) for i in range(7)]
+            + [PlayerOnRoster(name=f"G{i}", position="G", group="3", salary=1.0,
+                              projected_points=30) for i in range(3)]
+        )
+        team = _make_team(keepers=keepers)  # full roster: physical max 0.0
+        assert team.physical_max_bid == 0.0
+        pool = {"S": _make_player("S", pts=90)}
+        prices = {"S": 5.0}
+        mi = MarketInfo(market_ceiling=5.0, highest_bidder="X", highest_bid=5.0,
+                        second_bidder="Y", demand_count=3, floor_demand=False)
+        rec = compute_bid_recommendation(pool["S"], team, pool, prices, mi)
+        # Never clamp a 0 physical max UP to a $0.5 BID
+        assert rec.action == "DROP"
+        assert rec.max_bid == 0.0
+
+
+class TestLiveCeilingExcludesBot:
+    """BOT's own budget must never set its own bidding ceiling."""
+
+    def test_bot_richest_uses_highest_opponent(self):
+        from market import compute_live_ceiling
+        teams = {}
+        for code, spent in [("BOT", 34.0), ("AAA", 38.0), ("BBB", 42.0)]:
+            teams[code] = _make_team()
+            teams[code].code = code
+            teams[code].penalties = spent  # consume budget via penalties
+        ceilings = {c: teams[c].physical_max_bid for c in teams}
+        live = compute_live_ceiling(["BOT", "AAA", "BBB"], teams, exclude_team="BOT")
+        # Price-to-beat is the highest OPPONENT max, not BOT's own richer max
+        assert live == pytest.approx(round(ceilings["AAA"], 1))
+        assert live < ceilings["BOT"]
+
+
 class TestOptimizerEdgeCases:
     """Test optimizer boundary conditions."""
 
@@ -102,7 +191,9 @@ class TestOptimizerEdgeCases:
         prices = {f"P{i}": 1.0 for i in range(10)}
 
         sol = solve_optimal_roster(team, players, prices)
-        assert sol.status == "Infeasible"
+        # A full roster is a complete outcome, not an infeasibility —
+        # Infeasible here made the endgame bid advisor price everyone at floor
+        assert sol.status == "Optimal"
         assert len(sol.roster) == 0
 
     def test_fewer_candidates_than_spots(self):

@@ -23,8 +23,9 @@ BUYOUT_PENALTY_RATE = 0.5
 # NHL team alias mapping (players.csv uses UTH, team_odds.json uses UTA)
 NHL_TEAM_ALIASES = {"UTH": "UTA"}
 
-# Default Stanley Cup probability for teams not in team_odds.json
-DEFAULT_TEAM_PROBABILITY = 0.031
+# Default Stanley Cup probability (percent) for teams not in team_odds.json —
+# the price model was trained on percentages (league sums to 100)
+DEFAULT_TEAM_PROBABILITY = 3.1
 
 # Groups whose minor-league salary counts toward the cap
 MINOR_CAP_GROUPS = {"2", "3"}

@@ -35,17 +35,18 @@ class TestLoadTeamMetadata:
 
 
 class TestLoadTeamOdds:
-    def test_loads_odds(self):
+    def test_loads_odds_as_percent(self):
+        # The price model was trained on percentages (league sums to ~100)
         odds = load_team_odds()
-        assert odds["EDM"] == pytest.approx(0.1104)
-        assert odds["FLA"] == pytest.approx(0.0974)
+        assert odds["EDM"] == pytest.approx(11.04)
+        assert odds["FLA"] == pytest.approx(9.74)
 
     def test_uth_alias(self):
         odds = load_team_odds()
         # UTH should be resolvable via the alias
         assert "UTH" in odds or "UTA" in odds
         # UTA should have the value
-        assert odds.get("UTA", odds.get("UTH")) == pytest.approx(0.0202)
+        assert odds.get("UTA", odds.get("UTH")) == pytest.approx(2.02)
 
 
 class TestLoadPlayers:
@@ -91,7 +92,7 @@ class TestLoadPlayers:
     def test_team_probability_edm(self, loaded):
         _, biddable = loaded
         mcdavid = biddable["Connor McDavid"]
-        assert mcdavid.team_probability == pytest.approx(0.1104)
+        assert mcdavid.team_probability == pytest.approx(11.04)
 
     def test_team_probability_uth_alias(self, loaded):
         _, biddable = loaded
@@ -99,7 +100,29 @@ class TestLoadPlayers:
         uth_players = [p for p in biddable.values() if p.nhl_team == "UTH"]
         assert len(uth_players) > 0
         # Should have resolved to UTA odds
-        assert uth_players[0].team_probability == pytest.approx(0.0202)
+        assert uth_players[0].team_probability == pytest.approx(2.02)
+
+    def test_pos_ranks_assigned(self, loaded):
+        _, biddable = loaded
+        best = {}
+        for p in biddable.values():
+            assert p.pos_rank >= 1, f"{p.name} has no pos_rank"
+            if p.position not in best or p.projected_points > best[p.position].projected_points:
+                best[p.position] = p
+        # The top scorer at each position is rank 1
+        for pos, player in best.items():
+            assert player.pos_rank == 1, f"{pos} leader {player.name} not rank 1"
+
+    def test_goalie_wins_attached(self):
+        from data_loader import load_goalie_wins
+        wins = load_goalie_wins()
+        assert len(wins) > 0
+        odds = load_team_odds()
+        _, biddable = load_players(team_odds=odds, goalie_wins=wins)
+        matched = [p for p in biddable.values() if p.position == "G" and p.proj_wins]
+        assert len(matched) > 0
+        # Skaters never carry proj_wins
+        assert all(p.proj_wins is None for p in biddable.values() if p.position != "G")
 
     def test_bot_keepers(self, loaded):
         team_players, _ = loaded

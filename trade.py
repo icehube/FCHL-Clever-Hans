@@ -11,6 +11,14 @@ from optimizer import MILPSolution, solve_optimal_roster
 from state import AuctionState, Player, PlayerOnRoster
 
 
+def _pool_rank(pool: dict[str, Player], position: str, projected_points: float) -> int:
+    """Rank a player re-entering the pool against the remaining pool (ties=min)."""
+    return 1 + sum(
+        1 for q in pool.values()
+        if q.position == position and q.projected_points > projected_points
+    )
+
+
 @dataclass
 class PlayerTrade:
     """A player involved in a trade."""
@@ -133,6 +141,7 @@ def evaluate_trade(
                 is_rfa=False,
                 salary=p.salary,
                 team_probability=0.0,
+                pos_rank=_pool_rank(trade_available, p.position, p.projected_points),
             )
 
     # Scenario: keep all received players
@@ -301,6 +310,9 @@ def execute_trade(
             is_rfa=False,
             salary=p.salary,
             team_probability=0.0,
+            # Re-entering the pool: rank against the remaining pool so the
+            # price model's scarcity feature doesn't treat them as rank 1
+            pos_rank=_pool_rank(state.available_players, p.position, p.projected_points),
         )
 
     for p in receive:

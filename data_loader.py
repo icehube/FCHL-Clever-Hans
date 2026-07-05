@@ -2,6 +2,8 @@
 
 import csv
 import json
+import logging
+import os
 
 from config import (
     DEFAULT_TEAM_PROBABILITY,
@@ -9,6 +11,7 @@ from config import (
     NHL_TEAM_ALIASES,
     RFA_GROUPS,
 )
+from price_model import compute_pos_ranks
 from state import AuctionState, Player, PlayerOnRoster, TeamState
 
 # Team codes that are real FCHL teams (not UFA/RFA placeholders)
@@ -23,10 +26,14 @@ def load_team_metadata(path: str = "data/fchl_teams.json") -> dict:
 
 
 def load_team_odds(path: str = "data/team_odds.json") -> dict[str, float]:
-    """Load Stanley Cup odds. Applies NHL team aliases and default for missing teams."""
+    """Load Stanley Cup odds as PERCENT (11.04 = 11.04%).
+
+    team_odds.json stores fractions; the price model was trained on
+    vig-removed percentages (each season sums to 100), so convert here.
+    """
     with open(path) as f:
         data = json.load(f)
-    odds = data["odds"]
+    odds = {team: prob * 100.0 for team, prob in data["odds"].items()}
     # Apply aliases so lookups work with either name
     for alias, canonical in NHL_TEAM_ALIASES.items():
         if canonical in odds and alias not in odds:
@@ -40,9 +47,38 @@ def _get_team_probability(nhl_team: str, odds: dict[str, float]) -> float:
     return odds.get(canonical, DEFAULT_TEAM_PROBABILITY)
 
 
+def load_goalie_wins(path: str = "data/goalie_projection_stats.csv") -> dict[str, float]:
+    """Load projected goalie WINS for the most recent season in the file.
+
+    The pricer repo's parse_projections.py regenerates this CSV from the
+    current Dobber projections — goalies are priced on wins, not the 2W+3SO
+    composite. Goalies missing here fall back to points / goalie_pts_per_win
+    inside the price model, so a missing file degrades gracefully.
+    """
+    if not os.path.exists(path):
+        logging.warning("No goalie projection stats at %s — using points fallback", path)
+        return {}
+
+    rows = []
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            if row.get("proj_wins", "").strip():
+                rows.append(row)
+    if not rows:
+        return {}
+
+    latest = max(r["league_year"] for r in rows)
+    return {
+        r["player_name"].strip(): float(r["proj_wins"])
+        for r in rows
+        if r["league_year"] == latest
+    }
+
+
 def load_players(
     path: str = "data/players.csv",
     team_odds: dict[str, float] | None = None,
+    goalie_wins: dict[str, float] | None = None,
 ) -> tuple[dict[str, list], dict[str, Player]]:
     """
     Parse players.csv into team rosters and biddable players.
@@ -53,6 +89,8 @@ def load_players(
     """
     if team_odds is None:
         team_odds = {}
+    if goalie_wins is None:
+        goalie_wins = {}
 
     team_players: dict[str, dict[str, list]] = {}
     biddable: dict[str, Player] = {}
@@ -89,6 +127,7 @@ def load_players(
                     salary=salary,
                     team_probability=team_prob,
                     prior_fchl_team=prior_fchl_team,
+                    proj_wins=goalie_wins.get(name) if position == "G" else None,
                 )
             elif fchl_team not in _PLACEHOLDER_TEAMS and fchl_team != "":
                 # Player on a real team (keeper or minor)
@@ -109,6 +148,11 @@ def load_players(
                 else:
                     team_players[fchl_team]["keepers"].append(roster_player)
 
+    # Scarcity feature: rank within the draft-time pool, fixed for the whole
+    # auction (re-ranking the shrinking pool would inflate remaining prices).
+    for name, rank in compute_pos_ranks(biddable).items():
+        biddable[name].pos_rank = rank
+
     return team_players, biddable
 
 
@@ -121,7 +165,8 @@ def build_initial_state(
     """Full startup pipeline: load all data, build initial AuctionState."""
     metadata = load_team_metadata(teams_path)
     team_odds = load_team_odds(odds_path)
-    team_players, biddable = load_players(players_path, team_odds)
+    goalie_wins = load_goalie_wins()
+    team_players, biddable = load_players(players_path, team_odds, goalie_wins)
 
     # Build TeamState for each team defined in metadata
     teams: dict[str, TeamState] = {}

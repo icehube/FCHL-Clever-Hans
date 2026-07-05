@@ -395,31 +395,31 @@ class TestPriceModelEdgeCases:
     def params(self):
         return load_model_params()
 
-    def test_zero_points_player(self, params):
-        """Zero-point player should get floor price."""
-        pred = predict_price("F", 0, 0.03, False, params)
+    def test_zero_points_depth_player_near_floor(self, params):
+        """Zero-point newcomer ranked at the bottom of the pool sells at floor."""
+        pred = predict_price("F", 0, 3.0, False, params, pos_rank=400)
         assert pred.expected_price >= MIN_SALARY
-        # Model clamps to min_bid, so expected should be at floor
-        assert pred.expected_price == MIN_SALARY
+        assert pred.p_floor > 0.95
+        assert pred.expected_price < 1.0
 
     def test_very_high_points(self, params):
         """150+ point player should get max-range price."""
-        pred = predict_price("F", 150, 0.1, True, params)
+        pred = predict_price("F", 150, 10.0, True, params,
+                             last_salary=10.0, pos_rank=1)
         assert pred.expected_price > 5.0
         assert pred.expected_price <= MAX_SALARY + 1  # Allow slight overshoot from model
 
     def test_goalie_vs_forward(self, params):
-        """Same points, goalie should have wider sigma (more uncertainty)."""
-        f_pred = predict_price("F", 60, 0.03, False, params)
-        g_pred = predict_price("G", 60, 0.03, False, params)
-        # Both should be valid
+        """Same points, both positions should produce valid prices."""
+        f_pred = predict_price("F", 60, 3.0, False, params, pos_rank=30)
+        g_pred = predict_price("G", 60, 3.0, False, params, pos_rank=5)
         assert f_pred.expected_price > 0
         assert g_pred.expected_price > 0
 
     def test_rfa_flag_effect(self, params):
         """RFA flag should generally increase expected price."""
-        ufa = predict_price("F", 80, 0.05, False, params)
-        rfa = predict_price("F", 80, 0.05, True, params)
+        ufa = predict_price("F", 80, 5.0, False, params, pos_rank=10)
+        rfa = predict_price("F", 80, 5.0, True, params, pos_rank=10)
         # RFA typically sells higher due to restricted market
         # But don't hard-assert direction — model may vary
         assert rfa.expected_price > 0
@@ -427,13 +427,13 @@ class TestPriceModelEdgeCases:
 
     def test_very_low_team_probability(self, params):
         """Player on worst team (low Cup odds) should still get valid price."""
-        pred = predict_price("D", 40, 0.001, False, params)
+        pred = predict_price("D", 40, 0.1, False, params, pos_rank=40)
         assert pred.expected_price >= MIN_SALARY
         assert pred.sigma > 0
 
     def test_very_high_team_probability(self, params):
         """Player on best team (high Cup odds) should still get valid price."""
-        pred = predict_price("F", 80, 0.15, False, params)
+        pred = predict_price("F", 80, 15.0, False, params, pos_rank=10)
         assert pred.expected_price >= MIN_SALARY
         assert pred.expected_price <= MAX_SALARY + 1
 

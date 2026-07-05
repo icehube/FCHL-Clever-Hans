@@ -29,9 +29,11 @@ class Player:
     age: int
     projected_points: int
     is_rfa: bool
-    salary: float  # Prior salary for RFAs, stale for UFAs
+    salary: float  # Last season's FCHL salary (0 = new to league); lag feature
     team_probability: float  # Stanley Cup odds for their NHL team
     prior_fchl_team: str = ""  # For RFAs: which FCHL team previously held them
+    pos_rank: int = 0  # Rank by points within position at draft start (0 = unset)
+    proj_wins: float | None = None  # Goalies: projected wins (model input)
 
 
 @dataclass
@@ -420,6 +422,8 @@ def _player_to_dict(p: Player) -> dict:
         "salary": p.salary,
         "team_probability": p.team_probability,
         "prior_fchl_team": p.prior_fchl_team,
+        "pos_rank": p.pos_rank,
+        "proj_wins": p.proj_wins,
     }
 
 
@@ -435,6 +439,8 @@ def _player_from_dict(d: dict) -> Player:
         salary=d["salary"],
         team_probability=d["team_probability"],
         prior_fchl_team=d.get("prior_fchl_team", ""),
+        pos_rank=d.get("pos_rank", 0),
+        proj_wins=d.get("proj_wins"),
     )
 
 

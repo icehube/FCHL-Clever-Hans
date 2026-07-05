@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from config import MAX_SALARY, MIN_SALARY, MY_TEAM
-from data_loader import build_initial_state
+from data_loader import build_initial_state, load_goalie_wins
 from market import (
     MarketInfo,
     compute_all_market_prices,
@@ -29,7 +29,12 @@ from optimizer import (
     recommend_nomination,
     solve_optimal_roster,
 )
-from price_model import PricePrediction, load_model_params, predict_all_prices
+from price_model import (
+    PricePrediction,
+    compute_pos_ranks,
+    load_model_params,
+    predict_all_prices,
+)
 from state import AuctionState, ChangeRecord, PlayerOnRoster, TransactionRecord
 from trade import (
     PlayerTrade,
@@ -73,6 +78,31 @@ def _backfill_team_metadata(teams_path: str = "data/fchl_teams.json"):
             team.logo = meta[code].get("logo", team.logo)
 
 
+def _backfill_model_inputs():
+    """Fill model inputs missing from pre-round-2 state files.
+
+    pos_rank is recomputed over the remaining pool (approximate for
+    mid-draft snapshots — drafted players no longer count — but only
+    legacy snapshots ever hit this path). Goalie wins come from the
+    projection stats file; unmatched goalies use the points fallback.
+    """
+    pool = auction_state.available_players
+    if any(p.pos_rank <= 0 for p in pool.values()):
+        for name, rank in compute_pos_ranks(pool).items():
+            pool[name].pos_rank = rank
+    # Old snapshots stored fraction odds; the model expects percent. No real
+    # pool has every team's Cup probability under 1%, so max < 1 = fractions.
+    if pool and max(p.team_probability for p in pool.values()) < 1.0:
+        for p in pool.values():
+            p.team_probability *= 100.0
+    goalie_wins = None
+    for p in pool.values():
+        if p.position == "G" and p.proj_wins is None:
+            if goalie_wins is None:
+                goalie_wins = load_goalie_wins()
+            p.proj_wins = goalie_wins.get(p.name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
@@ -86,6 +116,7 @@ async def lifespan(app: FastAPI):
                 auction_state = AuctionState.from_json(f.read())
             _backfill_nhl_teams()
             _backfill_team_metadata()
+            _backfill_model_inputs()
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logging.warning("Corrupt state file, starting fresh: %s", e)
             auction_state = build_initial_state()

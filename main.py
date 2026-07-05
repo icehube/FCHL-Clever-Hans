@@ -346,17 +346,24 @@ async def assign_player(
             f"Unknown team: {team}", "error",
         )
 
-    # Clamp salary to valid range
-    salary = max(MIN_SALARY, min(salary, MAX_SALARY))
-
-    auction_state.save_snapshot()
-
-    p = auction_state.available_players.pop(player, None)
-    if p is None:
+    # Validate BEFORE snapshotting — a failed assign must not leave a no-op
+    # snapshot that eats the next undo
+    if player not in auction_state.available_players:
         return _toast(
             _render(request, "partials/all_panels.html"),
             f"Player not found: {player}", "warning",
         )
+
+    # Clamp salary to valid range, and say so — silently recording $11.4M
+    # for a typo'd 46 corrupts the draft record
+    raw_salary = salary
+    salary = max(MIN_SALARY, min(salary, MAX_SALARY))
+    clamp_note = (
+        f" (salary clamped from ${raw_salary:g}M)" if salary != raw_salary else ""
+    )
+
+    auction_state.save_snapshot()
+    p = auction_state.available_players.pop(player)
 
     # RFA group conversion: RFA1→GROUP 2, RFA2→GROUP 3
     group = p.group
@@ -391,7 +398,7 @@ async def assign_player(
     _save_state()
     return _toast(
         _render(request, "partials/all_panels.html"),
-        f"{p.name} → {team} at ${salary}M", "success",
+        f"{p.name} → {team} at ${salary}M{clamp_note}", "success",
     )
 
 
@@ -620,15 +627,19 @@ async def buyout(request: Request, player: str = Form(...)):
 @app.post("/team-done", response_class=HTMLResponse)
 async def team_done(request: Request, team_code: str = Form(...)):
     """Toggle team as finished drafting."""
-    auction_state.save_snapshot()
     t = auction_state.teams.get(team_code)
-    if t:
-        t.is_done = not t.is_done
-        _log_change(
-            "team-done",
-            team_code,
-            f"{team_code} marked as {'done' if t.is_done else 'still drafting'}",
+    if t is None:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Unknown team: {team_code}", "error",
         )
+    auction_state.save_snapshot()
+    t.is_done = not t.is_done
+    _log_change(
+        "team-done",
+        team_code,
+        f"{team_code} marked as {'done' if t.is_done else 'still drafting'}",
+    )
     _recompute()
     _save_state()
     return _render(request, "partials/all_panels.html")
@@ -636,13 +647,35 @@ async def team_done(request: Request, team_code: str = Form(...)):
 
 @app.post("/undo", response_class=HTMLResponse)
 async def undo(request: Request):
-    """Restore previous snapshot."""
-    auction_state.restore_snapshot()
+    """Restore previous snapshot, telling the user WHAT was undone."""
+    pre_txn = list(auction_state.transaction_log)
+    pre_chg = list(auction_state.change_log)
+
+    if not auction_state.restore_snapshot():
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            "Nothing to undo", "warning",
+        )
+
+    # Whichever log shrank names the reverted action; a silent undo made
+    # the Ctrl+Z-while-typing footgun invisible
+    message = "Undid last action"
+    if len(auction_state.transaction_log) < len(pre_txn):
+        t = pre_txn[-1]
+        message = (
+            f"Undid {t.transaction_type}: {t.player_name} → "
+            f"{t.team_code} (${t.salary:.1f}M)"
+        )
+    elif len(auction_state.change_log) < len(pre_chg):
+        message = f"Undid: {pre_chg[-1].description}"
+
     global model_prices
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    return _toast(
+        _render(request, "partials/all_panels.html"), message, "info",
+    )
 
 
 @app.get("/buyout-indicators", response_class=HTMLResponse)
@@ -842,15 +875,26 @@ async def toggle_bench(
     """Toggle a player between active and bench."""
     t = auction_state.teams.get(team_code)
     if t is None:
-        return _render(request, "partials/all_panels.html")
-    p = t.find_player(player_name)
-    if p:
-        p.is_bench = not p.is_bench
-        _log_change(
-            "toggle-bench",
-            team_code,
-            f"{player_name} → {'bench' if p.is_bench else 'active'}",
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Unknown team: {team_code}", "error",
         )
+    p = t.find_player(player_name)
+    if p is None:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"{player_name} not found on {team_code}", "warning",
+        )
+    # Snapshot like every other mutation — without it, undo after a bench
+    # toggle silently reverts the PREVIOUS action instead
+    auction_state.save_snapshot()
+    p.is_bench = not p.is_bench
+    _log_change(
+        "toggle-bench",
+        team_code,
+        f"{player_name} → {'bench' if p.is_bench else 'active'}",
+    )
+    _recompute()
     _save_state()
     ctx = _context(request)
     ctx["team"] = t
@@ -868,10 +912,17 @@ async def adjust_salary(
     t = auction_state.teams.get(team_code)
     if t is None:
         return _render(request, "partials/all_panels.html")
+    # Validate before snapshotting: the input auto-submits on change, and a
+    # player traded/bought out since render used to 500 here
+    p = t.find_player(player_name)
+    if p is None:
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"{player_name} is no longer on {team_code}", "warning",
+        )
     clamped = max(MIN_SALARY, min(new_salary, MAX_SALARY))
     auction_state.save_snapshot()
-    p = t.find_player(player_name)
-    old_salary = p.salary if p else 0.0
+    old_salary = p.salary
     t.adjust_salary(player_name, clamped)
     _log_change(
         "adjust-salary",

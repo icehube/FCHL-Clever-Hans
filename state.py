@@ -317,6 +317,7 @@ class AuctionState:
         self.teams = restored.teams
         self.available_players = restored.available_players
         self.transaction_log = restored.transaction_log
+        self.change_log = restored.change_log
         self.nomination_order = restored.nomination_order
         self.nomination_round = restored.nomination_round
         self.nomination_index = restored.nomination_index

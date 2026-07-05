@@ -12,17 +12,42 @@ document.body.addEventListener('showToast', function(e) {
 /* Keyboard shortcuts for auction day */
 
 document.addEventListener('keydown', function(e) {
-    // Ctrl+Z: Undo
-    if (e.ctrlKey && e.key === 'z') {
+    var tag = e.target.tagName;
+    var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || e.target.isContentEditable;
+
+    // Ctrl/Cmd+Z: state-level undo — never while editing a field (the user
+    // is undoing their typing, not the last draft pick), never on key-repeat
+    // (holding Z must not unwind multiple picks).
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (typing) return;
         e.preventDefault();
+        if (e.repeat) return;
         htmx.ajax('POST', '/undo', {target: '#app', swap: 'innerHTML'});
     }
 
-    // Ctrl+N: Nominate
-    if (e.ctrlKey && e.key === 'n') {
+    // N: nomination recommendations. (Ctrl+N is reserved by Chrome/Firefox
+    // and cannot be intercepted — plain letter keys outside inputs work.)
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         htmx.ajax('GET', '/nominate', {target: '#auction-control', swap: 'outerHTML'});
     }
+});
+
+/* Surface failed HTMX requests — without these listeners a failed POST
+   swaps nothing and the user believes the action was recorded. */
+document.body.addEventListener('htmx:responseError', function(e) {
+    document.body.dispatchEvent(new CustomEvent('showToast', {detail: {
+        type: 'error',
+        message: 'Request failed (' + e.detail.xhr.status + '): '
+            + (e.detail.requestConfig ? e.detail.requestConfig.path : ''),
+    }}));
+});
+document.body.addEventListener('htmx:sendError', function() {
+    document.body.dispatchEvent(new CustomEvent('showToast', {detail: {
+        type: 'error',
+        message: 'Network error — the request did not reach the server',
+    }}));
 });
 
 /* Sort table by clicking column headers */

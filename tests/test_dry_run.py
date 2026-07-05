@@ -151,10 +151,11 @@ class TestDryRun:
         assert "ACCEPT" in r.text or "DECLINE" in r.text
 
         # Execute (regardless of recommendation — testing the flow)
-        r = client.post("/trade-execute")
+        import main
+        r = client.post("/trade-execute", data={"trade_id": main.last_trade_eval.trade_id})
         assert r.status_code == 200
         trigger = r.headers.get("HX-Trigger", "")
-        assert "showToast" in trigger, "Trade execute should have toast"
+        assert "Trade executed" in trigger, "Trade must actually execute, not be rejected as stale"
 
         # Undo the trade to restore state
         client.post("/undo")

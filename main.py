@@ -393,7 +393,12 @@ async def assign_player(
         model_price=model_price_val, market_price=market_price_val,
     )
 
-    auction_state.advance_nomination()
+    # A nomination turn is a combo: 1 RFA (silent bid) then 1 UFA (open
+    # bid). The turn passes to the next team only when the UFA half sells —
+    # advancing on the RFA too skipped every other team in the order.
+    # Late-draft states with no RFAs left advance on every (UFA) sale.
+    if not p.is_rfa:
+        auction_state.advance_nomination()
     _recompute()
     _save_state()
     return _toast(

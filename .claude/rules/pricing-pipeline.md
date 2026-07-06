@@ -26,6 +26,12 @@ prediction           reality         engine
 
 **Layer 3 -- Bid recommendation** (`optimizer.py`): Uses market-adjusted prices in the MILP to plan the optimal roster. Computes BOT's max bid as the marginal value of each player.
 
+- **The MILP maximizes STARTING LINEUP points** (best 12F/6D/2G); bench players score nothing. Joint roster+starter selection: binary x (rostered) and s (starter) per player, s <= x, starter slots capped at 12/6/2.
+- Soft bench preference: `BACKUP_TARGETS` (2F/1D/1G -> the classic 14/7/3 shape) earns `BACKUP_BONUS` objective credit per filled slot; bench players' points count at `BENCH_WEIGHT` (10%) so backups are good players. The solver may deviate from 14/7/3 when starters/budget win more than the bonus.
+- Position minimums are 12/6/2 (must be able to field the lineup), NOT 14/7/3.
+- `MILPSolution.total_points` and `TeamState.current_roster_points` are lineup points (`state.lineup_points`, greedy top-k -- exact).
+- **Endgame semantics**: forced players exactly filling the roster = Optimal (not Infeasible); a player whose exclusion makes the roster unsolvable (e.g. last goalie) is valued at physical max; `physical_max_bid < MIN_SALARY` -> DROP with max_bid 0.0, never clamped up.
+
 ## Key formulas
 
 **Opponent physical max** (absolute ceiling any team can bid):
@@ -60,7 +66,12 @@ The MILP uses `remaining_budget` because the `== spots` constraint forces fillin
 
 ## Critical rule
 
-The bid recommendation must **NEVER** exceed the market ceiling. If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardless of what the model or marginal value says.
+The bid recommendation must **NEVER** exceed what opponents can force BOT to pay. Two ceiling contexts, both computed from OPPONENTS only (BOT's own budget never sets its own cap):
+
+- **Idle/market ceiling** (`compute_market_ceiling`): second-highest opponent physical max -- the expected clearing price if BOT abstains. Feeds the MILP's market prices.
+- **Live ceiling** (`compute_live_ceiling`): when BOT is among the active bidders, the HIGHEST opponent max is the price-to-beat (that opponent must drop out for BOT to win); when BOT is only observing, second-highest. Caps the bid advisor.
+
+If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardless of what the model or marginal value says.
 
 ## "Team done" exclusion
 

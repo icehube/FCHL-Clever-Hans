@@ -63,13 +63,16 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 | GET | `/team-players/{code}` | JSON player list (for trade dropdowns) |
 | POST | `/toggle-bench` | Toggle player active/bench status |
 | POST | `/adjust-salary` | Correct a player's salary |
-| POST | `/trade-between` | Execute trade between non-BOT teams |
+| POST | `/move-to-minors` | Send a benched acquired player to minors |
+| POST | `/move-to-roster` | Recall a player from minors |
+| POST | `/trade-between` | Execute trade between any two teams (atomic) |
+| POST | `/load-scenario` | Load a pre-baked test scenario |
 | GET | `/state` | JSON state dump for debugging |
 
 ### UI patterns
 
 - **Toast notifications**: Mutation endpoints return `HX-Trigger: {"showToast": {...}}` header. JS listener in `shortcuts.js` shows auto-dismissing alerts.
-- **Lazy buyout indicators**: Roster panel renders grey placeholder dots, then `hx-trigger="load"` fires `GET /buyout-indicators` which returns OOB-swapped green/red dots.
+- **Buyout indicators**: A manual "Scan Roster" button fires `GET /buyout-indicators` (one MILP solve per roster player), which returns OOB-swapped green/red dots into the placeholder dots.
 - **Atomic saves**: `_save_state()` writes to `.tmp` then `os.replace()` (POSIX atomic). Previous state kept as `.backup`.
 - **Responsive layout**: CSS grid with 1-col (mobile), 2-col (768px+), 3-col (1024px+) breakpoints.
 
@@ -77,13 +80,19 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 
 - UFA: circular bidding, $0.1M increments, drop out = permanent for that player
 - RFA: secret bids, prior team can match (ROFR)
-- Combo: 1 RFA + 1 UFA per nomination turn
+- Combo: 1 RFA + 1 UFA per nomination turn. The nomination pointer advances only when the UFA half sells (an RFA sale keeps the turn).
 - Min salary $0.5M, max $11.4M
 - Roster: 24 active (playing: 12F + 6D + 2G, bench: 4 any position). Teams can draft beyond 24 -- extras go to minors with salary fully on cap. Teams can also finish with fewer than 24.
+- **Only the starting lineup scores**: weekly points come from the best 12F/6D/2G. Bench players contribute nothing to the total -- they are insurance.
 - Snake draft for nominations
 - Trades allowed during auction breaks
-- Buyouts: player removed, 50% salary penalty remains on team's cap
+- Buyouts: player removed, 50% salary penalty remains on team's cap. ANYONE can be bought out -- keepers and fresh draftees alike.
 - Teams can voluntarily stop drafting before filling all 24 spots
+
+### Owner decisions (2026-07-05)
+
+- 14F/7D/3G roster shape is a **soft preference** (good backups: 2F/1D/1G), not a constraint -- encoded as `BACKUP_TARGETS`/`BACKUP_BONUS`/`BENCH_WEIGHT` in config.py. The MILP maximizes starting-lineup points.
+- RFA sealed bids are NOT separately modeled: run them like a regular auction and bid the advisor's current optimal bid. No ROFR logic in the tool.
 
 ## Key design decisions
 

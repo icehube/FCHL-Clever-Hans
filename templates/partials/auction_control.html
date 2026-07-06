@@ -16,6 +16,16 @@
         </select>
     </div>
 
+    {# Degraded-advice warning: when the roster MILP can't solve, every
+       bid recommendation falls back to floor values — the operator must
+       know the numbers are fallbacks, not analysis. #}
+    {% if milp and milp.status != "Optimal" %}
+    <div class="alert alert-warning py-2 text-xs mb-2">
+        ⚠ Optimizer {{ milp.status }} — bid advice degraded to floor values.
+        Check budget/roster (pool too small, cap too tight, or roster overfull).
+    </div>
+    {% endif %}
+
     <datalist id="player-list">
         {% for name in available_players %}
         <option value="{{ name }}">

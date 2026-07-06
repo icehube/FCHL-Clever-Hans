@@ -13,11 +13,11 @@ from state import Player, TeamState
 class MarketInfo:
     """Market ceiling and demand information for a player's position."""
 
-    market_ceiling: float  # Second-highest physical_max among active needing teams
+    market_ceiling: float  # Second-highest physical_max among active opponents
     highest_bidder: str | None  # Team with highest physical_max
     highest_bid: float  # Their physical_max
     second_bidder: str | None  # Team with second-highest
-    demand_count: int  # Active teams needing this position that can afford
+    demand_count: int  # Active opponents able to bid at least MIN_SALARY
     floor_demand: bool  # True if demand_count == 0 → player sells at floor
 
 

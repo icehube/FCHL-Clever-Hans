@@ -23,13 +23,23 @@
            computed at. #}
         {% set gain = counterfactual.points_difference %}
         {% set alt = counterfactual.alternative_players[0].name if counterfactual.alternative_players else None %}
-        <div class="alert alert-sm py-2 mt-2 text-xs {{ 'alert-success' if gain > 0 else 'alert-warning' }}">
+        {# Three cases, not two: a zero delta is a genuine toss-up, and folding
+           it into "skip" produced "costs you 0 lineup points". Common in an
+           endgame where the remaining players are interchangeable. #}
+        {% set tone = 'alert-success' if gain > 0 else ('alert-info' if gain == 0 else 'alert-warning') %}
+        <div class="alert alert-sm py-2 mt-2 text-xs {{ tone }}">
             {% if gain > 0 %}
             <span>
                 <strong>Worth having at ${{ cf_price }}M</strong> — he adds
                 {{ "%.0f"|format(gain) }} lineup points over your best roster without him{% if alt %},
                 where you'd draft {{ alt }} instead{% endif %}.
                 Cap effect: {{ "%+.1f"|format(counterfactual.budget_difference) }}M.
+            </span>
+            {% elif gain == 0 %}
+            <span>
+                <strong>Toss-up at ${{ cf_price }}M</strong> — your best roster scores the
+                same with or without him{% if alt %}; {{ alt }} does the same job for the
+                money{% endif %}. Worth taking only below ${{ cf_price }}M.
             </span>
             {% else %}
             <span>

@@ -192,6 +192,45 @@ class TestCounterfactualVerdict:
                 seen.add("skip")
         assert seen == {"buy", "skip"}, f"sample should cover both branches, got {seen}"
 
+    def _render_verdict(self, gain: int, alt: str | None = None) -> str:
+        """Render the panel against a stubbed counterfactual.
+
+        A zero delta is hard to conjure from the live pool, but trivial to
+        state directly — and the branch is pure presentation.
+        """
+        from types import SimpleNamespace
+
+        import main
+
+        sol = SimpleNamespace(total_points=100, total_cost=30.0)
+        alts = [SimpleNamespace(name=alt, position="F", projected_points=20)] if alt else []
+        return main.templates.env.get_template("partials/explanation.html").render(
+            counterfactual=SimpleNamespace(
+                with_player=sol,
+                without_player=sol,
+                points_difference=gain,
+                budget_difference=0.0,
+                alternative_players=alts,
+            ),
+            cf_player=SimpleNamespace(name="Filler", position="F", projected_points=20),
+            cf_price=1.2,
+        )
+
+    def test_break_even_is_a_toss_up_not_a_skip(self):
+        """gain == 0 fell into the Skip branch and read "costs you 0 lineup
+        points" — self-contradictory. Reachable late, when the players left
+        are interchangeable and none of them moves the lineup."""
+        html = self._render_verdict(0, alt="Someone Else")
+        assert "Toss-up at $1.2M" in html
+        assert "Someone Else does the same job" in html
+        assert "costs you" not in html
+        assert "Worth having" not in html
+
+    def test_nonzero_deltas_still_pick_a_side(self):
+        """The third branch must not swallow the two that carry the verdict."""
+        assert "Worth having at $1.2M" in self._render_verdict(8)
+        assert "Skip him at $1.2M" in self._render_verdict(-8)
+
     def test_verdict_names_the_price(self, client):
         """A points delta with no price attached can't be judged."""
         import main

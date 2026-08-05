@@ -915,9 +915,12 @@ async def toggle_bench(
     )
     _recompute()
     _save_state()
-    ctx = _context(request)
-    ctx["team"] = t
-    return _render(request, "partials/all_panels.html", ctx)
+    # Render with the default context. Overriding ctx["team"] to the edited
+    # team leaked that team into every panel — `team` also drives the Trade
+    # "I Give" dropdown and the buyout controls, so editing an opponent put
+    # THEIR players in BOT's trade form. Consistent with /assign,
+    # /move-to-minors and every other mutation, which already render as BOT.
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/adjust-salary", response_class=HTMLResponse)
@@ -950,9 +953,8 @@ async def adjust_salary(
     )
     _recompute()
     _save_state()
-    ctx = _context(request)
-    ctx["team"] = t
-    return _render(request, "partials/all_panels.html", ctx)
+    # Default context — see the note in /toggle-bench on the ctx["team"] leak.
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/move-to-minors", response_class=HTMLResponse)

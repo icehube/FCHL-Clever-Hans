@@ -144,6 +144,57 @@ class TestBidCheck:
         assert "overpaying by" in r.text
 
 
+class TestPanelContextIsolation:
+    """Editing an opponent's roster must not leak them into BOT's panels.
+
+    /toggle-bench and /adjust-salary used to override ctx["team"] to the edited
+    team and render all_panels.html. But `team` defaults to BOT and feeds the
+    Trade "I Give" dropdown and buyout controls, so editing an opponent loaded
+    THEIR players into BOT's trade form — a wrong trade waiting to happen.
+    """
+
+    def _give_options(self, html: str) -> str:
+        """The <select name="give_player"> block from the Trade panel."""
+        start = html.index('name="give_player"')
+        return html[start:html.index("</select>", start)]
+
+    def test_toggle_bench_on_opponent_keeps_trade_panel_on_bot(self, client):
+        import main
+
+        opponent = main.auction_state.teams["SRL"]
+        bot = main.auction_state.teams["BOT"]
+        victim = opponent.roster_players[0].name
+        bot_players = {p.name for p in bot.roster_players}
+        opponent_players = {p.name for p in opponent.roster_players}
+
+        r = client.post("/toggle-bench", data={
+            "team_code": "SRL", "player_name": victim,
+        })
+        assert r.status_code == 200
+        options = self._give_options(r.text)
+        assert any(n in options for n in bot_players), "Trade should offer BOT's players"
+        leaked = [n for n in opponent_players - bot_players if n in options]
+        assert not leaked, f"opponent players leaked into Trade 'I Give': {leaked}"
+
+    def test_adjust_salary_on_opponent_keeps_trade_panel_on_bot(self, client):
+        import main
+
+        opponent = main.auction_state.teams["MAC"]
+        bot = main.auction_state.teams["BOT"]
+        target = opponent.roster_players[0]
+        bot_players = {p.name for p in bot.roster_players}
+        opponent_players = {p.name for p in opponent.roster_players}
+
+        r = client.post("/adjust-salary", data={
+            "team_code": "MAC", "player_name": target.name,
+            "new_salary": str(target.salary),
+        })
+        assert r.status_code == 200
+        options = self._give_options(r.text)
+        leaked = [n for n in opponent_players - bot_players if n in options]
+        assert not leaked, f"opponent players leaked into Trade 'I Give': {leaked}"
+
+
 class TestNominate:
     def test_nominate(self, client):
         """Nomination should return picks in auction control."""

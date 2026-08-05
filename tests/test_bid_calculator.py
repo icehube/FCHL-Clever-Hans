@@ -184,6 +184,19 @@ class TestUncontestedBidding:
         assert team.total_spots_remaining == 1
         assert team.physical_max_bid == pytest.approx(4.2, abs=0.01)
 
+    def test_marginal_value_reaches_physical_max(self):
+        """A team must be able to bid its own physical max.
+
+        remaining_budget used to come out as 4.199999999999996, so the MILP
+        budget constraint rejected a forced bid at exactly 4.2 and the binary
+        search settled one increment low at 4.1 — $0.1M of real headroom lost
+        to float error. Star beats Filler on points at any affordable price,
+        so the break-even salary IS the physical max.
+        """
+        team, pool, prices = self._setup()
+        marginal = compute_marginal_value(pool["Star"], team, pool, prices)
+        assert marginal == team.physical_max_bid == 4.2
+
     def test_uncontested_win_at_good_price(self):
         """The exact reported case: $2.5M on a ~$4.2M player is a WIN, not DROP."""
         team, pool, prices = self._setup()

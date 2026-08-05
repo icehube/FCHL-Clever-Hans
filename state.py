@@ -74,6 +74,19 @@ class PlayerOnRoster:
         return self.group in MINOR_CAP_GROUPS
 
 
+def _index_of(players: list[PlayerOnRoster], name: str) -> int | None:
+    """Index of the named player in a list, or None if absent.
+
+    Returns the index rather than the player so callers can validate before
+    mutating — send_to_minors must reject an un-benched player while leaving
+    them exactly where they were.
+    """
+    for i, p in enumerate(players):
+        if p.name == name:
+            return i
+    return None
+
+
 @dataclass
 class TeamState:
     """State of one FCHL team during the auction."""
@@ -114,8 +127,15 @@ class TeamState:
 
     @property
     def remaining_budget(self) -> float:
-        """How much cap space is left."""
-        return SALARY_CAP - self.total_salary
+        """How much cap space is left.
+
+        Rounded because every salary in this league moves in $0.1M increments,
+        so any sub-cent residue is float error, not money. Left raw, this
+        returned values like 4.199999999999996, and the MILP budget constraint
+        then rejected a bid at exactly 4.2 — costing a team $0.1M of real
+        bidding headroom at its own physical max.
+        """
+        return round(SALARY_CAP - self.total_salary, 1)
 
     @property
     def roster_count(self) -> int:
@@ -166,7 +186,7 @@ class TeamState:
             return 0.0
         # Clamp at 0 so over-committed teams read as "can't bid", not a
         # nonsense negative ceiling in templates and projections.
-        return max(0.0, min(self.spendable_budget + MIN_SALARY, MAX_SALARY))
+        return round(max(0.0, min(self.spendable_budget + MIN_SALARY, MAX_SALARY)), 1)
 
     @property
     def current_roster_points(self) -> int:
@@ -175,18 +195,16 @@ class TeamState:
 
     def find_player(self, name: str) -> PlayerOnRoster | None:
         """Find a player by name across all lists."""
-        for p in self.all_players:
-            if p.name == name:
-                return p
-        return None
+        i = _index_of(self.all_players, name)
+        return self.all_players[i] if i is not None else None
 
     def remove_player(self, name: str) -> PlayerOnRoster:
         """Remove and return a player by name. Raises ValueError if not found."""
         for player_list in [self.keeper_players, self.acquired_players, self.minor_players]:
-            for i, p in enumerate(player_list):
-                if p.name == name:
-                    self._invalidate_cache()
-                    return player_list.pop(i)
+            i = _index_of(player_list, name)
+            if i is not None:
+                self._invalidate_cache()
+                return player_list.pop(i)
         raise ValueError(f"Player '{name}' not found on team {self.code}")
 
     def add_acquired_player(self, player: PlayerOnRoster) -> None:
@@ -197,32 +215,33 @@ class TeamState:
     def send_to_minors(self, player_name: str) -> None:
         """Move an acquired player to minors. Player must be benched first;
         keepers cannot be sent down."""
-        for i, p in enumerate(self.acquired_players):
-            if p.name == player_name:
-                if not p.is_bench:
-                    raise ValueError(
-                        f"'{player_name}' must be benched before being sent to minors"
-                    )
-                p.is_minor = True
-                self.minor_players.append(self.acquired_players.pop(i))
-                self._invalidate_cache()
-                return
+        i = _index_of(self.acquired_players, player_name)
+        if i is not None:
+            # Validate before mutating: a rejected send must leave the player
+            # exactly where they were.
+            if not self.acquired_players[i].is_bench:
+                raise ValueError(
+                    f"'{player_name}' must be benched before being sent to minors"
+                )
+            self.acquired_players[i].is_minor = True
+            self.minor_players.append(self.acquired_players.pop(i))
+            self._invalidate_cache()
+            return
         # Distinguish keepers (explicitly disallowed) from unknown names so the
         # caller's toast can be specific. Keepers stay in keeper_players forever
         # so recall always lands back in acquired_players cleanly.
-        for p in self.keeper_players:
-            if p.name == player_name:
-                raise ValueError(f"Cannot send keeper '{player_name}' to minors")
+        if _index_of(self.keeper_players, player_name) is not None:
+            raise ValueError(f"Cannot send keeper '{player_name}' to minors")
         raise ValueError(f"Player '{player_name}' not on active roster of {self.code}")
 
     def recall_from_minors(self, player_name: str) -> None:
         """Move a player from minors back to acquired (active roster)."""
-        for i, p in enumerate(self.minor_players):
-            if p.name == player_name:
-                p.is_minor = False
-                self.acquired_players.append(self.minor_players.pop(i))
-                self._invalidate_cache()
-                return
+        i = _index_of(self.minor_players, player_name)
+        if i is not None:
+            self.minor_players[i].is_minor = False
+            self.acquired_players.append(self.minor_players.pop(i))
+            self._invalidate_cache()
+            return
         raise ValueError(f"Player '{player_name}' not in minors on {self.code}")
 
     def adjust_salary(self, player_name: str, new_salary: float) -> None:

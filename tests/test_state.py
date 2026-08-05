@@ -108,7 +108,9 @@ class TestTeamStateBudget:
     def test_remaining_budget(self):
         keepers = [_make_player_on_roster("P1", salary=30.0)]
         team = _make_team(keepers=keepers)
-        assert team.remaining_budget == SALARY_CAP - 30.0
+        # approx, not ==: remaining_budget rounds to the $0.1M increment all
+        # league money moves in, so it will not equal the raw float subtraction
+        assert team.remaining_budget == pytest.approx(SALARY_CAP - 30.0)
 
     def test_roster_count_excludes_minors(self):
         keepers = [_make_player_on_roster("P1"), _make_player_on_roster("P2")]

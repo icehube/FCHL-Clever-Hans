@@ -20,6 +20,7 @@ from data_loader import build_initial_state, load_goalie_wins
 from market import (
     MarketInfo,
     compute_all_market_prices,
+    bid_winner,
     compute_live_ceiling,
     compute_market_ceiling,
     live_opponents,
@@ -425,13 +426,14 @@ async def bid_check(
 
     # Use live ceiling from active bidders if provided
     bidder_list = [b.strip() for b in bidders.split(",") if b.strip()]
-    bot_uncontested = False
+    winner = None
     if bidder_list:
         opponents = live_opponents(bidder_list, auction_state.teams)
-        # BOT alone in the bidding = the auction is over and BOT won at `price`.
-        # Requires BOT in the list: an empty list means no auction is running,
-        # and a WIN verdict there would be nonsense.
-        bot_uncontested = MY_TEAM in bidder_list and not opponents
+        # One shared notion of "last bidder standing": the advisor's WIN verdict
+        # and the template's Assign button both derive from `winner`. An empty
+        # bidder list means no auction is running, so there is no winner and a
+        # WIN verdict there would be nonsense.
+        winner = bid_winner(bidder_list, auction_state.teams)
         live_ceil = compute_live_ceiling(bidder_list, auction_state.teams)
         live_info = MarketInfo(
             market_ceiling=live_ceil,
@@ -439,7 +441,10 @@ async def bid_check(
             highest_bid=live_ceil,
             second_bidder=None,
             demand_count=len(opponents),
-            floor_demand=False,
+            # Keep compute_market_ceiling's invariant: no demand means the
+            # player goes for the floor. Nothing reads it off this path today,
+            # but an inconsistent MarketInfo is a trap for whoever does next.
+            floor_demand=not opponents,
         )
     else:
         live_info = market_info
@@ -447,7 +452,7 @@ async def bid_check(
     team = auction_state.teams[MY_TEAM]
     rec = compute_bid_recommendation(
         p, team, auction_state.available_players, market_prices, live_info, price,
-        bot_uncontested=bot_uncontested,
+        bot_uncontested=(winner == MY_TEAM),
     )
 
     ctx = _context(request)
@@ -455,6 +460,7 @@ async def bid_check(
     ctx["bid_player"] = p
     ctx["bid_price"] = price
     ctx["active_bidders"] = bidder_list
+    ctx["bid_winner"] = winner
     ctx["highest_bidder"] = highest_bidder
     chart = _chart_context(player)
     if chart is not None:

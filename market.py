@@ -149,6 +149,30 @@ def live_opponents(
     ]
 
 
+def bid_winner(
+    active_bidders: list[str],
+    teams: dict[str, TeamState],
+    exclude_team: str = MY_TEAM,
+) -> str | None:
+    """
+    The single bidder left standing, or None while the auction is still open.
+
+    THE one definition of "last bidder standing" — the bid advisor and the
+    Assign button must both use it. They used to disagree: the advisor asked
+    whether any opponent could still raise the price, the button counted raw
+    toggled bidders. A cap-full team (clickable, since the bidder grid filters
+    on is_done only) satisfied the first and not the second, so the panel
+    rendered "You've won -- take it" with no button to take it.
+
+    BOT counts as a live bidder whenever it's toggled on; a bid it can't afford
+    is caught downstream, not here.
+    """
+    live = live_opponents(active_bidders, teams, exclude_team)
+    if exclude_team in active_bidders:
+        live = [*live, exclude_team]
+    return live[0] if len(live) == 1 else None
+
+
 def compute_live_ceiling(
     active_bidders: list[str],
     teams: dict[str, TeamState],

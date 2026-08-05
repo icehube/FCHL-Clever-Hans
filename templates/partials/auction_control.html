@@ -144,9 +144,13 @@
         {% endfor %}
     </div>
 
-    {# Assign appears only when one team is left bidding — the auction winner. #}
-    {% if active_bidders is defined and active_bidders|length == 1 %}
-    {% set winner_code = active_bidders[0] %}
+    {# Assign appears only when one team is left bidding — the auction winner.
+       bid_winner comes from market.bid_winner(), the same predicate behind the
+       advisor's WIN verdict. Don't count active_bidders here: a cap-full or
+       done team is still toggled on but cannot raise the price, which used to
+       render WIN with no Assign button. #}
+    {% if bid_winner is defined and bid_winner %}
+    {% set winner_code = bid_winner %}
     <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="mt-2">
         <input type="hidden" name="player" value="{{ bid_advice.player_name }}">
         <input type="hidden" name="team" value="{{ winner_code }}">

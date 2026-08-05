@@ -9,6 +9,7 @@ from market import (
     compute_live_ceiling,
     compute_market_ceiling,
     compute_market_price,
+    bid_winner,
     compute_opponent_ceiling,
     live_opponents,
 )
@@ -269,6 +270,54 @@ class TestLiveOpponents:
                                 keeper_positions={"F": 5}),
         }
         assert live_opponents([MY_TEAM], teams) == []
+
+
+class TestBidWinner:
+    """One definition of "last bidder standing", shared by the advisor and the UI.
+
+    Regression: the Assign button used to gate on len(active_bidders) == 1 while
+    the advisor gated on live_opponents being empty. A cap-full team toggled on
+    alongside BOT satisfied the advisor but not the button, so the panel said
+    "You've won -- take it" with no way to take it.
+    """
+
+    def _teams(self):
+        return {
+            MY_TEAM: _make_team(MY_TEAM, keeper_salary=10.0, num_keepers=5,
+                                keeper_positions={"F": 5}),
+            "LIVE": _make_team("LIVE", keeper_salary=10.0, num_keepers=5,
+                               keeper_positions={"F": 5}),
+            "LIVE2": _make_team("LIVE2", keeper_salary=12.0, num_keepers=5,
+                                keeper_positions={"F": 5}),
+            "DONE": _make_team("DONE", keeper_salary=10.0, num_keepers=5,
+                               is_done=True, keeper_positions={"F": 5}),
+            "BROKE": _make_team("BROKE", keeper_salary=0.0, num_keepers=0,
+                                penalties=SALARY_CAP),
+        }
+
+    def test_bot_alone_wins(self):
+        assert bid_winner([MY_TEAM], self._teams()) == MY_TEAM
+
+    def test_bot_plus_capped_out_team_still_wins(self):
+        """The reported case: the other 'bidder' cannot legally raise the price."""
+        teams = self._teams()
+        assert teams["BROKE"].physical_max_bid < MIN_SALARY
+        assert bid_winner([MY_TEAM, "BROKE"], teams) == MY_TEAM
+
+    def test_bot_plus_done_team_still_wins(self):
+        assert bid_winner([MY_TEAM, "DONE"], self._teams()) == MY_TEAM
+
+    def test_live_opponent_means_no_winner_yet(self):
+        assert bid_winner([MY_TEAM, "LIVE"], self._teams()) is None
+
+    def test_two_live_opponents_means_no_winner_yet(self):
+        assert bid_winner(["LIVE", "LIVE2"], self._teams()) is None
+
+    def test_sole_opponent_wins_when_bot_is_out(self):
+        assert bid_winner(["LIVE"], self._teams()) == "LIVE"
+
+    def test_no_bidders_no_winner(self):
+        assert bid_winner([], self._teams()) is None
 
 
 class TestComputeAllMarketPrices:

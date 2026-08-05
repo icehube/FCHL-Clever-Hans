@@ -97,6 +97,40 @@ class TestBidCheck:
         assert "bid-win" not in r.text
         assert "Ceiling: $" in r.text
 
+    def test_win_comes_with_an_assign_button(self, client):
+        """Regression (2026-08-05): WIN must never render without Assign.
+
+        A cap-full team stays clickable in the bidder grid (the grid filters on
+        is_done only), so BOT + a full team satisfied the advisor's uncontested
+        check while the Assign gate's len(active_bidders) == 1 hid the button.
+        """
+        import main
+        from state import PlayerOnRoster
+
+        victim = main.auction_state.teams["HSM"]
+        saved = list(victim.keeper_players)
+        victim.keeper_players = [
+            PlayerOnRoster(name=f"HSM_F{i}", position="F", group="3",
+                           salary=1.0, projected_points=50)
+            for i in range(24)
+        ]
+        victim._invalidate_cache()  # roster_players is memoized
+        try:
+            assert victim.physical_max_bid == 0.0, "fixture must be cap-full"
+            assert not victim.is_done, "must be full but NOT done to be clickable"
+            r = client.post("/bid-check", data={
+                "player": "Connor McDavid",
+                "bidders": "BOT,HSM",
+                "price": "2.5",
+                "highest_bidder": "BOT",
+            })
+            assert r.status_code == 200
+            assert "bid-win" in r.text, "should be a WIN — HSM cannot raise the price"
+            assert 'name="team" value="BOT"' in r.text, "Assign form must be present"
+        finally:
+            victim.keeper_players = saved
+            victim._invalidate_cache()
+
     def test_uncontested_overpay_still_drops(self, client):
         """No opponents left, but above value — DROP and name the overpay."""
         r = client.post("/bid-check", data={

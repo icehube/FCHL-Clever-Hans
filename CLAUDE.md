@@ -86,7 +86,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 - **Only the starting lineup scores**: weekly points come from the best 12F/6D/2G. Bench players contribute nothing to the total -- they are insurance.
 - Snake draft for nominations
 - Trades allowed during auction breaks
-- Buyouts: player removed, 50% salary penalty remains on team's cap. ANYONE can be bought out -- keepers and fresh draftees alike.
+- Buyouts (CBA Article 11.4): player removed, 50% salary penalty remains on team's cap. ANYONE can be bought out -- keepers and fresh draftees alike.
 - Teams can voluntarily stop drafting before filling all 24 spots
 
 ### Owner decisions (2026-07-05)
@@ -108,12 +108,30 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 | JSON snapshots for undo | Simple, crash-safe, human-readable. |
 | Term not tracked | Nobody caps out. Irrelevant. |
 
+## Design rationale
+
+This app replaced a Streamlit tool that was used for a live draft and found wanting. Every problem below drove a specific architectural choice -- don't undo one without knowing which problem it re-opens.
+
+| Problem in the old Streamlit app | Root cause | How this app fixes it |
+|---|---|---|
+| App got slower as the draft progressed | Streamlit full re-runs on every interaction | HTMX partial updates, no re-runs |
+| Had to tab between pages constantly | Multi-page Streamlit layout | Single-page multi-panel layout |
+| Editing a cell meant edit -> wait -> save -> wait -> switch tab | Streamlit `data_editor` widget | Single `POST /assign` endpoint |
+| Red/green/yellow light was confusing | Z-score deviation from mean -- not intuitive | Replaced with max bid from the MILP. One number. |
+| Mediocre players got "good value" ratings, rare players didn't | Z-score treats players independently | MILP plans the whole roster. Scarcity captured by the market layer's demand count. |
+| Optimizer page required a manual refresh | Streamlit tab isolation | Optimizer runs after every action, always visible |
+| "What if I go slightly over?" was unanswerable | No marginal analysis | Counterfactual shows the exact impact of any price |
+| Started in deficit; the "value overbid" feature was useless | Assumed a budget surplus | MILP works from any starting position -- deficit or surplus |
+| Couldn't evaluate trades fast enough | No trade UI | Dedicated trade evaluator with one-click evaluation |
+| Done teams inflated market prices | No concept of team completion | `is_done` toggle excludes them from market calculations |
+| A competitor ended up with more points | Z-score optimized $/point, not total points | MILP maximizes projected starting-lineup points |
+
 ## Development workflow
 
 Verification loop for every change:
 
 1. Make changes
-2. Run tests: `pytest tests/ -v`
+2. Run tests: `.venv/bin/pytest tests/ -v`
 3. Fix any failures before moving on
 4. Before committing: run full test suite
 
@@ -185,11 +203,11 @@ Before appending, scan `BACKLOG.md` for an existing entry covering the same file
 
 | Command | Description |
 |---|---|
-| `/commit-push-pr` | Commit, push, and open a PR |
+| `/dev` | Start the FastAPI dev server and verify it responds |
+| `/go` | Verify, simplify, and commit -- the ship sequence |
 | `/quick-commit` | Stage all changes and commit with a descriptive message |
 | `/test-and-fix` | Run tests and fix any failures |
 | `/review-changes` | Review uncommitted changes and suggest improvements |
-| `/worktree` | Create a git worktree for parallel Claude sessions |
 | `/grill` | Adversarial code review -- don't ship until it passes |
 | `/techdebt` | End-of-session sweep for duplicated and dead code |
 
@@ -197,9 +215,9 @@ Before appending, scan `BACKLOG.md` for an existing entry covering the same file
 
 | Agent | Purpose |
 |---|---|
+| `pre-auction-check` | Draft-day readiness runbook: data, state, solver, UI |
+| `solver-checker` | Audit MILP formulation and pricing-layer correctness |
+| `verify-app` | Validate the build and thoroughly test the app works |
 | `code-simplifier` | Simplify code after Claude is done working |
 | `code-architect` | Design reviews and architectural decisions |
-| `verify-app` | Thoroughly test the application works correctly |
-| `build-validator` | Ensure project builds correctly for deployment |
-| `oncall-guide` | Help diagnose and resolve production issues |
 | `staff-reviewer` | Review plans and architectures as a skeptical staff engineer |

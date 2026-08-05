@@ -17,6 +17,7 @@ Triaged 2026-07-05.
 - [2026-07-05] [review] optimizer.py:87 — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in auction_control.html so it's no longer silent; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — needs a plan-with-fewer-spots MILP mode
 - [2026-07-05] [review] optimizer.py:401 — drain score divides by can_afford, so it nominates players FEW opponents can afford — gifting the rich opponent a bargain at second-highest ceiling instead of draining budgets — rework drain heuristic
 - [2026-07-05] [review] state.py:141 — physical_max_bid=0 when roster full excludes that team from market ceiling, but CBA allows drafting beyond 24 (extras to minors, full cap) — a cap-rich full team is an invisible live bidder — needs design: spots vs minors-overflow in physical max
+- [2026-08-05] [owner] optimizer.py:362 — **advisor says DROP on a bargain once BOT is the last bidder standing.** Reported live: `DROP / Max bid $0.6M / Marginal $4.2M / Ceiling $0.5M / Price $2.5M exceeds max bid $0.6M` on a good player at a good price. Root cause chain: last opponent drops out → `active_bidders` is `[MY_TEAM]` only → `compute_live_ceiling` skips MY_TEAM, finds no opponent ceilings, returns MIN_SALARY (market.py:161) → `max_bid = min(marginal, ceiling + INCREMENT, physical_max)` collapses to $0.6M → `current_price >= max_bid` → DROP (optimizer.py:377). The ceiling is a *forecast of the clearing price*, valid for planning; it is invalid as a bid cap once a real price is on the table, because the price cannot go back down. With no opponent left, the only question is whether current_price < marginal value ($2.5M < $4.2M → take it). Fix direction: when there is no live opponent, cap at marginal value bounded by physical_max, not by the ceiling — the ceiling should only bind while the price is still below it — **draft-night critical, this tells you to walk away from free points**
 
 ### domain/state
 
@@ -29,6 +30,7 @@ Triaged 2026-07-05.
 - [2026-07-05] [review] templates/partials/auction_control.html:139 — Assign form's hidden salary field holds render-time price: typing the final price then clicking Assign races the change-triggered re-render and can record a stale salary — awaiting triage
 - [2026-07-05] [review] main.py:840 — ctx["team"] override in /toggle-bench and /adjust-salary leaks the edited team into ALL panels: opponent roster shows up in Trade "I Give" and buyout buttons — awaiting triage
 - [2026-07-05] [review] main.py:781 — /set-nominator (and /nominate, and unknown-player /bid-check) re-renders auction_control with base context, destroying an in-flight bidding session (player, price, bidder toggles live only in the DOM) — awaiting triage
+- [2026-08-05] [owner] market.py:107 — Model $ and Market $ columns are always identical, which reads as a broken display. The math is correct: `market_price = min(model_price, market_ceiling)`, and while budgets are full the ceiling sits at MAX_SALARY ($11.4M), which no model price exceeds — so `min()` returns the model price on every row until opponent budgets drain late in the draft. Correct but useless: two identical columns for most of the auction train you to ignore both. Fix is presentational — collapse to one column and surface the ceiling only when it actually binds (e.g. show Market $ struck-through against Model $ only when `ceiling < model_price`) — needs a UI decision, not an engine change
 
 ### code quality
 
@@ -57,6 +59,21 @@ Track these; don't implement upfront. The market layer (Layer 2) already compens
 - **Goalie features** — games played, save percentage, team defense quality. Goalies were the weakest position pre-rebuild; the round-2 rebuild (July 2026) moved them onto projected wins, so **re-measure goalie accuracy against the current wins-based model before adding features** — the old accuracy numbers no longer apply.
 - **Auction position effect** — early picks tend to sell higher than the model predicts.
 - **Non-linear points × team_probability interaction term.**
+
+### UI / UX
+
+From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items — the engine is right, the interface makes it hard to act on.
+
+- **Auto-show the counterfactual for the player being bid on.** Right now it's a separate lookup; during live bidding there's no time to go get it. It should appear as soon as a player is under the hammer.
+- **Make the counterfactual text area say what to *do* with it.** The numbers are there but the call to action isn't — it should read as advice, not as a data dump.
+- **Buyout Analyzer: replace the current flow with Scan button + dropdown of my roster → select a player → show "Execute Buyout".** Fewer steps, no typing a name during a live break.
+- **Decompose Model $ into its drivers — how much comes from projected points vs. NHL team quality** (and reputation/lag salary, which is the third big term). Needs a per-coefficient contribution breakdown out of `price_model.py`; the two-stage log-normal form means contributions are multiplicative on price, so decide whether to show them in log space or as "% of predicted price".
+- **Save State button that jumps between live state and a scenario**, so testing a what-if doesn't cost the real draft state. Interacts with the scenario loader (`POST /load-scenario`) and the undo snapshot chain — check that switching can't strand a snapshot.
+- **Standardize font size in the price-distribution graph** (`GET /player-chart/{name}` SVG) — sizes are currently inconsistent across labels and axes.
+
+### Testing
+
+- **More scenarios.** Extend the pre-baked set behind `POST /load-scenario` — the gaps worth covering are the ones that keep producing findings: last-goalie endgame, drained-budget late draft, a cap-rich team with a full roster, and bidding down to a single remaining bidder (see the DROP finding above).
 
 ### Performance
 

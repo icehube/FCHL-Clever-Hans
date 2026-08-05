@@ -144,6 +144,57 @@ class TestBidCheck:
         assert "overpaying by" in r.text
 
 
+class TestPriceColumn:
+    """One Price column, marked only when the market ceiling actually binds.
+
+    market_price = min(model_price, ceiling), and the ceiling sits at
+    MAX_SALARY while budgets are full — so two columns showed identical
+    numbers for most of the auction and trained you to ignore both.
+    """
+
+    def test_single_price_header(self, client):
+        r = client.get("/")
+        assert r.status_code == 200
+        assert ">Price<" in r.text
+        assert ">Model $<" not in r.text and ">Market $<" not in r.text
+
+    def _capped(self, main, name: str) -> bool:
+        """The same flag _context puts on each bid_limits row."""
+        return round(main.market_prices[name], 1) < round(
+            main.model_prices[name].expected_price, 1
+        )
+
+    def test_nothing_capped_at_full_budgets(self, client):
+        import main
+
+        assert not any(
+            self._capped(main, n) for n in main.auction_state.available_players
+        ), "no row should be ceiling-capped while every team still has budget"
+
+    def test_capped_flips_once_the_ceiling_bites(self, client):
+        """Drain every opponent's cap; the ceiling then cuts the top prices."""
+        import main
+
+        model = {n: p.expected_price for n, p in main.model_prices.items()}
+        priciest = max(model, key=model.get)
+        assert model[priciest] > 1.0, "need a player priced above the floor"
+
+        saved = {c: t.penalties for c, t in main.auction_state.teams.items()}
+        try:
+            for code, t in main.auction_state.teams.items():
+                if code != main.MY_TEAM:
+                    t.penalties = 54.0  # leaves each opponent ~$2.8M of cap
+                    t._invalidate_cache()
+            main._recompute()
+            assert main.market_info.market_ceiling < model[priciest]
+            assert self._capped(main, priciest)
+        finally:
+            for code, pen in saved.items():
+                main.auction_state.teams[code].penalties = pen
+                main.auction_state.teams[code]._invalidate_cache()
+            main._recompute()
+
+
 class TestPanelContextIsolation:
     """Editing an opponent's roster must not leak them into BOT's panels.
 

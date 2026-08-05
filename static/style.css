@@ -113,6 +113,10 @@ summary::-webkit-details-marker { display: none; }
 
 /* Price chart */
 .price-chart { width: 100%; height: auto; display: block; }
+/* One size for every label in the chart. Sizing lived on seven inline
+   font-size attributes split across two sizes; CSS beats presentation
+   attributes anyway, so keeping both would just be two competing sources. */
+.price-chart text { font-size: 10px; }
 .chart-meta { font-size: 0.8125rem; color: var(--text-muted); margin: 4px 0; }
 .chart-legend { display: flex; gap: 12px; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
 .chart-leg { display: flex; gap: 4px; align-items: center; }

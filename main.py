@@ -262,6 +262,11 @@ def _context(request: Request) -> dict:
             "projected_points": player.projected_points,
             "model_price": round(model_p, 1),
             "market_price": round(mp, 1),
+            # market_price = min(model_price, ceiling), so the two are equal on
+            # every row until opponent budgets drain. Flag the rows where the
+            # ceiling actually cuts the price — the table shows one column and
+            # only marks it when the market is doing something.
+            "capped": round(mp, 1) < round(model_p, 1),
             "is_rfa": player.is_rfa,
             "in_optimal": name in wanted,
             "prior_fchl_team": player.prior_fchl_team,

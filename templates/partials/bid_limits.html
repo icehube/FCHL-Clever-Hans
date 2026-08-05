@@ -20,9 +20,11 @@
                     <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
                     <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
                     <th data-sort-col="4" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">PTS</th>
-                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Model $</th>
-                    <th data-sort-col="6" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Market $</th>
-                    <th data-sort-col="7" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">RFA</th>
+                    {# One Price column. data-sort-col is a raw 0-based cell
+                       index (sortTable reads row.cells[col]), so dropping the
+                       old Market $ column shifted RFA from 7 to 6. #}
+                    <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Price</th>
+                    <th data-sort-col="6" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">RFA</th>
                     <th></th>
                 </tr>
             </thead>
@@ -34,8 +36,16 @@
                 <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>
                 <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
                 <td>{{ p.projected_points }}</td>
-                <td>${{ p.model_price }}M</td>
-                <td>${{ p.market_price }}M</td>
+                <td>
+                    {% if p.capped %}
+                    <span class="tooltip tooltip-left" data-tip="Model says ${{ p.model_price }}M, but no opponent can push bidding that high — the market ceiling caps it at ${{ p.market_price }}M">
+                        <span class="opacity-50 line-through">${{ p.model_price }}M</span>
+                        <strong class="text-warning">${{ p.market_price }}M &#9660;</strong>
+                    </span>
+                    {% else %}
+                    ${{ p.model_price }}M
+                    {% endif %}
+                </td>
                 <td>{% if p.is_rfa %}<span class="badge badge-warning badge-xs">{{ p.prior_fchl_team }}</span>{% endif %}</td>
                 <td class="flex gap-1">
                     <button type="button" class="btn btn-xs btn-ghost btn-circle btn-add-bid" data-player="{{ p.name }}" title="Add to bid">+</button>

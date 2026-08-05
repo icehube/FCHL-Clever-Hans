@@ -18,9 +18,27 @@
             </div>
         </div>
 
-        <div class="alert alert-sm py-2 mt-2 text-xs">
-            Delta: {{ "%+.0f"|format(counterfactual.points_difference) }} points,
-            {{ "%+.1f"|format(counterfactual.budget_difference) }}M cap
+        {# Lead with the verdict, not the delta. The numbers alone don't answer
+           "so do I bid?", and they're meaningless without the price they were
+           computed at. #}
+        {% set gain = counterfactual.points_difference %}
+        {% set alt = counterfactual.alternative_players[0].name if counterfactual.alternative_players else None %}
+        <div class="alert alert-sm py-2 mt-2 text-xs {{ 'alert-success' if gain > 0 else 'alert-warning' }}">
+            {% if gain > 0 %}
+            <span>
+                <strong>Worth having at ${{ cf_price }}M</strong> — he adds
+                {{ "%.0f"|format(gain) }} lineup points over your best roster without him{% if alt %},
+                where you'd draft {{ alt }} instead{% endif %}.
+                Cap effect: {{ "%+.1f"|format(counterfactual.budget_difference) }}M.
+            </span>
+            {% else %}
+            <span>
+                <strong>Skip him at ${{ cf_price }}M</strong> — locking him in at that price
+                costs you {{ "%.0f"|format(-gain) }} lineup points versus spending the money
+                elsewhere{% if alt %}, starting with {{ alt }}{% endif %}.
+                Worth revisiting only at a lower price.
+            </span>
+            {% endif %}
         </div>
 
         {% if counterfactual.alternative_players %}

@@ -144,6 +144,64 @@ class TestBidCheck:
         assert "overpaying by" in r.text
 
 
+class TestCounterfactualVerdict:
+    """The panel must say what to DO, and name the price it judged at.
+
+    It used to end in "Delta: +8 points, -3.2M cap" — numbers with no verdict,
+    and it never showed the price the comparison was run at, so "is that good?"
+    was unanswerable from the panel.
+    """
+
+    def _delta(self, main, name: str) -> float:
+        """The engine's roster delta for this player at his market price."""
+        from optimizer import generate_counterfactual
+
+        pool = main.auction_state.available_players
+        cf = generate_counterfactual(
+            pool[name], main.market_prices.get(name, 0.5),
+            main.auction_state.teams[main.MY_TEAM], pool, main.market_prices,
+        )
+        return cf.points_difference
+
+    def test_verdict_follows_the_engine_both_ways(self, client):
+        """Both branches render, and each matches the sign of the engine's delta.
+
+        Don't pin a player: points_difference is the roster delta AT THAT PRICE,
+        so an elite player can be a "skip" (McDavid forced in at $9.5M costs
+        lineup points elsewhere) while a mid-tier one is a "buy". Derive the
+        expected branch instead of assuming it.
+        """
+        import main
+
+        ranked = sorted(
+            main.auction_state.available_players.values(),
+            key=lambda p: -p.projected_points,
+        )[:4]
+        seen = set()
+        for p in ranked:
+            gain = self._delta(main, p.name)
+            r = client.get(f"/explain/{p.name}")
+            assert r.status_code == 200
+            if gain > 0:
+                assert "Worth having at $" in r.text, f"{p.name} gained {gain}"
+                assert "lineup points over your best roster without him" in r.text
+                seen.add("buy")
+            else:
+                assert "Skip him at $" in r.text, f"{p.name} lost {gain}"
+                assert "costs you" in r.text
+                seen.add("skip")
+        assert seen == {"buy", "skip"}, f"sample should cover both branches, got {seen}"
+
+    def test_verdict_names_the_price(self, client):
+        """A points delta with no price attached can't be judged."""
+        import main
+
+        name = next(iter(main.auction_state.available_players))
+        r = client.get(f"/explain/{name}")
+        expected = round(main.market_prices[name], 1)
+        assert f"${expected}M" in r.text
+
+
 class TestPriceColumn:
     """One Price column, marked only when the market ceiling actually binds.
 

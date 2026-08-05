@@ -502,6 +502,9 @@ async def explain(request: Request, player_name: str):
     ctx = _context(request)
     ctx["counterfactual"] = cf
     ctx["cf_player"] = p
+    # The whole verdict is conditioned on this price — without it the panel
+    # shows a points delta the reader can't judge.
+    ctx["cf_price"] = round(price, 1)
     return _render(request, "partials/explanation.html", ctx)
 
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
 from market import (
     MarketInfo,
     compute_all_market_prices,
@@ -10,6 +10,7 @@ from market import (
     compute_market_ceiling,
     compute_market_price,
     compute_opponent_ceiling,
+    live_opponents,
 )
 from state import PlayerOnRoster, TeamState
 
@@ -235,6 +236,39 @@ class TestComputeLiveCeiling:
         }
         ceiling = compute_live_ceiling(["A", "B"], teams)
         assert ceiling == teams["B"].physical_max_bid
+
+
+class TestLiveOpponents:
+    """The predicate behind both the live ceiling and uncontested detection."""
+
+    def test_excludes_bot_done_and_unknown(self):
+        teams = {
+            MY_TEAM: _make_team(MY_TEAM, keeper_salary=10.0, num_keepers=5,
+                                keeper_positions={"F": 5}),
+            "A": _make_team("A", keeper_salary=10.0, num_keepers=5, is_done=True,
+                            keeper_positions={"F": 5}),
+            "B": _make_team("B", keeper_salary=20.0, num_keepers=5,
+                            keeper_positions={"F": 5}),
+        }
+        opponents = live_opponents([MY_TEAM, "A", "B", "GHOST"], teams)
+        assert opponents == ["B"]
+
+    def test_excludes_teams_that_cannot_reach_the_floor(self):
+        """A team with no spendable room isn't a live bidder."""
+        teams = {
+            "A": _make_team("A", keeper_salary=0.0, num_keepers=0,
+                            penalties=SALARY_CAP),
+        }
+        assert teams["A"].physical_max_bid < MIN_SALARY
+        assert live_opponents(["A"], teams) == []
+
+    def test_bot_alone_has_no_opponents(self):
+        """The uncontested case: BOT is the only bidder left."""
+        teams = {
+            MY_TEAM: _make_team(MY_TEAM, keeper_salary=10.0, num_keepers=5,
+                                keeper_positions={"F": 5}),
+        }
+        assert live_opponents([MY_TEAM], teams) == []
 
 
 class TestComputeAllMarketPrices:

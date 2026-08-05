@@ -55,7 +55,11 @@ market_price = min(model_price, market_ceiling)
 **Final bid recommendation**:
 ```
 recommended_bid = min(marginal_value, market_ceiling + 0.1, physical_max_bid)
+
+# ...except the ceiling term drops out once current_price > market_ceiling + 0.1:
+recommended_bid = min(marginal_value, physical_max_bid)
 ```
+The ceiling term exists so BOT never pays more than needed to win. It is only valid while the standing price is still below it -- see the Critical rule.
 
 **MILP budget** (different from single-bid budget):
 ```
@@ -72,6 +76,14 @@ The bid recommendation must **NEVER** exceed what opponents can force BOT to pay
 - **Live ceiling** (`compute_live_ceiling`): when BOT is among the active bidders, the HIGHEST opponent max is the price-to-beat (that opponent must drop out for BOT to win); when BOT is only observing, second-highest. Caps the bid advisor.
 
 If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardless of what the model or marginal value says.
+
+### The one exception: a real price beats a forecast
+
+The ceiling is a *forecast of the clearing price*. It caps the bid only **while the standing price is still below it**. Once `current_price` exceeds `ceiling + 0.1`, the forecast has been falsified by a price that is actually on the table and cannot come back down -- so the cap drops out and marginal value binds instead (`optimizer.py`, `compute_bid_recommendation`).
+
+Two ways this happens: the last opponent drops out (live ceiling collapses to `MIN_SALARY`), or an opponent bids above the max we computed for them (stale budget data). Without the exception, both produce a spurious DROP on a bargain -- the advisor telling you to walk away from a player you have already won. Regression tests: `tests/test_bid_calculator.py::TestUncontestedBidding`.
+
+**Uncontested semantics** (`bot_uncontested=True`, i.e. `live_opponents()` is empty and BOT is in the bidder list): the auction is over and BOT has won at `current_price`. Verdict is **WIN** when `current_price <= max_bid`, else **DROP** naming the overpay. CAUTION is meaningless here -- nobody can push the price higher. Note the `<=`: the contested ladder uses `>=` because it asks "will I have to go higher?", while uncontested asks "is this final price at or below value?", where break-even is indifferent.
 
 ## "Team done" exclusion
 

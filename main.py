@@ -22,6 +22,7 @@ from market import (
     compute_all_market_prices,
     compute_live_ceiling,
     compute_market_ceiling,
+    live_opponents,
 )
 from optimizer import (
     compute_bid_recommendation,
@@ -424,14 +425,20 @@ async def bid_check(
 
     # Use live ceiling from active bidders if provided
     bidder_list = [b.strip() for b in bidders.split(",") if b.strip()]
+    bot_uncontested = False
     if bidder_list:
+        opponents = live_opponents(bidder_list, auction_state.teams)
+        # BOT alone in the bidding = the auction is over and BOT won at `price`.
+        # Requires BOT in the list: an empty list means no auction is running,
+        # and a WIN verdict there would be nonsense.
+        bot_uncontested = MY_TEAM in bidder_list and not opponents
         live_ceil = compute_live_ceiling(bidder_list, auction_state.teams)
         live_info = MarketInfo(
             market_ceiling=live_ceil,
             highest_bidder=highest_bidder or None,
             highest_bid=live_ceil,
             second_bidder=None,
-            demand_count=len(bidder_list),
+            demand_count=len(opponents),
             floor_demand=False,
         )
     else:
@@ -440,6 +447,7 @@ async def bid_check(
     team = auction_state.teams[MY_TEAM]
     rec = compute_bid_recommendation(
         p, team, auction_state.available_players, market_prices, live_info, price,
+        bot_uncontested=bot_uncontested,
     )
 
     ctx = _context(request)

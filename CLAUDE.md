@@ -46,7 +46,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 |--------|-------|---------|
 | GET | `/` | Main page with all panels |
 | POST | `/assign` | Draft player to team (validates team, clamps salary) |
-| POST | `/bid-check` | Live bidding advice (BID/CAUTION/DROP) |
+| POST | `/bid-check` | Live bidding advice (BID/CAUTION/DROP, or WIN when uncontested) |
 | GET | `/nominate` | Nomination recommendations (target/drain/depth) |
 | GET | `/explain/{name}` | Counterfactual: roster with vs without player |
 | POST | `/trade-evaluate` | Evaluate proposed trade (ACCEPT/DECLINE) |

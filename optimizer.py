@@ -45,7 +45,8 @@ class BidRecommendation:
     marginal_value: float
     market_ceiling: float
     reasoning: str
-    action: str  # "BID", "CAUTION", "DROP"
+    action: str  # "BID", "CAUTION", "DROP", "WIN"
+    uncontested: bool = False  # No opponent left — market_ceiling is meaningless
 
 
 @dataclass
@@ -350,16 +351,32 @@ def compute_bid_recommendation(
     market_prices: dict[str, float],
     market_info: MarketInfo,
     current_price: float = 0.0,
+    bot_uncontested: bool = False,
 ) -> BidRecommendation:
     """
-    Compute max bid and recommend BID / CAUTION / DROP.
+    Compute max bid and recommend BID / CAUTION / DROP / WIN.
 
     max_bid = min(marginal_value, market_ceiling + INCREMENT, physical_max_bid)
+
+    with one exception: the ceiling term drops out once the standing price has
+    already passed it (see below). Pass bot_uncontested=True when BOT is the
+    only bidder left — then the auction is over and the verdict is WIN or DROP.
     """
     marginal = compute_marginal_value(player, team, available_players, market_prices)
     ceiling = market_info.market_ceiling
 
-    max_bid = min(marginal, ceiling + SALARY_INCREMENT, team.physical_max_bid)
+    # The ceiling forecasts the clearing price, which caps the bid so we never
+    # pay more than needed to win. But it's only valid while the price is still
+    # below it: once a real price passes the forecast — the last opponent
+    # dropped out, or someone outbid the max we computed for them — the price
+    # is on the table and can't come back down, so value binds instead.
+    # Capping at a falsified forecast is what made the advisor say DROP at
+    # $2.5M on a $4.2M player with a collapsed $0.5M ceiling.
+    caps = [marginal, team.physical_max_bid]
+    efficiency_cap = ceiling + SALARY_INCREMENT
+    if current_price <= efficiency_cap:
+        caps.append(efficiency_cap)
+    max_bid = min(caps)
 
     if max_bid < MIN_SALARY:
         # We can't legally place even a floor bid (roster full or budget
@@ -371,10 +388,27 @@ def compute_bid_recommendation(
             market_ceiling=ceiling,
             reasoning="No roster spot or budget for any bid",
             action="DROP",
+            uncontested=bot_uncontested,
         )
     max_bid = round(max_bid, 1)
 
-    if current_price >= max_bid:
+    if bot_uncontested:
+        # Nobody left to outbid us: the price is final, so the only question is
+        # whether it's at or below what the player is worth. Note the <= against
+        # the contested path's >= — contested asks "will I have to go HIGHER?",
+        # so matching max_bid means stop. Here there is no next increment, and
+        # break-even is indifferent, so take the player.
+        if current_price <= max_bid:
+            action = "WIN"
+            reasoning = f"You've won at ${current_price}M — worth up to ${max_bid}M. Take it."
+        else:
+            action = "DROP"
+            overpay = round(current_price - max_bid, 1)
+            reasoning = (
+                f"No one left to outbid you, but ${current_price}M is above "
+                f"${max_bid}M — overpaying by ${overpay}M"
+            )
+    elif current_price >= max_bid:
         action = "DROP"
         reasoning = f"Price ${current_price}M exceeds max bid ${max_bid}M"
     elif current_price >= max_bid - 0.3:
@@ -391,6 +425,7 @@ def compute_bid_recommendation(
         market_ceiling=ceiling,
         reasoning=reasoning,
         action=action,
+        uncontested=bot_uncontested,
     )
 
 

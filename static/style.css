@@ -81,6 +81,9 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 .bid-bid { background: rgba(158, 206, 106, 0.15); border-left: 4px solid var(--green); }
 .bid-caution { background: rgba(224, 175, 104, 0.15); border-left: 4px solid var(--yellow); }
 .bid-drop { background: rgba(247, 118, 142, 0.15); border-left: 4px solid var(--red); }
+/* WIN: uncontested, the player is yours. Stronger green tint than BID so the
+   strongest success state reads as more emphatic than "keep bidding". */
+.bid-win { background: rgba(158, 206, 106, 0.22); border-left: 4px solid var(--green); }
 .bid-action { font-size: 1.125rem; font-weight: bold; }
 .bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 0.75rem; }
 .bid-reasoning { color: var(--text-muted); font-size: 0.75rem; }

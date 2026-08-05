@@ -129,6 +129,26 @@ def compute_all_market_prices(
     return results
 
 
+def live_opponents(
+    active_bidders: list[str],
+    teams: dict[str, TeamState],
+    exclude_team: str = MY_TEAM,
+) -> list[str]:
+    """
+    Active bidders other than BOT who can still legally raise the price.
+
+    Excludes BOT, unknown codes, done teams, and teams that can't reach the
+    floor. An empty result means nobody can outbid BOT — the uncontested case.
+    """
+    return [
+        code for code in active_bidders
+        if code in teams
+        and code != exclude_team
+        and not teams[code].is_done
+        and teams[code].physical_max_bid >= MIN_SALARY
+    ]
+
+
 def compute_live_ceiling(
     active_bidders: list[str],
     teams: dict[str, TeamState],
@@ -145,17 +165,10 @@ def compute_live_ceiling(
     as compute_market_ceiling.
     """
     bot_bidding = exclude_team in active_bidders
-    ceilings: list[float] = []
-
-    for code in active_bidders:
-        if code not in teams or code == exclude_team:
-            continue
-        team = teams[code]
-        if team.is_done:
-            continue
-        ceiling = team.physical_max_bid
-        if ceiling >= MIN_SALARY:
-            ceilings.append(round(ceiling, 1))
+    ceilings = [
+        round(teams[code].physical_max_bid, 1)
+        for code in live_opponents(active_bidders, teams, exclude_team)
+    ]
 
     if not ceilings:
         return MIN_SALARY

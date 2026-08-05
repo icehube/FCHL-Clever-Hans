@@ -66,6 +66,49 @@ class TestBidCheck:
         })
         assert r.status_code == 200
 
+    def test_last_bidder_standing_wins_not_drops(self, client):
+        """Regression (2026-08-05): BOT alone at a fair price is a WIN.
+
+        The collapsed live ceiling used to cap max_bid at $0.6M and render DROP
+        on a bargain. Elite player, low price, no opponents left.
+        """
+        r = client.post("/bid-check", data={
+            "player": "Connor McDavid",
+            "bidders": "BOT",
+            "price": "2.5",
+            "highest_bidder": "BOT",
+        })
+        assert r.status_code == 200
+        assert "bid-win" in r.text
+        assert "You" in r.text and "won at $2.5M" in r.text
+        assert "exceeds max bid" not in r.text
+        # Ceiling is meaningless with nobody left — must not show the $0.5M floor
+        assert "Ceiling: &mdash;" in r.text
+
+    def test_contested_bidding_unaffected(self, client):
+        """Opponents still active: normal BID advice and a real ceiling."""
+        r = client.post("/bid-check", data={
+            "player": "Connor McDavid",
+            "bidders": "BOT,SRL,MAC",
+            "price": "2.5",
+            "highest_bidder": "SRL",
+        })
+        assert r.status_code == 200
+        assert "bid-win" not in r.text
+        assert "Ceiling: $" in r.text
+
+    def test_uncontested_overpay_still_drops(self, client):
+        """No opponents left, but above value — DROP and name the overpay."""
+        r = client.post("/bid-check", data={
+            "player": "Connor McDavid",
+            "bidders": "BOT",
+            "price": "11.4",
+            "highest_bidder": "BOT",
+        })
+        assert r.status_code == 200
+        assert "bid-drop" in r.text
+        assert "overpaying by" in r.text
+
 
 class TestNominate:
     def test_nominate(self, client):

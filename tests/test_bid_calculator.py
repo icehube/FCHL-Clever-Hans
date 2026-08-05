@@ -131,6 +131,136 @@ class TestBidRecommendation:
         assert rec.max_bid <= team.physical_max_bid + 0.01
 
 
+class TestUncontestedBidding:
+    """Regression: DROP on a bargain when BOT is the last bidder standing.
+
+    Reported 2026-08-05. Every opponent drops out -> compute_live_ceiling finds
+    no opponent ceilings and returns the MIN_SALARY floor -> max_bid collapsed
+    to $0.6M -> the advisor said DROP at $2.5M on a player worth $4.2M.
+
+    The ceiling forecasts the clearing price. It is a valid cap only while the
+    standing price is still below it; once a real price exceeds the forecast,
+    the forecast is falsified and value binds instead.
+    """
+
+    def _setup(self):
+        """One open spot, $4.2M left, and a clear upgrade in the pool.
+
+        Marginal value lands at physical_max_bid ($4.2M): the objective is
+        points, so Star beats Filler at any affordable price.
+        """
+        keepers = (
+            [PlayerOnRoster(name=f"F{i}", position="F", group="3", salary=2.0,
+                            projected_points=50) for i in range(13)]
+            + [PlayerOnRoster(name=f"D{i}", position="D", group="3", salary=2.0,
+                              projected_points=40) for i in range(7)]
+            + [PlayerOnRoster(name=f"G{i}", position="G", group="3", salary=2.0,
+                              projected_points=30) for i in range(3)]
+        )
+        team = TeamState(
+            code=MY_TEAM, name="Bot Team", keeper_players=keepers,
+            minor_players=[], acquired_players=[], penalties=6.6, is_done=False,
+            colors={"primary": "#000", "secondary": "#fff"},
+            logo="test.png", is_my_team=True,
+        )
+        pool = {
+            "Star": _make_player("Star", "F", 90),
+            "Filler": _make_player("Filler", "F", 50),
+        }
+        prices = {"Star": 3.0, "Filler": MIN_SALARY}
+        return team, pool, prices
+
+    def _floor_ceiling(self):
+        """MarketInfo as compute_live_ceiling returns it with no opponents left."""
+        return MarketInfo(
+            market_ceiling=MIN_SALARY, highest_bidder=None,
+            highest_bid=MIN_SALARY, second_bidder=None,
+            demand_count=0, floor_demand=False,
+        )
+
+    def test_setup_reproduces_reported_numbers(self):
+        """Precondition: the fixture really does have $4.2M of headroom."""
+        team, _, _ = self._setup()
+        assert team.total_spots_remaining == 1
+        assert team.physical_max_bid == pytest.approx(4.2, abs=0.01)
+
+    def test_uncontested_win_at_good_price(self):
+        """The exact reported case: $2.5M on a ~$4.2M player is a WIN, not DROP."""
+        team, pool, prices = self._setup()
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, self._floor_ceiling(),
+            current_price=2.5, bot_uncontested=True,
+        )
+        assert rec.action == "WIN"
+        # Value binds, not the collapsed $0.5M ceiling. Pre-fix this was $0.6M
+        # (ceiling + increment), which is what produced the spurious DROP.
+        assert rec.max_bid == rec.marginal_value
+        assert rec.max_bid > 4.0
+        assert rec.uncontested is True
+
+    def test_uncontested_break_even_is_a_win(self):
+        """At exactly max_bid there is no next increment — take the player."""
+        team, pool, prices = self._setup()
+        marginal = compute_marginal_value(pool["Star"], team, pool, prices)
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, self._floor_ceiling(),
+            current_price=marginal, bot_uncontested=True,
+        )
+        assert rec.action == "WIN"
+
+    def test_uncontested_overpay_drops(self):
+        """Above marginal value it's still a DROP, and says by how much."""
+        team, pool, prices = self._setup()
+        marginal = compute_marginal_value(pool["Star"], team, pool, prices)
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, self._floor_ceiling(),
+            current_price=round(marginal + 0.8, 1), bot_uncontested=True,
+        )
+        assert rec.action == "DROP"
+        assert "0.8" in rec.reasoning, f"should name the overpay: {rec.reasoning}"
+
+    def test_uncontested_full_roster_still_drops(self):
+        """A full roster can't bid at all — uncontested doesn't override that."""
+        team, pool, prices = self._setup()
+        team.keeper_players.append(PlayerOnRoster(
+            name="F99", position="F", group="3", salary=2.0, projected_points=50,
+        ))
+        assert team.physical_max_bid == 0.0
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, self._floor_ceiling(),
+            current_price=2.5, bot_uncontested=True,
+        )
+        assert rec.action == "DROP"
+        assert rec.max_bid == 0.0
+
+    def test_ceiling_still_caps_while_price_below_it(self):
+        """The critical rule holds in the normal case: bid <= ceiling + increment."""
+        team, pool, prices = self._setup()
+        info = MarketInfo(
+            market_ceiling=1.0, highest_bidder="AAA", highest_bid=1.0,
+            second_bidder="BBB", demand_count=2, floor_demand=False,
+        )
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, info, current_price=MIN_SALARY,
+        )
+        assert rec.max_bid == pytest.approx(1.0 + SALARY_INCREMENT, abs=0.01)
+        assert rec.action == "BID"
+
+    def test_price_above_ceiling_releases_the_cap(self):
+        """Contested but price exceeded the forecast — value binds, not the ceiling."""
+        team, pool, prices = self._setup()
+        info = MarketInfo(
+            market_ceiling=1.0, highest_bidder="AAA", highest_bid=1.0,
+            second_bidder="BBB", demand_count=2, floor_demand=False,
+        )
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, info, current_price=2.5,
+        )
+        assert rec.max_bid == rec.marginal_value
+        assert rec.max_bid > 4.0
+        assert rec.action == "BID"
+
+
 class TestCounterfactual:
     def test_counterfactual_produces_both_rosters(self):
         """Should produce valid with and without solutions."""

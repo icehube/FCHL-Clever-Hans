@@ -100,7 +100,11 @@
         <div class="bid-details">
             <span class="tooltip tooltip-bottom" data-tip="Highest bid you should make on this player given your roster, budget, and market state">Max bid: <strong>${{ bid_advice.max_bid }}M</strong></span>
             <span class="tooltip tooltip-bottom" data-tip="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
+            {% if bid_advice.uncontested %}
+            <span class="tooltip tooltip-bottom" data-tip="No opponents left in the bidding — nobody can push the price higher, so the ceiling no longer constrains you">Ceiling: &mdash;</span>
+            {% else %}
             <span class="tooltip tooltip-bottom" data-tip="Highest realistic price the auction can reach: second-highest physical max bid among active opponents (auction ends when 2nd-to-last bidder drops out)">Ceiling: ${{ bid_advice.market_ceiling }}M</span>
+            {% endif %}
         </div>
         {% if bid_advice.action != "BID" %}
         <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>

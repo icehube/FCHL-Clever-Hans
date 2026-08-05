@@ -6,6 +6,10 @@ MIN_SALARY = 0.5
 MAX_SALARY = 11.4
 SALARY_INCREMENT = 0.1
 
+# How close the price can get to a player's value before the advisor stops
+# saying BID and starts saying CAUTION.
+CAUTION_BAND = 0.3
+
 # Roster sizes
 ROSTER_SIZE = 24
 

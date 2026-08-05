@@ -10,6 +10,7 @@ from config import (
     BACKUP_BONUS,
     BACKUP_TARGETS,
     BENCH_WEIGHT,
+    CAUTION_BAND,
     MAX_SALARY,
     MIN_SALARY,
     MY_TEAM,
@@ -356,27 +357,34 @@ def compute_bid_recommendation(
     """
     Compute max bid and recommend BID / CAUTION / DROP / WIN.
 
-    max_bid = min(marginal_value, market_ceiling + INCREMENT, physical_max_bid)
+    Two caps, deliberately kept apart because they mean different things:
 
-    with one exception: the ceiling term drops out once the standing price has
-    already passed it (see below). Pass bot_uncontested=True when BOT is the
-    only bidder left — then the auction is over and the verdict is WIN or DROP.
+    * **value cap** = min(marginal_value, physical_max_bid). A hard limit —
+      past it the player costs more than he is worth to this roster.
+    * **expected stop** = market_ceiling + INCREMENT. A *forecast* of where
+      bidding runs out, so we never pay more than winning requires.
+
+    `max_bid` blends the two, but the BID/CAUTION/DROP ladder runs on the value
+    cap ALONE. Running it on the blend made advice non-monotonic in price: the
+    forecast releasing one increment above itself flipped DROP into BID.
+
+    Pass bot_uncontested=True when BOT is the only bidder left — the auction is
+    over, and the verdict is WIN or DROP against the value cap.
     """
     marginal = compute_marginal_value(player, team, available_players, market_prices)
     ceiling = market_info.market_ceiling
+    value_cap = round(min(marginal, team.physical_max_bid), 1)
 
-    # The ceiling forecasts the clearing price, which caps the bid so we never
-    # pay more than needed to win. But it's only valid while the price is still
-    # below it: once a real price passes the forecast — the last opponent
-    # dropped out, or someone outbid the max we computed for them — the price
-    # is on the table and can't come back down, so value binds instead.
-    # Capping at a falsified forecast is what made the advisor say DROP at
-    # $2.5M on a $4.2M player with a collapsed $0.5M ceiling.
-    caps = [marginal, team.physical_max_bid]
-    efficiency_cap = ceiling + SALARY_INCREMENT
-    if current_price <= efficiency_cap:
-        caps.append(efficiency_cap)
-    max_bid = min(caps)
+    # The forecast is worthless in two cases: no opponent is left (there is
+    # nothing to forecast), or the price has already reached it — a real price
+    # on the table cannot come back down, so only value still binds. Capping at
+    # a falsified forecast is what made the advisor say DROP at $2.5M on a
+    # $4.2M player whose ceiling had collapsed to the $0.5M floor.
+    expected_stop = ceiling + SALARY_INCREMENT
+    if bot_uncontested or current_price >= expected_stop:
+        max_bid = value_cap
+    else:
+        max_bid = min(value_cap, expected_stop)
 
     if max_bid < MIN_SALARY:
         # We can't legally place even a floor bid (roster full or budget
@@ -408,10 +416,13 @@ def compute_bid_recommendation(
                 f"No one left to outbid you, but ${current_price}M is above "
                 f"${max_bid}M — overpaying by ${overpay}M"
             )
-    elif current_price >= max_bid:
+    # Ladder on value_cap, never on max_bid: value_cap doesn't move with price,
+    # so the verdict can only soften as the price climbs — never harden then
+    # soften again.
+    elif current_price >= value_cap:
         action = "DROP"
-        reasoning = f"Price ${current_price}M exceeds max bid ${max_bid}M"
-    elif current_price >= max_bid - 0.3:
+        reasoning = f"Price ${current_price}M exceeds max bid ${value_cap}M"
+    elif current_price >= value_cap - CAUTION_BAND:
         action = "CAUTION"
         reasoning = f"Price ${current_price}M is near max bid ${max_bid}M — proceed carefully"
     else:

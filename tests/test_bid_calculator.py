@@ -233,6 +233,32 @@ class TestUncontestedBidding:
         assert rec.action == "DROP"
         assert rec.max_bid == 0.0
 
+    def test_advice_never_inverts_as_price_rises(self):
+        """Willingness must be non-increasing in price.
+
+        Judging the verdict ladder on a max_bid that blends the value cap with
+        the ceiling forecast made advice non-monotonic: the forecast releasing
+        one increment above itself flipped DROP at $1.1M into BID at $1.2M.
+        A point test at the boundary would miss that, so assert the property.
+        """
+        team, pool, prices = self._setup()
+        info = MarketInfo(
+            market_ceiling=1.0, highest_bidder="AAA", highest_bid=1.0,
+            second_bidder="BBB", demand_count=2, floor_demand=False,
+        )
+        rank = {"BID": 2, "CAUTION": 1, "DROP": 0}
+        # The ceiling boundary ($1.1M) and the value boundary (~$4.1M)
+        sweep = [round(0.5 + i * SALARY_INCREMENT, 1) for i in range(11)]
+        sweep += [round(3.6 + i * SALARY_INCREMENT, 1) for i in range(8)]
+        seen = []
+        for price in sweep:
+            rec = compute_bid_recommendation(
+                pool["Star"], team, pool, prices, info, current_price=price,
+            )
+            seen.append((price, rec.action, rec.max_bid))
+        ranks = [rank[a] for _, a, _ in seen]
+        assert ranks == sorted(ranks, reverse=True), f"advice inverted: {seen}"
+
     def test_ceiling_still_caps_while_price_below_it(self):
         """The critical rule holds in the normal case: bid <= ceiling + increment."""
         team, pool, prices = self._setup()

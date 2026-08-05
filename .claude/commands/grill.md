@@ -6,12 +6,16 @@ Adversarial code review. Don't let me ship until the changes pass your scrutiny.
 
 ## 1. Establish the diff
 
-Review everything not yet on the main branch, in this order:
+`$ARGUMENTS` may scope the review. Take the first rule that applies:
 
-1. `git status --short` and `git diff HEAD` — uncommitted work (staged and unstaged)
-2. If the current branch is not `main`: `git diff main...HEAD` — commits on this branch
+1. **`$ARGUMENTS` names a scope** — a commit range (`abc123..def456`), a count ("last 3 commits"), a date ("since yesterday"), or a batch in prose ("the changes before today"). Resolve it with `git log --format='%h %ad %s' --date=format:'%Y-%m-%d %H:%M' -15` to see where the batches fall, then review `git diff <base>..<head>`. State the range you picked so I can correct it.
+2. **Uncommitted work exists** (`git status --short` is non-empty) — review `git diff HEAD`, staged and unstaged.
+3. **Branch is not `main`** — review `git diff main...HEAD`.
+4. **Otherwise** — this project commits straight to `main`, so a clean tree is the normal state after any `/quick-commit`; it does NOT mean there is nothing to review. Show `git log --oneline -10` and review the most recent batch of related commits, saying which ones you took.
 
-Review the union of both. If both are empty, say so and stop — there is nothing to grill.
+Never answer "nothing to grill" just because the working tree is clean.
+
+Before reporting, check `BACKLOG.md` — findings already tracked there under **Open findings** are known and should not be re-reported as new. Say so if a change touches one.
 
 ## 2. Review every change as a skeptical staff engineer
 

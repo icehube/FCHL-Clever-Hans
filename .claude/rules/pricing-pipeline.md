@@ -52,14 +52,23 @@ Position-agnostic -- any team can bid on any player (extras go to bench or minor
 market_price = min(model_price, market_ceiling)
 ```
 
-**Final bid recommendation**:
+**Final bid recommendation** -- two caps that mean different things, kept apart:
 ```
-recommended_bid = min(marginal_value, market_ceiling + 0.1, physical_max_bid)
+value_cap     = min(marginal_value, physical_max_bid)   # hard: past this he isn't worth it
+expected_stop = market_ceiling + 0.1                    # FORECAST: where bidding runs out
 
-# ...except the ceiling term drops out once current_price > market_ceiling + 0.1:
-recommended_bid = min(marginal_value, physical_max_bid)
+max_bid = value_cap                       if uncontested or current_price >= expected_stop
+        = min(value_cap, expected_stop)   otherwise
 ```
-The ceiling term exists so BOT never pays more than needed to win. It is only valid while the standing price is still below it -- see the Critical rule.
+`expected_stop` exists so BOT never pays more than winning requires. It's a prediction, valid only while the standing price is below it -- see the Critical rule.
+
+**The BID/CAUTION/DROP ladder runs on `value_cap`, never on `max_bid`:**
+```
+DROP     if current_price >= value_cap
+CAUTION  if current_price >= value_cap - CAUTION_BAND
+BID      otherwise
+```
+`value_cap` does not move with price, so the verdict can only soften as the price climbs. Judging the ladder on `max_bid` made advice non-monotonic: the forecast releasing one increment above itself flipped DROP into BID and tripled `max_bid` (fixed a3de737, pinned by `tests/test_bid_calculator.py::TestUncontestedBidding::test_advice_never_inverts_as_price_rises`).
 
 **MILP budget** (different from single-bid budget):
 ```
@@ -79,11 +88,11 @@ If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardl
 
 ### The one exception: a real price beats a forecast
 
-The ceiling is a *forecast of the clearing price*. It caps the bid only **while the standing price is still below it**. Once `current_price` exceeds `ceiling + 0.1`, the forecast has been falsified by a price that is actually on the table and cannot come back down -- so the cap drops out and marginal value binds instead (`optimizer.py`, `compute_bid_recommendation`).
+The ceiling is a *forecast of the clearing price*. It caps the bid only **while the standing price is strictly below it**. Once `current_price` reaches `ceiling + 0.1`, the cap drops out and value binds instead (`optimizer.py`, `compute_bid_recommendation`) -- either because a real price on the table has falsified the forecast, or because `ceiling + 0.1` is *by construction* the price that outbids the strongest opponent, so reaching it means BOT has already won. Same reason the cap never applies when uncontested: with no opponent there is nothing to forecast.
 
 Two ways this happens: the last opponent drops out (live ceiling collapses to `MIN_SALARY`), or an opponent bids above the max we computed for them (stale budget data). Without the exception, both produce a spurious DROP on a bargain -- the advisor telling you to walk away from a player you have already won. Regression tests: `tests/test_bid_calculator.py::TestUncontestedBidding`.
 
-**Uncontested semantics** (`bot_uncontested=True`, i.e. `live_opponents()` is empty and BOT is in the bidder list): the auction is over and BOT has won at `current_price`. Verdict is **WIN** when `current_price <= max_bid`, else **DROP** naming the overpay. CAUTION is meaningless here -- nobody can push the price higher. Note the `<=`: the contested ladder uses `>=` because it asks "will I have to go higher?", while uncontested asks "is this final price at or below value?", where break-even is indifferent.
+**Uncontested semantics** (`bot_uncontested=True`, i.e. `market.bid_winner()` returns `MY_TEAM`): the auction is over and BOT has won at `current_price`. `bid_winner` is the ONE definition of "last bidder standing" -- the advisor's WIN verdict and the template's Assign button both derive from it, because when they were computed separately they disagreed and the panel rendered WIN with no Assign button (fixed ce20814). Verdict is **WIN** when `current_price <= max_bid`, else **DROP** naming the overpay. CAUTION is meaningless here -- nobody can push the price higher. Note the `<=`: the contested ladder uses `>=` because it asks "will I have to go higher?", while uncontested asks "is this final price at or below value?", where break-even is indifferent.
 
 ## "Team done" exclusion
 

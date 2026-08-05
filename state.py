@@ -74,6 +74,23 @@ class PlayerOnRoster:
         return self.group in MINOR_CAP_GROUPS
 
 
+def _floor_to_increment(amount: float) -> float:
+    """Largest committable amount not exceeding `amount`.
+
+    Money moves in $0.1M steps, so cap space below one increment can never
+    actually be spent. Sub-increment residue is NOT always float noise:
+    a buyout penalty is 50% of salary, so buying out a $2.1M player leaves a
+    genuine $1.05M on the cap. Rounding that to nearest invents $0.05M of
+    space (10 of 100 reachable penalty values) — enough for the MILP to plan
+    a roster over the cap and for physical_max_bid to report a bid the team
+    cannot make. Floor, so the error is always in the safe direction.
+
+    Scaling to integer hundredths first absorbs float error, so a genuine
+    4.2 arriving as 4.199999999999996 still floors to 4.2 rather than 4.1.
+    """
+    return (round(amount * 100) // 10) / 10.0
+
+
 def _index_of(players: list[PlayerOnRoster], name: str) -> int | None:
     """Index of the named player in a list, or None if absent.
 
@@ -127,15 +144,15 @@ class TeamState:
 
     @property
     def remaining_budget(self) -> float:
-        """How much cap space is left.
+        """How much cap space is left, floored to what can actually be spent.
 
-        Rounded because every salary in this league moves in $0.1M increments,
-        so any sub-cent residue is float error, not money. Left raw, this
-        returned values like 4.199999999999996, and the MILP budget constraint
-        then rejected a bid at exactly 4.2 — costing a team $0.1M of real
-        bidding headroom at its own physical max.
+        Left raw this returned values like 4.199999999999996, and the MILP
+        budget constraint then rejected a bid at exactly 4.2 — costing a team
+        $0.1M of real headroom at its own physical max. Floored rather than
+        rounded so a buyout's half-increment penalty can never inflate it;
+        see _floor_to_increment.
         """
-        return round(SALARY_CAP - self.total_salary, 1)
+        return _floor_to_increment(SALARY_CAP - self.total_salary)
 
     @property
     def roster_count(self) -> int:
@@ -186,7 +203,9 @@ class TeamState:
             return 0.0
         # Clamp at 0 so over-committed teams read as "can't bid", not a
         # nonsense negative ceiling in templates and projections.
-        return round(max(0.0, min(self.spendable_budget + MIN_SALARY, MAX_SALARY)), 1)
+        return _floor_to_increment(
+            max(0.0, min(self.spendable_budget + MIN_SALARY, MAX_SALARY))
+        )
 
     @property
     def current_roster_points(self) -> int:

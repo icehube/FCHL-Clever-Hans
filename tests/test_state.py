@@ -108,9 +108,45 @@ class TestTeamStateBudget:
     def test_remaining_budget(self):
         keepers = [_make_player_on_roster("P1", salary=30.0)]
         team = _make_team(keepers=keepers)
-        # approx, not ==: remaining_budget rounds to the $0.1M increment all
-        # league money moves in, so it will not equal the raw float subtraction
+        # approx, not ==: remaining_budget is quantized to the $0.1M increment
+        # all league money moves in, so it will not equal the raw subtraction
         assert team.remaining_budget == pytest.approx(SALARY_CAP - 30.0)
+
+    def test_budget_never_overstates_real_cap_space(self):
+        """Reported budget must never exceed the cap space that actually exists.
+
+        A buyout penalty is 50% of salary, so it lands on a half-increment:
+        buying out a $2.1M player leaves a genuine $1.05M on the cap. Rounding
+        that to nearest inflated remaining_budget by $0.05M for 10 of the 100
+        reachable penalty values — enough for the MILP to plan a roster over
+        the cap, and for physical_max_bid to name a bid the team can't make.
+        """
+        keepers = [_make_player_on_roster(f"P{i}", salary=2.0) for i in range(23)]
+        team = _make_team(keepers=keepers)
+        for step in range(1, 100):
+            team.penalties = step * 0.05  # every buyout penalty is a half-step
+            true_space = SALARY_CAP - team.total_salary
+            assert team.remaining_budget <= true_space + 1e-9, (
+                f"penalties=${team.penalties:.2f}M: reported "
+                f"${team.remaining_budget}M of ${true_space}M real space"
+            )
+            # One reserved spot is replaced by the bid itself, so the physical
+            # max may exceed remaining by at most that reservation.
+            assert team.physical_max_bid <= true_space + MIN_SALARY + 1e-9
+            tenths = team.remaining_budget * 10
+            assert abs(tenths - round(tenths)) < 1e-9, "must land on a $0.1M step"
+
+    def test_budget_keeps_the_full_increment_it_is_owed(self):
+        """Flooring must not eat a legitimate increment.
+
+        The float-error case this quantization exists for: $52.6M committed
+        leaves exactly $4.2M, which arrives as 4.199999999999996.
+        """
+        keepers = [_make_player_on_roster(f"P{i}", salary=2.0) for i in range(23)]
+        team = _make_team(keepers=keepers)
+        team.penalties = 6.6
+        assert SALARY_CAP - team.total_salary != 4.2, "precondition: float error"
+        assert team.remaining_budget == 4.2
 
     def test_roster_count_excludes_minors(self):
         keepers = [_make_player_on_roster("P1"), _make_player_on_roster("P2")]

@@ -151,12 +151,21 @@
        render WIN with no Assign button. #}
     {% if bid_winner is defined and bid_winner %}
     {% set winner_code = bid_winner %}
-    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="mt-2">
+    {# Salary is read out of #bid-price when the request is built, NOT captured
+       here at render time. The price input re-renders this whole panel on
+       `change`, and `change` on a number input fires on BLUR — so clicking
+       Assign right after typing a price blurs the input, starts a /bid-check
+       re-render, and a snapshot taken at the last render would post the
+       PREVIOUS price. There is deliberately no hidden salary field to fall
+       back to: one source only, and a failed read 422s loudly instead of
+       silently recording the wrong salary for the rest of the draft. #}
+    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="mt-2"
+          hx-vals='js:{salary: document.getElementById("bid-price").value}'>
         <input type="hidden" name="player" value="{{ bid_advice.player_name }}">
         <input type="hidden" name="team" value="{{ winner_code }}">
-        <input type="hidden" name="salary" value="{{ bid_price if bid_price is defined else 0.5 }}">
         <button type="submit" class="btn btn-primary btn-sm w-full">
-            Assign to {{ winner_code }} (${{ "%.1f"|format(bid_price if bid_price is defined else 0.5) }}M)
+            Assign to {{ winner_code }}
+            (<span id="assign-price">${{ "%.1f"|format(bid_price if bid_price is defined else 0.5) }}M</span>)
         </button>
     </form>
     {% endif %}

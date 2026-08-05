@@ -144,12 +144,32 @@ function filterPosition(pos) {
     renumberRows(tbody);
 }
 
+/* Keep the Assign button's price label in step with the live price input.
+   The button posts #bid-price's value at submit time, so a label left at the
+   last render's price would promise one number and record another. */
+function syncAssignPrice() {
+    var input = document.getElementById('bid-price');
+    var label = document.getElementById('assign-price');
+    if (!input || !label) return;
+    var val = parseFloat(input.value);
+    label.textContent = '$' + (isNaN(val) ? 0.5 : val).toFixed(1) + 'M';
+}
+
+/* Delegated off document: the auction panel is swapped on every bid-check, so
+   a listener bound to the input itself dies on the first re-render. */
+document.addEventListener('input', function(e) {
+    if (e.target.id === 'bid-price') syncAssignPrice();
+});
+
 /* Adjust bid price by increment and auto-submit */
 function adjustPrice(delta) {
     var input = document.getElementById('bid-price');
     if (!input) return;
     var val = parseFloat(input.value) || 0.5;
     input.value = Math.max(0.5, (val + delta)).toFixed(1);
+    // Setting .value programmatically fires no input event, so sync by hand —
+    // the label would otherwise stay stale until the re-render lands.
+    syncAssignPrice();
     var form = input.closest('form');
     if (form) htmx.trigger(form, 'submit');
 }

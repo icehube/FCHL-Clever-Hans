@@ -144,6 +144,67 @@ class TestBidCheck:
         assert "overpaying by" in r.text
 
 
+class TestAssignSalaryIsLive:
+    """Assign must post the price that's in the box right now.
+
+    It used to carry a hidden salary field snapshotted at render time. The
+    price input re-renders this panel on `change`, and `change` on a number
+    input fires on BLUR — so clicking Assign straight after typing blurred the
+    input, started a /bid-check re-render, and posted the PREVIOUS price. A
+    wrong salary lands silently and skews every cap and ceiling after it.
+
+    The race is browser event ordering and cannot be reproduced from
+    TestClient. These pin the wiring so it can't silently revert.
+    """
+
+    def _panel(self, client) -> str:
+        """A rendered auction panel with the Assign form showing.
+
+        Cap-fill an opponent so BOT is the last team that can raise — same
+        trick as test_win_comes_with_an_assign_button.
+        """
+        import main
+        from state import PlayerOnRoster
+
+        victim = main.auction_state.teams["HSM"]
+        saved = list(victim.keeper_players)
+        victim.keeper_players = [
+            PlayerOnRoster(name=f"HSM_F{i}", position="F", group="3",
+                           salary=1.0, projected_points=50)
+            for i in range(24)
+        ]
+        victim._invalidate_cache()  # roster_players is memoized
+        try:
+            r = client.post("/bid-check", data={
+                "player": "Connor McDavid",
+                "bidders": "BOT,HSM",
+                "price": "2.5",
+                "highest_bidder": "BOT",
+            })
+            assert r.status_code == 200
+            assert 'name="team" value="BOT"' in r.text, "Assign form must render"
+            return r.text
+        finally:
+            victim.keeper_players = saved
+            victim._invalidate_cache()
+
+    def test_panel_holds_no_salary_snapshot(self, client):
+        """The assertion that pins the fix: no render-time salary to go stale."""
+        assert 'name="salary"' not in self._panel(client)
+
+    def test_assign_reads_the_price_input_at_submit_time(self, client):
+        html = self._panel(client)
+        assert "hx-vals=" in html, "Assign must supply salary at request time"
+        assert 'document.getElementById("bid-price").value' in html
+
+    def test_button_label_is_syncable(self, client):
+        """shortcuts.js rewrites this span as the price changes, so the button
+        never promises a price different from the one it will post."""
+        html = self._panel(client)
+        assert 'id="assign-price"' in html
+        assert ">$2.5M<" in html, "label should start at the rendered price"
+
+
 class TestCounterfactualVerdict:
     """The panel must say what to DO, and name the price it judged at.
 

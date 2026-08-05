@@ -214,8 +214,10 @@ class TeamState:
 
     def find_player(self, name: str) -> PlayerOnRoster | None:
         """Find a player by name across all lists."""
-        i = _index_of(self.all_players, name)
-        return self.all_players[i] if i is not None else None
+        # Bind once: all_players concatenates a fresh list on every access.
+        players = self.all_players
+        i = _index_of(players, name)
+        return players[i] if i is not None else None
 
     def remove_player(self, name: str) -> PlayerOnRoster:
         """Remove and return a player by name. Raises ValueError if not found."""

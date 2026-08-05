@@ -174,7 +174,7 @@ After every correction or mistake, update CLAUDE.md or the relevant rules file w
 
 ## Deferred findings
 
-When `/grill`, `/go`, `/simplify`, `/review-changes`, or any review agent flags an issue that is **not** addressed in the current change (out of scope, judgment-call skip, valid-but-deferred refactor), append it to `BACKLOG.md` at the repo root. Don't drop it on the floor — even if you decide not to act on it now, the user should be able to see what was flagged and triage it later.
+When `/grill`, `/go`, `/simplify`, or any review agent flags an issue that is **not** addressed in the current change (out of scope, judgment-call skip, valid-but-deferred refactor), append it to `BACKLOG.md` at the repo root. Don't drop it on the floor — even if you decide not to act on it now, the user should be able to see what was flagged and triage it later.
 
 Format per entry:
 
@@ -207,7 +207,6 @@ Before appending, scan `BACKLOG.md` for an existing entry covering the same file
 | `/go` | Verify, simplify, and commit -- the ship sequence |
 | `/quick-commit` | Stage all changes and commit with a descriptive message |
 | `/test-and-fix` | Run tests and fix any failures |
-| `/review-changes` | Review uncommitted changes and suggest improvements |
 | `/grill` | Adversarial code review -- don't ship until it passes |
 | `/techdebt` | End-of-session sweep for duplicated and dead code |
 

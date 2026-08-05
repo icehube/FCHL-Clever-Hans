@@ -2,7 +2,7 @@
 
 The single work list for this project: deferred review findings plus forward-looking ideas.
 
-**Open findings** are things flagged by review agents (`/grill`, `/go`, `/simplify`, `/review-changes`, etc.) that were **not** addressed in the change that surfaced them. Format: `- [YYYY-MM-DD] [source] file:line — finding — reason deferred`
+**Open findings** are things flagged by review agents (`/grill`, `/go`, `/simplify`, etc.) that were **not** addressed in the change that surfaced them. Format: `- [YYYY-MM-DD] [source] file:line — finding — reason deferred`
 
 **Ideas / future work** are unprompted improvements with no specific defect behind them. No file:line.
 

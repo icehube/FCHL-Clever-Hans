@@ -38,7 +38,7 @@ Triaged 2026-07-05.
 
 ### test infrastructure
 
-- [2026-07-05] [review] tests/test_data_loader.py — 15+ assertions pin the live players.csv (704 biddable, salaries, penalties, McDavid's team); every data refresh breaks them with no correctness signal — awaiting triage
+- [2026-08-05] [review] tests/test_data_loader.py — 15+ assertions pin the live players.csv (704 biddable, salaries, penalties, McDavid's team); every data refresh breaks them with no correctness signal. Same class: `test_endpoints.py::TestPriceColumn::test_nothing_capped_at_full_budgets` holds only because the top model price (~$9.5M) sits under the full-budget ceiling ($11.4M) — a pricier pool would fail it without anything being wrong — awaiting triage
 - [2026-07-05] [review] tests/ — coverage gaps: /trade-between happy path, undo-after-{adjust-salary,move-to-minors,move-to-roster,set-nominator}, MILP-infeasible rendering, corrupt-state startup fallback; assert-nothing tests in test_stress.py:146 (pass-body loop), test_bid_calculator.py:157 (>=0 tautology), test_edge_cases.py:312 (500 accepted) — partially reduced (trade guards, combo turn, endgame, live ceiling now tested); rest awaiting triage
 
 ---

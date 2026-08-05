@@ -238,7 +238,9 @@ class TestCounterfactualVerdict:
         name = next(iter(main.auction_state.available_players))
         r = client.get(f"/explain/{name}")
         expected = round(main.market_prices[name], 1)
-        assert f"${expected}M" in r.text
+        # Anchored to the verdict's <strong>: a bare "$4.9M" would also match
+        # the with/without roster costs rendered above it.
+        assert f"at ${expected}M</strong>" in r.text
 
 
 class TestPriceColumn:

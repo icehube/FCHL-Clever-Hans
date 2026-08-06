@@ -59,6 +59,13 @@ MINOR_CAP_GROUPS = {"2", "3"}
 # predicates that agreed until one moved (the drain filter) — don't merge these.
 BUYOUT_ELIGIBLE_GROUPS = {"2", "3"}
 
+# Below this clearing price a drain nomination isn't worth the turn: burning
+# ~$2M of one opponent's cap costs BOT a nomination it could have spent on a
+# player it wants. Compared against the MARKET price (what the player will
+# actually fetch), not the model price — a $9M star behind a $0.5M ceiling
+# drains $0.5M, and gating on his model price would call that a drain.
+MIN_DRAIN_PRICE = 2.0
+
 # Groups that indicate RFA status
 RFA_GROUPS = {"RFA1", "RFA2"}
 

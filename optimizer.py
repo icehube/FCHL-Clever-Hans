@@ -12,6 +12,7 @@ from config import (
     BENCH_WEIGHT,
     CAUTION_BAND,
     MAX_SALARY,
+    MIN_DRAIN_PRICE,
     MIN_SALARY,
     MY_TEAM,
     POSITION_MINIMUMS,
@@ -511,7 +512,7 @@ def recommend_nomination(
     ufas = {n: p for n, p in available.items() if not p.is_rfa and p.projected_points > 0}
 
     rfa_pick = _pick_best_rfa(rfas, wanted_names, market_prices, model_prices)
-    ufa_pick = _pick_best_ufa(ufas, wanted_names, team, market_prices, model_prices, market_info, state)
+    ufa_pick = _pick_best_ufa(ufas, wanted_names, market_prices, model_prices, state)
 
     return rfa_pick, ufa_pick
 
@@ -541,16 +542,18 @@ def _pick_best_rfa(
             expected_price=market_prices.get(best_name, MIN_SALARY),
         )
 
-    # Otherwise pick the most expensive RFA to drain opponent budgets
-    best_name, best = max(
-        rfas.items(),
-        key=lambda x: model_prices.get(x[0], 0),
-    )
+    # Otherwise drain. No MIN_DRAIN_PRICE gate and no depth fallback here: a
+    # combo turn is 1 RFA + 1 UFA, so the RFA half must nominate someone
+    # regardless of whether the market can pay. Ranked on market price for the
+    # same reason as the UFA branch — see _best_drain_candidate.
+    best_name, best = _best_drain_candidate(rfas, market_prices, model_prices)
+    price = market_prices.get(best_name, MIN_SALARY)
     return NominationPick(
         player=best,
         strategy="drain",
-        reasoning=f"{best.name} is expensive — forces opponents to spend on RFA bid",
-        expected_price=model_prices.get(best_name, MIN_SALARY),
+        reasoning=f"{best.name} (~${price:.1f}M) is the priciest RFA the market can "
+                  f"reach — forces opponents to spend their sealed bid",
+        expected_price=price,
     )
 
 
@@ -569,38 +572,69 @@ def _bidding_opponents(state: AuctionState) -> list[TeamState]:
     ]
 
 
-def _score_drain_candidate(
-    player: Player,
-    model_price: float,
-    state: AuctionState,
-) -> float:
-    """Score a drain candidate by how effectively it drains opponent budgets.
+def _best_drain_candidate(
+    pool: dict[str, Player],
+    market_prices: dict[str, float],
+    model_prices: dict[str, float],
+) -> tuple[str, Player] | None:
+    """The player whose sale burns the most opponent cap, per dollar gifted.
 
-    Higher score = better drain target. Considers price, position demand,
-    and how many opponents can afford the player.
+    Ranked on MARKET price, not model price, because that is the money that
+    actually leaves an opponent's budget. compute_market_price IS the auction
+    clearing price: min(model, second-highest opponent max) is identical to the
+    second-highest willingness to pay among bidders, which is what the
+    second-to-last bidder dropping out sets. So there is no separate drain
+    formula to derive — Layer 2 already computed the answer.
+
+    Ties are the normal case here, not an edge case: once the ceiling binds,
+    EVERY player priced above it clears at exactly the ceiling. Ranking that
+    tied set by model price (what the old score did) picks the player who hands
+    a rival the most value for the same money — a $7.7M goalie and a $2.5M
+    defenceman both cost the buyer $2.5M, but only one of them is a bargain.
+    Break toward the least surplus instead: same cap drained, no gift.
+
+    Position need is deliberately absent. It multiplied a dollar figure by a
+    team count, which is what made the old score uninterpretable, and it
+    contradicts the position-agnostic bidding rule — a team already holding 12F
+    reads as "doesn't need forwards" in roster_needs while remaining perfectly
+    free to bid on one. It survives as context in _drain_reasoning.
+    """
+    if not pool:
+        return None
+
+    def rank(item: tuple[str, Player]) -> tuple[float, float, str]:
+        name, _ = item
+        market = market_prices.get(name, MIN_SALARY)
+        surplus = model_prices.get(name, 0.0) - market
+        # Name last so the pick can't drift with dict insertion order.
+        return (market, -surplus, name)
+
+    return max(pool.items(), key=rank)
+
+
+def _drain_reasoning(player: Player, market_price: float, state: AuctionState) -> str:
+    """Context for a drain pick: who still needs the position, who can pay.
+
+    can_afford is counted at the MARKET price, so it is never zero when anyone
+    can bid — the market price is by construction the second-highest opponent
+    max, so the top two can always reach it. Counted at the model price it read
+    "0 can afford" while recommending the player, which is self-contradicting:
+    someone nobody can bid on drains nothing.
     """
     opponents = _bidding_opponents(state)
-    if not opponents:
-        return model_price
-
-    needing_position = sum(
-        1 for t in opponents if t.roster_needs.get(player.position, 0) > 0
+    needing = sum(1 for t in opponents if t.roster_needs.get(player.position, 0) > 0)
+    can_afford = sum(1 for t in opponents if t.physical_max_bid >= market_price)
+    return (
+        f"{player.name} (${market_price:.1f}M, {needing} need {player.position}, "
+        f"{can_afford} can afford) — drains opponent budgets"
     )
-    can_afford = sum(
-        1 for t in opponents if t.physical_max_bid >= model_price
-    )
-
-    # Price × demand / competition: expensive + needed + scarce = bidding war
-    return model_price * max(needing_position, 1) / max(can_afford, 1)
 
 
 def _pick_best_ufa(
     ufas: dict[str, Player],
     wanted: set[str],
-    team: TeamState,
     market_prices: dict[str, float],
     model_prices: dict[str, float],
-    market_info: MarketInfo,
     state: AuctionState,
 ) -> NominationPick | None:
     """Pick the best UFA to nominate."""
@@ -622,22 +656,21 @@ def _pick_best_ufa(
         )
 
     # Strategy 2: Drain — nominate player that forces opponents into bidding wars
-    unwanted = [(n, p) for n, p in ufas.items() if n not in wanted]
-    if unwanted:
-        drain_name, drain = max(
-            unwanted,
-            key=lambda x: _score_drain_candidate(x[1], model_prices.get(x[0], 0), state),
-        )
-        mprice = model_prices.get(drain_name, 0)
-        if mprice > 2.0:
-            opponents = _bidding_opponents(state)
-            needing = sum(1 for t in opponents if t.roster_needs.get(drain.position, 0) > 0)
-            can_afford = sum(1 for t in opponents if t.physical_max_bid >= mprice)
+    unwanted = {n: p for n, p in ufas.items() if n not in wanted}
+    best = _best_drain_candidate(unwanted, market_prices, model_prices)
+    if best is not None:
+        drain_name, drain = best
+        price = market_prices.get(drain_name, MIN_SALARY)
+        # Gating the top candidate is sound only because the ranking is in
+        # dollars: its market price is the most any nomination can drain, so
+        # failing the threshold means no drain is worth the turn. The old score
+        # wasn't a price, so this check could reject a perfectly good drain.
+        if price >= MIN_DRAIN_PRICE:
             return NominationPick(
                 player=drain,
                 strategy="drain",
-                reasoning=f"{drain.name} (${mprice:.1f}M, {needing} need {drain.position}, {can_afford} can afford) — drains opponent budgets",
-                expected_price=model_prices.get(drain_name, MIN_SALARY),
+                reasoning=_drain_reasoning(drain, price, state),
+                expected_price=price,
             )
 
     # Strategy 3: Depth — nominate a cheap player for BOT's roster

@@ -110,8 +110,17 @@
             <span class="tooltip tooltip-bottom" data-tip="No opponent left in the bidding, so there is nothing to forecast — only value binds now">Should win it: &mdash; <span class="opacity-60">(no rivals left)</span></span>
             {% elif bid_advice.stop_status == "unaffordable" %}
             <span class="tooltip tooltip-bottom" data-tip="No roster spot or budget for any bid — a target price would only invite one the engine has already refused">Should win it: &mdash; <span class="opacity-60">(can't bid)</span></span>
-            {% else %}
+            {% elif bid_advice.stop_status == "passed" %}
             <span class="tooltip tooltip-bottom" data-tip="Bidding went past the forecast, so it's been falsified — a real price on the table beats a prediction. Only value binds now.">Should win it: &mdash; <span class="opacity-60">(bidding passed it)</span></span>
+            {% else %}
+            {# Every known status is named above, so this is an unrecognized one:
+               a status added to the engine without a branch here, or a default-
+               constructed BidRecommendation ("live" with no figure — impossible
+               from compute_bid_recommendation, but reachable by construction).
+               Say nothing rather than guess. This used to be the "passed" arm,
+               which meant an unknown status rendered as a confident claim that
+               a real price had falsified the forecast. #}
+            <span class="tooltip tooltip-bottom" data-tip="No forecast available for this bid">Should win it: &mdash;</span>
             {% endif %}
             <span class="tooltip tooltip-bottom" data-tip="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
             {% if bid_advice.uncontested %}

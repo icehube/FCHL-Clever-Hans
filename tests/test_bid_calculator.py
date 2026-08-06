@@ -498,15 +498,19 @@ class TestBidPanelNumbers:
         ("uncontested", "(no rivals left)"),
         ("unaffordable", "(can't bid)"),
         ("passed", "(bidding passed it)"),
+        # An unrecognized status must not borrow another one's explanation.
+        ("some_future_status", "Should win it: &mdash;</span>"),
     ])
     def test_each_stop_status_renders_its_own_text(self, monkeypatch, status, expected):
         """Every branch of the template, pinned.
 
-        The three no-forecast branches are selected by string compare, and the
-        last one is a bare `{% else %}` — so a status renamed on either side
-        does not blank the field, it silently renders "bidding passed it" for
-        all three. Wrong text is worse than none: it tells the operator a real
-        price falsified the forecast when nobody is even bidding.
+        The no-forecast branches are selected by string compare, so a status
+        renamed on either side does not blank the field — it falls through.
+        Until the fallback was made neutral that meant rendering "bidding
+        passed it", telling the operator a real price had falsified the
+        forecast when nobody was even bidding. The last case here pins the
+        fallback itself: an unknown status must explain nothing rather than
+        borrow another status's explanation.
 
         Patched rather than staged from a league position, because the states
         differ only in this one field and building four league positions that

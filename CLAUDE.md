@@ -179,12 +179,14 @@ When `/grill`, `/go`, `/simplify`, or any review agent flags an issue that is **
 Format per entry:
 
 ```
-- [YYYY-MM-DD] [source] file:line — finding (one sentence) — reason deferred
+- [YYYY-MM-DD] [source] file:line (symbol) — finding (one sentence) — reason deferred
 ```
 
-Example: `- [2026-05-02] [simplify] main.py:852 — save_snapshot runs before validation; full JSON round-trip on rejected requests — pre-existing pattern across endpoints, fix would be cross-endpoint refactor`
+Example: `- [2026-05-02] [simplify] main.py:996 (move_to_minors) — save_snapshot runs before validation; full JSON round-trip on rejected requests — pre-existing pattern across endpoints, fix would be cross-endpoint refactor`
 
-Before appending, scan `BACKLOG.md` for an existing entry covering the same file:line + finding — update the date instead of duplicating.
+**Always name the enclosing function/property in `(symbol)`.** Line numbers drift whenever anything above them changes; on 2026-08-05 a third of this file's references pointed at unrelated code. The symbol survives the drift and keeps the entry greppable. Templates have no symbols, so those carry a line only.
+
+Before appending, scan `BACKLOG.md` for an existing entry covering the same symbol + finding — update the date instead of duplicating. When a change shifts line numbers in a file the backlog references, re-anchor those entries in the same commit.
 
 ## Working with plan mode
 

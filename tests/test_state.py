@@ -489,6 +489,28 @@ class TestMinorsMovement:
         assert team.minor_players == []
         assert team.acquired_players[0].is_minor is False
 
+    def test_demoted_keeper_recalls_into_acquired(self):
+        """A demoted keeper loses only the provenance label, and cap math holds.
+
+        Nothing in the app branches on keeper-vs-acquired — every other reader
+        concatenates the two — so landing in acquired_players on recall is
+        cosmetic. Pinned because it is the one visible consequence of dropping
+        the keeper refusal, and because the cap must return to where it started.
+        """
+        p = _make_player_on_roster(name="Round Tripper", group="A", salary=2.5)
+        p.is_bench = True
+        team = _make_team(keepers=[p])
+        cap_before = team.total_salary
+
+        team.send_to_minors("Round Tripper")
+        assert team.total_salary == 0.0, "group A in the minors costs nothing"
+
+        team.recall_from_minors("Round Tripper")
+        assert team.keeper_players == [], "keeper label is not restored"
+        assert [q.name for q in team.acquired_players] == ["Round Tripper"]
+        assert team.total_salary == cap_before, "cap must return to where it began"
+        assert len(team.roster_players) == 1, "still on the active roster either way"
+
     def test_send_active_player_raises(self):
         p = _make_player_on_roster(name="Starter", group="A")
         team = _make_team(acquired=[p])
@@ -502,10 +524,31 @@ class TestMinorsMovement:
         with pytest.raises(ValueError):
             team.send_to_minors("Nobody")
 
-    def test_send_keeper_raises(self):
+    def test_benched_keeper_can_be_sent_down(self):
+        """Keepers may be demoted — "keeper" is provenance, not a league rule.
+
+        Refusing them stranded group A-E players: they can't be bought out, and
+        the minors is the only place their cap hit goes to zero. Inverted from
+        test_send_keeper_raises, which pinned the old refusal.
+        """
+        keeper = _make_player_on_roster(name="Locked-In", group="A")
+        keeper.is_bench = True
+        team = _make_team(keepers=[keeper])
+
+        team.send_to_minors("Locked-In")
+
+        assert team.keeper_players == []
+        assert [p.name for p in team.minor_players] == ["Locked-In"]
+        assert team.minor_players[0].is_minor is True
+        assert not team.minor_players[0].counts_on_cap, (
+            "the whole point: a group-A player costs $0 in the minors"
+        )
+
+    def test_send_unbenched_keeper_still_raises(self):
+        """Lifting the keeper rule must not lift the benched-first rule."""
         keeper = _make_player_on_roster(name="Locked-In", group="A")
         team = _make_team(keepers=[keeper])
-        with pytest.raises(ValueError, match="keeper"):
+        with pytest.raises(ValueError, match="benched"):
             team.send_to_minors("Locked-In")
         assert len(team.keeper_players) == 1
         assert team.minor_players == []

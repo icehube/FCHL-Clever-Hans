@@ -6,7 +6,12 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from config import BUYOUT_PENALTY_RATE, DEFAULT_TEAM_PROBABILITY, MY_TEAM
+from config import (
+    BUYOUT_ELIGIBLE_GROUPS,
+    BUYOUT_PENALTY_RATE,
+    DEFAULT_TEAM_PROBABILITY,
+    MY_TEAM,
+)
 from optimizer import MILPSolution, solve_optimal_roster
 from state import AuctionState, Player, PlayerOnRoster
 
@@ -107,6 +112,12 @@ def evaluate_trade(
     # not the client-supplied form JSON (stale if adjusted after the
     # dropdown loaded). Mutating the PlayerTrade DTOs here also corrects
     # the values execute_trade will apply later.
+    # A traded player keeps his real contract group, which decides buyout
+    # eligibility and minors cap treatment. execute_trade already carries it
+    # over; this preview used to hardcode "3", so a group A-E prospect looked
+    # like a signed contract and the scenario builder below offered an illegal
+    # buyout on him. Evaluate and execute must describe the same player.
+    receive_groups: dict[str, str] = {}
     if source_team_code and source_team_code in trade_state.teams:
         src_team = trade_state.teams[source_team_code]
         for p in receive:
@@ -114,6 +125,7 @@ def evaluate_trade(
             if actual is not None:
                 p.salary = actual.salary
                 p.projected_points = actual.projected_points
+                receive_groups[p.name] = actual.group
 
     # Remove players BOT gives away
     for p in give:
@@ -127,7 +139,9 @@ def evaluate_trade(
         trade_team.add_acquired_player(PlayerOnRoster(
             name=p.name,
             position=p.position,
-            group="3",  # Acquired players are group 3
+            # Falls back to "3" for the free-agent flow, where a received player
+            # is a fresh draftee — the same group /assign gives them.
+            group=receive_groups.get(p.name, "3"),
             salary=p.salary,
             projected_points=p.projected_points,
             nhl_team=getattr(p, "nhl_team", ""),
@@ -172,6 +186,12 @@ def evaluate_trade(
         for p in receive:
             buyout_state = deepcopy(trade_state)
             buyout_team = buyout_state.teams[MY_TEAM]
+            # Only propose buyouts the league would allow. A scenario can be the
+            # RECOMMENDED one, so an unfiltered prospect here meant the tool
+            # advising an illegal move as the best available outcome.
+            incoming = buyout_team.find_player(p.name)
+            if incoming is None or not incoming.can_be_bought_out:
+                continue
             try:
                 buyout_team.remove_player(p.name)
             except ValueError:
@@ -244,6 +264,22 @@ def evaluate_trade(
     )
 
 
+def _require_buyout_eligible(player: PlayerOnRoster) -> None:
+    """Reject a buyout the league doesn't allow (CBA: group 2/3 only).
+
+    Names the alternative, because mid-draft the operator needs to know what to
+    do instead, not just that the button didn't work. A prospect on the active
+    roster is the case worth catching: their salary DOES count on the cap, so
+    the evaluation looked entirely plausible with nothing to flag it.
+    """
+    if not player.can_be_bought_out:
+        raise ValueError(
+            f"'{player.name}' is group {player.group} and cannot be bought out — "
+            f"only groups {'/'.join(sorted(BUYOUT_ELIGIBLE_GROUPS))} are eligible. "
+            f"Send him to the minors instead, where his cap hit is $0."
+        )
+
+
 def evaluate_buyout(
     state: AuctionState,
     player_name: str,
@@ -263,6 +299,7 @@ def evaluate_buyout(
     player = team.find_player(player_name)
     if player is None:
         raise ValueError(f"Player '{player_name}' not found on {MY_TEAM}")
+    _require_buyout_eligible(player)
 
     # Clone and apply buyout
     buyout_state = deepcopy(state)
@@ -377,5 +414,13 @@ def execute_buyout(
 ) -> None:
     """Execute a buyout on a player on BOT's roster."""
     team = state.teams[MY_TEAM]
+    # Checked here as well as in evaluate_buyout: /buyout posts a bare player
+    # name, so guarding only the advisory path leaves the illegal move one
+    # hand-made request away — and this one mutates the cap.
+    target = team.find_player(player_name)
+    if target is None:
+        raise ValueError(f"Player '{player_name}' not found on {MY_TEAM}")
+    _require_buyout_eligible(target)
+
     player = team.remove_player(player_name)
     team.penalties += player.salary * BUYOUT_PENALTY_RATE

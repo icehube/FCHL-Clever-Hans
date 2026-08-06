@@ -9,11 +9,17 @@
             Scan Roster for Buyout Opportunities
         </button>
 
+        {# Only group 2/3 can be bought out (CBA 11.4), and location is
+           irrelevant — so this lists all_players, not roster_players. That
+           drops A-E prospects sitting on the active roster (offering them was
+           an illegal move whose numbers looked fine, since they DO count on
+           cap) and picks up group 2/3 players in the minors, where everyone
+           drafted past 24 lands. #}
         <div class="flex flex-wrap gap-1 mb-2">
-            {% for p in team.roster_players|sort(attribute='projected_points') %}
+            {% for p in team.all_players|selectattr('can_be_bought_out')|sort(attribute='projected_points') %}
             <button hx-get="/buyout-check/{{ p.name }}" hx-target="#buyout-panel" hx-swap="outerHTML"
                     class="btn btn-xs btn-outline">
-                {{ player_label(p, with_position=false) }}
+                {{ player_label(p, with_position=false) }}{% if p.is_minor %} <span class="opacity-60">(M)</span>{% endif %}
             </button>
             {% endfor %}
         </div>

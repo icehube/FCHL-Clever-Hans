@@ -199,7 +199,10 @@ def _recompute_buyout_indicators():
     team = auction_state.teams[MY_TEAM]
     current_pts = milp_solution.total_points if milp_solution and milp_solution.status == "Optimal" else 0
     buyout_indicators = {}
-    for p in team.roster_players:
+    # Exactly the set the panel offers, so a dot can't appear beside a player
+    # you can't buy out — or be missing from one you can. Includes group 2/3
+    # players in the minors, who are eligible and were previously skipped.
+    for p in (q for q in team.all_players if q.can_be_bought_out):
         try:
             clone = deepcopy(auction_state)
             bt = clone.teams[MY_TEAM]
@@ -626,8 +629,15 @@ async def buyout_check(request: Request, player_name: str):
     """Preview buyout impact."""
     try:
         result = evaluate_buyout(auction_state, player_name, market_prices)
-    except ValueError:
-        result = None
+    except ValueError as e:
+        # Rendering an empty panel told the operator nothing. An ineligible
+        # group is the common case now, and the reason IS the useful answer.
+        ctx = _context(request)
+        ctx["buyout_result"] = None
+        return _toast(
+            _render(request, "partials/buyout_panel.html", ctx),
+            str(e), "error",
+        )
 
     ctx = _context(request)
     ctx["buyout_result"] = result
@@ -647,11 +657,13 @@ async def buyout(request: Request, player: str = Form(...)):
     auction_state.save_snapshot()
     try:
         execute_buyout(auction_state, player)
-    except ValueError:
+    except ValueError as e:
         auction_state.restore_snapshot()
+        # Report the actual reason: this used to say "not found" for every
+        # failure, so an ineligible-group refusal named the wrong problem.
         return _toast(
             _render(request, "partials/all_panels.html"),
-            f"Buyout failed: {player} not found", "error",
+            f"Buyout failed: {e}", "error",
         )
 
     # Log buyout transaction

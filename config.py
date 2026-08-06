@@ -48,6 +48,17 @@ DEFAULT_TEAM_PROBABILITY = 3.1
 # Groups whose minor-league salary counts toward the cap
 MINOR_CAP_GROUPS = {"2", "3"}
 
+# Groups that may be bought out (CBA Article 11.4). A-E are prospects: they can
+# be parked in the minors for a $0 cap hit, so a buyout would cost the 50%
+# penalty while freeing nothing — the league disallows it outright.
+#
+# Deliberately NOT reusing MINOR_CAP_GROUPS despite the identical membership.
+# The two answer different questions ("may this player be bought out?" vs "does
+# this minors salary count on cap?") and coincide only because both descend from
+# real-contract-vs-prospect. This repo already has one open finding from two
+# predicates that agreed until one moved (the drain filter) — don't merge these.
+BUYOUT_ELIGIBLE_GROUPS = {"2", "3"}
+
 # Groups that indicate RFA status
 RFA_GROUPS = {"RFA1", "RFA2"}
 

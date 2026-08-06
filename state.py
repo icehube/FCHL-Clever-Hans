@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from config import (
+    BUYOUT_ELIGIBLE_GROUPS,
     MAX_SALARY,
     MIN_SALARY,
     MINOR_CAP_GROUPS,
@@ -72,6 +73,18 @@ class PlayerOnRoster:
         if not self.is_minor:
             return True
         return self.group in MINOR_CAP_GROUPS
+
+    @property
+    def can_be_bought_out(self) -> bool:
+        """Whether this player may legally be bought out.
+
+        Location is irrelevant — active, bench and minors all buy out the same
+        way, for the same 50% penalty. Only the contract group decides.
+
+        Asked from the template as well as the engine, so the buttons on offer
+        and the moves the engine will accept cannot drift apart.
+        """
+        return self.group in BUYOUT_ELIGIBLE_GROUPS
 
 
 def _floor_to_increment(amount: float) -> float:
@@ -249,25 +262,31 @@ class TeamState:
         self._invalidate_cache()
 
     def send_to_minors(self, player_name: str) -> None:
-        """Move an acquired player to minors. Player must be benched first;
-        keepers cannot be sent down."""
-        i = _index_of(self.acquired_players, player_name)
-        if i is not None:
+        """Move an active-roster player to minors. Player must be benched first.
+
+        Keepers may go down too. "Keeper" only records that a player was on an
+        FCHL team before the auction — it is provenance, not a league rule, and
+        nothing else in the app branches on it (every other reader just
+        concatenates keepers + acquired). Refusing them used to strand the one
+        legal move a group A-E player has: those can't be bought out, and the
+        minors is where their cap hit goes to zero.
+
+        A demoted keeper recalls into acquired_players, losing only that label.
+        """
+        for source in (self.acquired_players, self.keeper_players):
+            i = _index_of(source, player_name)
+            if i is None:
+                continue
             # Validate before mutating: a rejected send must leave the player
             # exactly where they were.
-            if not self.acquired_players[i].is_bench:
+            if not source[i].is_bench:
                 raise ValueError(
                     f"'{player_name}' must be benched before being sent to minors"
                 )
-            self.acquired_players[i].is_minor = True
-            self.minor_players.append(self.acquired_players.pop(i))
+            source[i].is_minor = True
+            self.minor_players.append(source.pop(i))
             self._invalidate_cache()
             return
-        # Distinguish keepers (explicitly disallowed) from unknown names so the
-        # caller's toast can be specific. Keepers stay in keeper_players forever
-        # so recall always lands back in acquired_players cleanly.
-        if _index_of(self.keeper_players, player_name) is not None:
-            raise ValueError(f"Cannot send keeper '{player_name}' to minors")
         raise ValueError(f"Player '{player_name}' not on active roster of {self.code}")
 
     def recall_from_minors(self, player_name: str) -> None:

@@ -219,6 +219,110 @@ class TestPanelOffersExactlyTheEligible:
         assert main.auction_state.teams[MY_TEAM].find_player(victim.name) is not None
 
 
+class TestUIMatchesEligibility:
+    """The rest of the cockpit has to agree with the eligibility rule too.
+
+    Guarding the engine while leaving the UI on the old rule produces the worst
+    outcome: a button that looks available and a dot that looks like a verdict,
+    both about a decision that doesn't exist.
+    """
+
+    @pytest.fixture(scope="class")
+    def client(self):
+        from fastapi.testclient import TestClient
+        import main
+
+        with TestClient(main.app) as c:
+            c.post("/reset")
+            yield c
+
+    def test_ineligible_player_gets_no_buyout_dot(self, client):
+        """A grey dot on an un-buyoutable player reads as "not analyzed yet".
+
+        It would never fill in, because the scan skips him — so it promises an
+        answer that isn't coming.
+        """
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = next(
+            (p for p in bot.roster_players if not p.can_be_bought_out), None
+        )
+        if victim is None:
+            pytest.skip("no ineligible player on BOT's active roster in current data")
+
+        html = client.get("/team-view/" + MY_TEAM).text
+        dot_id = f'bo-{victim.name.replace(" ", "-")}'
+        assert dot_id not in html, (
+            f"{victim.name} is group {victim.group} and can't be bought out, "
+            f"but the panel renders a buyout indicator for him"
+        )
+
+    def test_scan_skips_ineligible_players(self, client):
+        """Every solve the scan runs must correspond to a real decision."""
+        import main
+
+        client.get("/buyout-indicators")
+        bot = main.auction_state.teams[MY_TEAM]
+        scanned = set(main.buyout_indicators)
+
+        illegal = {p.name for p in bot.all_players if not p.can_be_bought_out}
+        assert not (scanned & illegal), (
+            f"scan ran MILP solves for un-buyoutable players: {scanned & illegal}"
+        )
+        assert scanned, "scan produced nothing at all"
+
+    def test_scan_does_not_solve_for_players_with_no_dot(self, client):
+        """Minors have no row in the team table, so a solve for one is discarded.
+
+        The scan briefly covered them, which cost four MILP solves per click
+        and rendered nothing.
+        """
+        import main
+
+        client.get("/buyout-indicators")
+        bot = main.auction_state.teams[MY_TEAM]
+        minors = {p.name for p in bot.minor_players}
+        assert not (set(main.buyout_indicators) & minors), (
+            "scan solved for minors players, which have no placeholder to fill"
+        )
+
+    def test_benched_keeper_can_be_demoted_from_the_ui(self, client):
+        """The engine allows it; the button has to exist or nothing changed.
+
+        This is the whole point of lifting the keeper restriction — a group A-E
+        player can't be bought out, so the minors is his only route off the cap.
+        """
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = next(
+            (p for p in bot.keeper_players if not p.can_be_bought_out), None
+        )
+        if victim is None:
+            pytest.skip("no ineligible keeper on BOT's active roster")
+
+        try:
+            client.post(
+                "/toggle-bench", data={"team_code": MY_TEAM, "player_name": victim.name}
+            )
+            html = client.get(f"/team-view/{MY_TEAM}").text
+            assert "/move-to-minors" in html, "no demote button rendered at all"
+
+            r = client.post(
+                "/move-to-minors", data={"team_code": MY_TEAM, "player_name": victim.name}
+            )
+            assert r.status_code == 200
+            moved = main.auction_state.teams[MY_TEAM].find_player(victim.name)
+            assert moved.is_minor, f"{victim.name} (keeper) could not be sent down"
+            assert not moved.counts_on_cap, "the point of the move: $0 cap hit"
+        finally:
+            # /reset, not /undo: this mutates twice (bench, then demote) and one
+            # undo would leave the bench toggle flipped in the module-global
+            # auction_state, which every other test module shares.
+            client.post("/reset")
+
+
 class TestTradeScenariosRespectEligibility:
     """evaluate_trade auto-proposes buying out each received player.
 

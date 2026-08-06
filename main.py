@@ -199,10 +199,12 @@ def _recompute_buyout_indicators():
     team = auction_state.teams[MY_TEAM]
     current_pts = milp_solution.total_points if milp_solution and milp_solution.status == "Optimal" else 0
     buyout_indicators = {}
-    # Exactly the set the panel offers, so a dot can't appear beside a player
-    # you can't buy out — or be missing from one you can. Includes group 2/3
-    # players in the minors, who are eligible and were previously skipped.
-    for p in (q for q in team.all_players if q.can_be_bought_out):
+    # Active roster only, and only what's eligible. Roster because the dots
+    # render into placeholders in the team table, which lists no minors — every
+    # solve for a minors player would be thrown away. Eligible because a dot
+    # beside a player who can't be bought out is worse than no dot: it reads as
+    # a verdict on a decision that isn't available.
+    for p in (q for q in team.roster_players if q.can_be_bought_out):
         try:
             clone = deepcopy(auction_state)
             bt = clone.teams[MY_TEAM]

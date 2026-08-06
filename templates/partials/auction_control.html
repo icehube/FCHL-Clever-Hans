@@ -108,6 +108,8 @@
             <span class="tooltip tooltip-bottom" data-tip="FORECAST — where bidding should run out (second-highest opponent max, plus one increment). Bid this and you should win without overpaying.">Should win it: <strong>${{ bid_advice.expected_stop }}M</strong></span>
             {% elif bid_advice.stop_status == "uncontested" %}
             <span class="tooltip tooltip-bottom" data-tip="No opponent left in the bidding, so there is nothing to forecast — only value binds now">Should win it: &mdash; <span class="opacity-60">(no rivals left)</span></span>
+            {% elif bid_advice.stop_status == "unaffordable" %}
+            <span class="tooltip tooltip-bottom" data-tip="No roster spot or budget for any bid — a target price would only invite one the engine has already refused">Should win it: &mdash; <span class="opacity-60">(can't bid)</span></span>
             {% else %}
             <span class="tooltip tooltip-bottom" data-tip="Bidding went past the forecast, so it's been falsified — a real price on the table beats a prediction. Only value binds now.">Should win it: &mdash; <span class="opacity-60">(bidding passed it)</span></span>
             {% endif %}

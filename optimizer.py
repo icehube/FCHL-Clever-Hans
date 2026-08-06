@@ -56,7 +56,9 @@ class BidRecommendation:
     # being retired. max_bid stays the min of the two while the forecast holds.
     value_cap: float = 0.0          # HARD: past this he isn't worth it
     expected_stop: float | None = None  # FORECAST: None once it stops binding
-    stop_status: str = "live"       # "live" | "passed" | "uncontested"
+    # Why the forecast retired — a bare dash reads the same for all three, and
+    # they call for different reactions: wait vs bid on value vs don't bid.
+    stop_status: str = "live"  # "live" | "passed" | "uncontested" | "unaffordable"
 
 
 @dataclass
@@ -399,7 +401,13 @@ def compute_bid_recommendation(
     # on the table cannot come back down, so only value still binds. Capping at
     # a falsified forecast is what made the advisor say DROP at $2.5M on a
     # $4.2M player whose ceiling had collapsed to the $0.5M floor.
-    expected_stop = ceiling + SALARY_INCREMENT
+    # Quantized to the $0.1M step like every other money value in this app
+    # (_legal_salary, _floor_to_increment). Raw float addition puts 8 of the 110
+    # legal ceilings just ABOVE their own 1-decimal rendering — $1.1M yields
+    # 1.2000000000000002 — so an operator bidding exactly the $1.2M the panel
+    # advertises did not clear it, and the panel went on recommending a stop the
+    # price had already reached.
+    expected_stop = round(ceiling + SALARY_INCREMENT, 1)
     if bot_uncontested:
         # Distinguish the two reasons the forecast is gone, so the panel can say
         # which — "no rivals left" and "bidding went past it" call for different
@@ -409,7 +417,7 @@ def compute_bid_recommendation(
         max_bid, stop_status, shown_stop = value_cap, "passed", None
     else:
         max_bid = min(value_cap, expected_stop)
-        stop_status, shown_stop = "live", round(expected_stop, 1)
+        stop_status, shown_stop = "live", expected_stop
 
     if max_bid < MIN_SALARY:
         # We can't legally place even a floor bid (roster full or budget
@@ -423,8 +431,10 @@ def compute_bid_recommendation(
             action="DROP",
             uncontested=bot_uncontested,
             value_cap=value_cap,
-            expected_stop=shown_stop,
-            stop_status=stop_status,
+            # No forecast here: pairing "you can't bid at all" with a target
+            # price invites a bid the engine has just refused.
+            expected_stop=None,
+            stop_status="unaffordable",
         )
     max_bid = round(max_bid, 1)
 

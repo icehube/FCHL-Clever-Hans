@@ -2,7 +2,7 @@
 
 import pytest
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_INCREMENT
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP, SALARY_INCREMENT
 from market import MarketInfo
 from optimizer import (
     compute_bid_recommendation,
@@ -410,6 +410,61 @@ class TestBidPanelNumbers:
             assert rec.max_bid == pytest.approx(
                 min(rec.value_cap, rec.expected_stop), abs=0.01
             ), f"ceiling ${ceiling}M"
+
+    def test_bidding_the_shown_figure_always_retires_the_forecast(self):
+        """The panel must not contradict itself at the boundary it displays.
+
+        `ceiling + SALARY_INCREMENT` is float addition: for 8 of the 110 legal
+        ceilings it lands just ABOVE its own 1-decimal rendering — $1.1M gives
+        1.2000000000000002, shown as "$1.2M". Comparing an operator-typed $1.2M
+        against the raw value left the forecast "live", so the panel advised
+        "Should win it: $1.2M" while the price field already read $1.2M.
+
+        Money is quantized to $0.1M everywhere else in this app (_legal_salary,
+        _floor_to_increment); the forecast has to be too.
+        """
+        team, pool, prices = self._setup()
+        contradictions = []
+        steps = int((MAX_SALARY - MIN_SALARY) / SALARY_INCREMENT) + 1
+        for i in range(steps):
+            ceiling = round(MIN_SALARY + i * SALARY_INCREMENT, 1)
+            at_stop = compute_bid_recommendation(
+                pool["Star"], team, pool, prices, self._contested(ceiling),
+                current_price=round(ceiling + SALARY_INCREMENT, 1),
+            )
+            if at_stop.stop_status != "passed":
+                contradictions.append((ceiling, at_stop.expected_stop))
+        assert not contradictions, (
+            f"{len(contradictions)} ceilings still advise a stop the price has "
+            f"already reached: {contradictions[:5]}"
+        )
+
+    def test_no_forecast_when_no_bid_is_possible(self):
+        """A forecast of the clearing price is noise when you cannot bid at all.
+
+        The full-roster/no-budget path returns max_bid 0.0 and "No roster spot
+        or budget for any bid"; pairing that with "Should win it: $3.1M" invites
+        the operator to bid a number the engine has just refused.
+        """
+        keepers = [PlayerOnRoster(name=f"P{i}", position="F", group="3",
+                                  salary=2.0, projected_points=50)
+                   for i in range(24)]
+        team = TeamState(code=MY_TEAM, name="b", keeper_players=keepers,
+                         is_my_team=True)
+        team.penalties = SALARY_CAP - team.total_salary
+        team._invalidate_cache()
+        pool = {"Star": _make_player("Star", "F", 90)}
+
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, {"Star": 1.0}, self._contested(3.0),
+            current_price=1.0,
+        )
+
+        assert rec.max_bid == 0.0
+        assert rec.expected_stop is None, (
+            f"offered a ${rec.expected_stop}M target while refusing any bid"
+        )
+        assert rec.stop_status == "unaffordable"
 
     def test_panel_shows_both_numbers(self):
         """A template edit must not silently drop one of them."""

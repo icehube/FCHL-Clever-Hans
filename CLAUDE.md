@@ -182,7 +182,7 @@ Format per entry:
 - [YYYY-MM-DD] [source] file:line (symbol) — finding (one sentence) — reason deferred
 ```
 
-Example: `- [2026-05-02] [simplify] main.py:996 (move_to_minors) — save_snapshot runs before validation; full JSON round-trip on rejected requests — pre-existing pattern across endpoints, fix would be cross-endpoint refactor`
+Example (`NNN` stands in for the real line — an example carrying a live line number would rot the same way real entries do, and it is the thing people copy): `- [2026-05-02] [simplify] main.py:NNN (move_to_minors) — save_snapshot runs before validation; full JSON round-trip on rejected requests — pre-existing pattern across endpoints, fix would be cross-endpoint refactor`
 
 **Always name the enclosing function/property in `(symbol)`.** Line numbers drift whenever anything above them changes; on 2026-08-05 a third of this file's references pointed at unrelated code. The symbol survives the drift and keeps the entry greppable. Templates have no symbols, so those carry a line only.
 

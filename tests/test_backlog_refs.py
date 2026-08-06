@@ -9,6 +9,12 @@ it sends you somewhere wrong without saying so.
 CLAUDE.md already carries the rule ("when a change shifts line numbers in a
 file the backlog references, re-anchor those entries in the same commit").
 This is that rule with a check behind it, so it stops depending on memory.
+
+What this can and cannot prove: it verifies the file exists, the line is in
+range, and the line sits inside the named function. It CANNOT tell that the
+line still points at the statement the finding describes — a reference can
+drift within a function and still pass. Naming the symbol is what keeps the
+entry findable when that happens.
 """
 
 import ast
@@ -63,9 +69,22 @@ def _references() -> list[tuple[str, int, str | None]]:
     ]
 
 
-def test_backlog_has_references_to_check():
-    """Guard the guard: a regex that silently matches nothing proves nothing."""
-    assert len(_references()) >= 10
+def test_reference_pattern_still_matches():
+    """Guard the guard.
+
+    parametrize over an empty list is a silent SKIP, not a failure — verified.
+    So if _REF ever stops matching, every case below evaporates and the suite
+    goes quiet-green while checking nothing.
+
+    Asserted against a literal sample rather than a count of live references:
+    a threshold like "at least 10" would start failing as findings get FIXED,
+    punishing exactly the progress this file is meant to track.
+    """
+    sample = "- [2026-01-01] [grill] state.py:246 (add_acquired_player) — x — y"
+    assert _REF.findall(sample) == [("state.py", "246", "add_acquired_player")]
+    assert _REF.findall("templates/base.html:8 — no symbol here") == [
+        ("templates/base.html", "8", "")
+    ]
 
 
 @pytest.mark.parametrize("path,line,symbol", _references(), ids=lambda v: str(v))

@@ -8,6 +8,8 @@ The single work list for this project: deferred review findings plus forward-loo
 
 Name the enclosing function or property in `(symbol)`. Line numbers drift every time the file above them changes — on 2026-08-05 a third of the references in this file pointed at unrelated code — and a stale line sends you somewhere wrong without saying so. The symbol survives the drift and makes the entry greppable. Templates have no symbols, so those entries carry a line only.
 
+`tests/test_backlog_refs.py` enforces this: every `file.py:line` here must resolve, and must sit inside the function it names. That is why editing code can fail the suite on a docs file — re-anchor the affected entries in the same commit. A Python reference without an identifier-shaped symbol fails too, since a prose parenthetical would opt out of the only check that catches drift.
+
 **Ideas / future work** are unprompted improvements with no specific defect behind them. No file:line.
 
 ---
@@ -45,8 +47,8 @@ Last triaged 2026-08-05.
 ### test infrastructure
 
 - [2026-08-05] [review] tests/test_data_loader.py — 15+ assertions pin the live players.csv (704 biddable, salaries, penalties, McDavid's team); every data refresh breaks them with no correctness signal. Same class: `test_endpoints.py::TestPriceColumn::test_nothing_capped_at_full_budgets` holds only because the top model price (~$9.5M) sits under the full-budget ceiling ($11.4M) — a pricier pool would fail it without anything being wrong — awaiting triage
-- [2026-08-05] [grill] tests/test_endpoints.py:11 (client fixture) — the `client` fixture is `scope="module"`, so `POST /reset` runs ONCE for the whole file, not per test. Any test that mutates global state without restoring it leaks into every later test in the module (`TestPanelContextIsolation` leaves a bench toggle flipped; the salary tests rely on `/undo` to clean up). Nothing is broken today, but it makes test order load-bearing and it is invisible at the call site — I asserted the opposite during a review before checking. Options: switch to function scope and eat the per-test `/reset` cost, or add a teardown that snapshots and restores — awaiting triage
-- [2026-07-05] [review] tests/ — coverage gaps: /trade-between happy path, undo-after-{adjust-salary,move-to-minors,move-to-roster,set-nominator}, MILP-infeasible rendering, corrupt-state startup fallback; assert-nothing tests in test_stress.py:146 (pass-body loop), test_bid_calculator.py:157 (>=0 tautology), test_edge_cases.py:312 (500 accepted) — partially reduced (trade guards, combo turn, endgame, live ceiling now tested); rest awaiting triage
+- [2026-08-05] [grill] tests/test_endpoints.py:11 (client) — the `client` fixture is `scope="module"`, so `POST /reset` runs ONCE for the whole file, not per test. Any test that mutates global state without restoring it leaks into every later test in the module (`TestPanelContextIsolation` leaves a bench toggle flipped; the salary tests rely on `/undo` to clean up). Nothing is broken today, but it makes test order load-bearing and it is invisible at the call site — I asserted the opposite during a review before checking. Options: switch to function scope and eat the per-test `/reset` cost, or add a teardown that snapshots and restores — awaiting triage
+- [2026-07-05] [review] tests/ — coverage gaps: /trade-between happy path, undo-after-{adjust-salary,move-to-minors,move-to-roster,set-nominator}, MILP-infeasible rendering, corrupt-state startup fallback; assert-nothing tests in tests/test_stress.py:150 (_check_invariants) — `pass`-body loop, tests/test_bid_calculator.py:339 (test_counterfactual_shows_alternatives) — `len(...) >= 0` tautology, tests/test_edge_cases.py:406 (test_team_players_nonexistent) — accepts a 500 as a pass — partially reduced (trade guards, combo turn, endgame, live ceiling now tested); rest awaiting triage
 
 ---
 

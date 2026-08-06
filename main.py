@@ -502,7 +502,7 @@ async def nominate(request: Request):
     """It's BOT's turn: get nomination recommendation."""
     model_expected = {name: pred.expected_price for name, pred in model_prices.items()}
     rfa_pick, ufa_pick = recommend_nomination(
-        auction_state, market_prices, model_expected, market_info,
+        auction_state, market_prices, model_expected,
     )
     ctx = _context(request)
     ctx["rfa_pick"] = rfa_pick

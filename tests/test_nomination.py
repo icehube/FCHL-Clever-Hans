@@ -4,7 +4,6 @@ import pytest
 
 from config import MY_TEAM
 from optimizer import recommend_nomination
-from market import MarketInfo
 
 
 def _setup():
@@ -123,7 +122,7 @@ class TestRecommendNomination:
     def test_returns_rfa_and_ufa(self):
         """Should return both an RFA and UFA pick."""
         state, mp, model_expected, info = _setup()
-        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected, info)
+        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected)
         assert rfa_pick is not None, "Should recommend an RFA"
         assert ufa_pick is not None, "Should recommend a UFA"
         assert rfa_pick.player.is_rfa is True
@@ -132,21 +131,21 @@ class TestRecommendNomination:
     def test_rfa_pick_has_points(self):
         """RFA pick should have projected points > 0."""
         state, mp, model_expected, info = _setup()
-        rfa_pick, _ = recommend_nomination(state, mp, model_expected, info)
+        rfa_pick, _ = recommend_nomination(state, mp, model_expected)
         assert rfa_pick is not None
         assert rfa_pick.player.projected_points > 0
 
     def test_ufa_pick_has_points(self):
         """UFA pick should have projected points > 0."""
         state, mp, model_expected, info = _setup()
-        _, ufa_pick = recommend_nomination(state, mp, model_expected, info)
+        _, ufa_pick = recommend_nomination(state, mp, model_expected)
         assert ufa_pick is not None
         assert ufa_pick.player.projected_points > 0
 
     def test_picks_have_strategy(self):
         """Both picks should have a valid strategy."""
         state, mp, model_expected, info = _setup()
-        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected, info)
+        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected)
         valid_strategies = {"target", "drain", "depth"}
         assert rfa_pick.strategy in valid_strategies
         assert ufa_pick.strategy in valid_strategies
@@ -154,7 +153,7 @@ class TestRecommendNomination:
     def test_picks_have_reasoning(self):
         """Both picks should have non-empty reasoning."""
         state, mp, model_expected, info = _setup()
-        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected, info)
+        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected)
         assert len(rfa_pick.reasoning) > 0
         assert len(ufa_pick.reasoning) > 0
 
@@ -165,7 +164,7 @@ class TestRecommendNomination:
         rfa_names = [n for n, p in state.available_players.items() if p.is_rfa]
         for name in rfa_names:
             del state.available_players[name]
-        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected, info)
+        rfa_pick, ufa_pick = recommend_nomination(state, mp, model_expected)
         assert rfa_pick is None
         assert ufa_pick is not None
 
@@ -190,7 +189,7 @@ class TestDrainStrategy:
         """The panel renders expected_price as "Expected: ~$X M" — it has to be
         the clearing price, not the model's vacuum price."""
         state, mp, model, info = _drain_state()
-        rfa_pick, ufa_pick = recommend_nomination(state, mp, model, info)
+        rfa_pick, ufa_pick = recommend_nomination(state, mp, model)
 
         for pick in (rfa_pick, ufa_pick):
             assert pick is not None
@@ -209,7 +208,7 @@ class TestDrainStrategy:
         from optimizer import _bidding_opponents
 
         state, mp, model, info = _drain_state()
-        _, ufa_pick = recommend_nomination(state, mp, model, info)
+        _, ufa_pick = recommend_nomination(state, mp, model)
         assert ufa_pick is not None and ufa_pick.strategy == "drain"
         assert _bidding_opponents(state), "fixture must leave someone able to bid"
 
@@ -236,7 +235,7 @@ class TestDrainStrategy:
         measured mid-draft, it took Aho at $7.5M over Vasilevskiy at $7.7M and
         left $0.3M of opponent cap unburned."""
         state, mp, model, info = _drain_state(leave_each=14.0)
-        _, ufa_pick = recommend_nomination(state, mp, model, info)
+        _, ufa_pick = recommend_nomination(state, mp, model)
         assert ufa_pick is not None and ufa_pick.strategy == "drain"
 
         ufas = {n: p for n, p in state.available_players.items()
@@ -254,7 +253,7 @@ class TestDrainStrategy:
         """"0 can afford — drains opponent budgets" is self-contradicting: a
         player nobody can bid on drains nothing."""
         state, mp, model, info = _drain_state()
-        rfa_pick, ufa_pick = recommend_nomination(state, mp, model, info)
+        rfa_pick, ufa_pick = recommend_nomination(state, mp, model)
 
         for pick in (rfa_pick, ufa_pick):
             if pick and pick.strategy == "drain":
@@ -267,7 +266,7 @@ class TestDrainStrategy:
         from optimizer import _bidding_opponents
 
         state, mp, model, info = _drain_state()
-        _, ufa_pick = recommend_nomination(state, mp, model, info)
+        _, ufa_pick = recommend_nomination(state, mp, model)
         assert ufa_pick is not None and ufa_pick.strategy == "drain"
 
         opponents = _bidding_opponents(state)
@@ -293,7 +292,7 @@ class TestDrainStrategy:
             "so the test distinguishes model-gating from market-gating"
         )
 
-        _, ufa_pick = recommend_nomination(state, mp, model, info)
+        _, ufa_pick = recommend_nomination(state, mp, model)
         assert ufa_pick is not None
         assert ufa_pick.strategy != "drain", (
             f"nobody can pay more than ${info.market_ceiling:.1f}M, but "

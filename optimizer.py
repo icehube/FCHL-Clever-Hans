@@ -488,7 +488,6 @@ def recommend_nomination(
     state: AuctionState,
     market_prices: dict[str, float],
     model_prices: dict[str, float],
-    market_info: MarketInfo,
 ) -> tuple[NominationPick | None, NominationPick | None]:
     """
     Recommend RFA + UFA nominations for BOT's turn.

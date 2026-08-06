@@ -311,6 +311,133 @@ class TestUncontestedBidding:
         assert rec.action == "BID"
 
 
+class TestBidPanelNumbers:
+    """The panel shows two numbers because max_bid was always two numbers.
+
+    value_cap = min(marginal, physical_max) is a HARD limit and does not move
+    with price. expected_stop = ceiling + increment is a FORECAST of where
+    bidding ends. max_bid is the min of the two while the forecast holds, and
+    the value cap once a real price falsifies it — which is why the single
+    displayed figure doubled from $4.1M to $8.5M when the price moved one
+    increment, with nothing on screen to explain it.
+
+    Reuses TestUncontestedBidding's fixture: $4.2M of headroom, one open spot,
+    and a Star the objective always prefers, so value_cap is exactly $4.2M.
+    """
+
+    def _setup(self):
+        return TestUncontestedBidding()._setup()
+
+    def _contested(self, ceiling: float = 1.0) -> MarketInfo:
+        return MarketInfo(
+            market_ceiling=ceiling, highest_bidder="AAA", highest_bid=ceiling,
+            second_bidder="BBB", demand_count=2, floor_demand=False,
+        )
+
+    def test_value_cap_never_moves_with_price(self):
+        """The invariant that makes the new display trustworthy.
+
+        If "Worth up to" wandered as the price climbed it would be no better
+        than the blended number it replaces. Swept across the forecast boundary,
+        where max_bid demonstrably does jump.
+        """
+        team, pool, prices = self._setup()
+        info = self._contested()
+
+        seen = []
+        for i in range(41):
+            price = round(MIN_SALARY + i * SALARY_INCREMENT, 1)
+            rec = compute_bid_recommendation(
+                pool["Star"], team, pool, prices, info, current_price=price,
+            )
+            seen.append((price, rec.value_cap, rec.max_bid))
+
+        caps = {c for _, c, _ in seen}
+        assert len(caps) == 1, f"value_cap moved with price: {sorted(caps)}"
+        assert caps.pop() == pytest.approx(team.physical_max_bid, abs=0.01)
+        assert len({m for _, _, m in seen}) > 1, (
+            "fixture must sweep across the boundary where max_bid jumps, "
+            "or this proves nothing"
+        )
+
+    def test_expected_stop_clears_once_price_passes_it(self):
+        team, pool, prices = self._setup()
+        info = self._contested(ceiling=1.0)
+        stop = 1.0 + SALARY_INCREMENT
+
+        below = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, info, current_price=MIN_SALARY,
+        )
+        assert below.stop_status == "live"
+        assert below.expected_stop == pytest.approx(stop, abs=0.01)
+        assert below.max_bid == pytest.approx(stop, abs=0.01), (
+            "while the forecast holds it is the binding number"
+        )
+
+        at_stop = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, info, current_price=stop,
+        )
+        assert at_stop.stop_status == "passed", (
+            "a real price at the forecast has falsified it"
+        )
+        assert at_stop.expected_stop is None
+        assert at_stop.max_bid == at_stop.value_cap
+
+    def test_expected_stop_is_absent_when_uncontested(self):
+        """A forecast of where rivals stop is meaningless with no rivals."""
+        team, pool, prices = self._setup()
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices,
+            TestUncontestedBidding()._floor_ceiling(),
+            current_price=2.5, bot_uncontested=True,
+        )
+        assert rec.stop_status == "uncontested"
+        assert rec.expected_stop is None
+        assert rec.max_bid == rec.value_cap
+
+    def test_max_bid_is_still_the_min_of_the_two_while_the_forecast_holds(self):
+        """This change is additive — max_bid semantics must not drift.
+
+        Roughly fifteen assertions across this file and test_edge_cases.py rest
+        on max_bid meaning exactly what it meant before.
+        """
+        team, pool, prices = self._setup()
+        for ceiling in (1.0, 2.0, 4.0, 8.0):
+            rec = compute_bid_recommendation(
+                pool["Star"], team, pool, prices, self._contested(ceiling),
+                current_price=MIN_SALARY,
+            )
+            assert rec.max_bid == pytest.approx(
+                min(rec.value_cap, rec.expected_stop), abs=0.01
+            ), f"ceiling ${ceiling}M"
+
+    def test_panel_shows_both_numbers(self):
+        """A template edit must not silently drop one of them."""
+        import tempfile
+
+        from fastapi.testclient import TestClient
+
+        import main
+        main.STATE_DIR = tempfile.mkdtemp()
+
+        with TestClient(main.app) as c:
+            c.post("/reset")
+            player = max(main.auction_state.available_players.values(),
+                         key=lambda p: p.projected_points)
+            bidders = [code for code in main.auction_state.teams if code != MY_TEAM][:2]
+            r = c.post("/bid-check", data={
+                "player": player.name, "price": "1.0",
+                "bidders": ",".join(bidders + [MY_TEAM]),
+            })
+            assert r.status_code == 200
+            assert "Worth up to" in r.text, "hard limit missing from the panel"
+            assert "Should win it" in r.text, "forecast missing from the panel"
+            assert "Max bid:" not in r.text, (
+                "the blended figure should be gone — it is what this replaces"
+            )
+            c.post("/reset")
+
+
 class TestCounterfactual:
     def test_counterfactual_produces_both_rosters(self):
         """Should produce valid with and without solutions."""

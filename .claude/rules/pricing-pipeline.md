@@ -63,6 +63,8 @@ max_bid = value_cap                       if uncontested or current_price >= exp
 ```
 `expected_stop` exists so BOT never pays more than winning requires. It's a prediction, valid only while the standing price is below it -- see the Critical rule.
 
+**Both are surfaced in the UI** (`BidRecommendation.value_cap` / `.expected_stop` / `.stop_status`, rendered as "Worth up to" and "Should win it"). They used to be blended into one "Max bid" figure, which doubled when the price rose one increment past the forecast -- the number lurching mid-auction with nothing on screen to explain it. `stop_status` says *which* way the forecast retired (`uncontested` = no rivals left, `passed` = a real price falsified it), because a bare dash for both is uninformative. `max_bid` still exists and still means "the min of the two while the forecast holds" -- it is what the ladder does NOT run on.
+
 **The BID/CAUTION/DROP ladder runs on `value_cap`, never on `max_bid`:**
 ```
 DROP     if current_price >= value_cap

@@ -50,6 +50,14 @@ class BidRecommendation:
     action: str  # "BID", "CAUTION", "DROP", "WIN"
     uncontested: bool = False  # No opponent left — market_ceiling is meaningless
 
+    # The two halves max_bid is made of, surfaced so the panel can show them
+    # apart. Blended into one figure they read as a single number that doubles
+    # when the price moves one increment; named, that jump is just the forecast
+    # being retired. max_bid stays the min of the two while the forecast holds.
+    value_cap: float = 0.0          # HARD: past this he isn't worth it
+    expected_stop: float | None = None  # FORECAST: None once it stops binding
+    stop_status: str = "live"       # "live" | "passed" | "uncontested"
+
 
 @dataclass
 class NominationPick:
@@ -392,10 +400,16 @@ def compute_bid_recommendation(
     # a falsified forecast is what made the advisor say DROP at $2.5M on a
     # $4.2M player whose ceiling had collapsed to the $0.5M floor.
     expected_stop = ceiling + SALARY_INCREMENT
-    if bot_uncontested or current_price >= expected_stop:
-        max_bid = value_cap
+    if bot_uncontested:
+        # Distinguish the two reasons the forecast is gone, so the panel can say
+        # which — "no rivals left" and "bidding went past it" call for different
+        # reactions, and a bare dash for both tells the operator nothing.
+        max_bid, stop_status, shown_stop = value_cap, "uncontested", None
+    elif current_price >= expected_stop:
+        max_bid, stop_status, shown_stop = value_cap, "passed", None
     else:
         max_bid = min(value_cap, expected_stop)
+        stop_status, shown_stop = "live", round(expected_stop, 1)
 
     if max_bid < MIN_SALARY:
         # We can't legally place even a floor bid (roster full or budget
@@ -408,6 +422,9 @@ def compute_bid_recommendation(
             reasoning="No roster spot or budget for any bid",
             action="DROP",
             uncontested=bot_uncontested,
+            value_cap=value_cap,
+            expected_stop=shown_stop,
+            stop_status=stop_status,
         )
     max_bid = round(max_bid, 1)
 
@@ -448,6 +465,9 @@ def compute_bid_recommendation(
         reasoning=reasoning,
         action=action,
         uncontested=bot_uncontested,
+        value_cap=value_cap,
+        expected_stop=shown_stop,
+        stop_status=stop_status,
     )
 
 

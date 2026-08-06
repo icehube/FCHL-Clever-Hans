@@ -85,7 +85,9 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
    strongest success state reads as more emphatic than "keep bidding". */
 .bid-win { background: rgba(158, 206, 106, 0.22); border-left: 4px solid var(--green); }
 .bid-action { font-size: 1.125rem; font-weight: bold; }
-.bid-details { display: flex; gap: 16px; margin: 4px 0; font-size: 0.75rem; }
+/* Wraps because the panel carries four figures now (worth-up-to, should-win-it,
+   marginal, ceiling); without it they crush together at the 1-col breakpoint. */
+.bid-details { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0; font-size: 0.75rem; }
 .bid-reasoning { color: var(--text-muted); font-size: 0.75rem; }
 
 /* Collapsible panel chevron */

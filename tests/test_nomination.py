@@ -24,6 +24,54 @@ def _setup():
     return state, mp, model_expected, info
 
 
+class TestBiddingOpponents:
+    """Demand counts must use the same "can still bid" rule as the ceilings.
+
+    The drain heuristic filtered opponents on total_spots_remaining > 0, so a
+    24-man team with cap space was counted as gone — understating how many
+    rivals can afford a player, exactly the way it understated market ceilings
+    before 4dc59da. Fixing physical_max_bid didn't reach here, because this
+    filter never consulted it.
+    """
+
+    def test_full_but_cap_rich_opponent_still_counts(self):
+        from config import ROSTER_SIZE
+        from optimizer import _bidding_opponents
+        from state import PlayerOnRoster
+
+        state, _, _, _ = _setup()
+        victim = state.teams["SRL"]
+        victim.keeper_players = [
+            PlayerOnRoster(name=f"S{i}", position="F", group="3",
+                           salary=1.0, projected_points=50)
+            for i in range(ROSTER_SIZE)
+        ]
+        victim.acquired_players, victim.minor_players = [], []
+        victim._invalidate_cache()  # roster_players is memoized
+
+        assert victim.total_spots_remaining == 0, "fixture must be roster-full"
+        assert victim.physical_max_bid > 0, "but still hold cap space"
+        assert victim in _bidding_opponents(state), "a full team with money bids"
+
+    def test_broke_opponent_does_not_count(self):
+        from config import SALARY_CAP
+        from optimizer import _bidding_opponents
+
+        state, _, _, _ = _setup()
+        victim = state.teams["SRL"]
+        victim.penalties = SALARY_CAP
+        victim._invalidate_cache()
+        assert victim not in _bidding_opponents(state), "no money, no bid"
+
+    def test_done_opponent_does_not_count(self):
+        from optimizer import _bidding_opponents
+
+        state, _, _, _ = _setup()
+        victim = state.teams["SRL"]
+        victim.is_done = True
+        assert victim not in _bidding_opponents(state)
+
+
 class TestRecommendNomination:
     def test_returns_rfa_and_ufa(self):
         """Should return both an RFA and UFA pick."""

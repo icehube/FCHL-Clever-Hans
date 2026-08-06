@@ -554,6 +554,21 @@ def _pick_best_rfa(
     )
 
 
+def _bidding_opponents(state: AuctionState) -> list[TeamState]:
+    """Opponents who can still bid on something.
+
+    Gates on physical_max_bid, NOT on spots remaining. A 24-man team with cap
+    space is still a bidder — the extra goes to minors at full cap — so
+    filtering it out understated demand and drain scores exactly the way it
+    understated market ceilings before this predicate was shared (2026-08-05).
+    market.live_opponents applies the same rule to an in-flight bidder list.
+    """
+    return [
+        t for code, t in state.teams.items()
+        if code != MY_TEAM and not t.is_done and t.physical_max_bid >= MIN_SALARY
+    ]
+
+
 def _score_drain_candidate(
     player: Player,
     model_price: float,
@@ -564,10 +579,7 @@ def _score_drain_candidate(
     Higher score = better drain target. Considers price, position demand,
     and how many opponents can afford the player.
     """
-    opponents = [
-        t for code, t in state.teams.items()
-        if code != MY_TEAM and not t.is_done and t.total_spots_remaining > 0
-    ]
+    opponents = _bidding_opponents(state)
     if not opponents:
         return model_price
 
@@ -618,10 +630,7 @@ def _pick_best_ufa(
         )
         mprice = model_prices.get(drain_name, 0)
         if mprice > 2.0:
-            opponents = [
-                t for code, t in state.teams.items()
-                if code != MY_TEAM and not t.is_done and t.total_spots_remaining > 0
-            ]
+            opponents = _bidding_opponents(state)
             needing = sum(1 for t in opponents if t.roster_needs.get(drain.position, 0) > 0)
             can_afford = sum(1 for t in opponents if t.physical_max_bid >= mprice)
             return NominationPick(

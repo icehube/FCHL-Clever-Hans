@@ -5,6 +5,7 @@ import pytest
 from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP, SALARY_INCREMENT
 from market import MarketInfo
 from optimizer import (
+    BidRecommendation,
     compute_bid_recommendation,
     compute_marginal_value,
     generate_counterfactual,
@@ -489,6 +490,65 @@ class TestBidPanelNumbers:
             assert "Should win it" in r.text, "forecast missing from the panel"
             assert "Max bid:" not in r.text, (
                 "the blended figure should be gone — it is what this replaces"
+            )
+            c.post("/reset")
+
+    @pytest.mark.parametrize("status,expected", [
+        ("live", "Should win it: <strong>$4.1M</strong>"),
+        ("uncontested", "(no rivals left)"),
+        ("unaffordable", "(can't bid)"),
+        ("passed", "(bidding passed it)"),
+    ])
+    def test_each_stop_status_renders_its_own_text(self, monkeypatch, status, expected):
+        """Every branch of the template, pinned.
+
+        The three no-forecast branches are selected by string compare, and the
+        last one is a bare `{% else %}` — so a status renamed on either side
+        does not blank the field, it silently renders "bidding passed it" for
+        all three. Wrong text is worse than none: it tells the operator a real
+        price falsified the forecast when nobody is even bidding.
+
+        Patched rather than staged from a league position, because the states
+        differ only in this one field and building four league positions that
+        produce them tests the engine's arithmetic over again instead of the
+        template. An earlier attempt to stage "passed" squeezed the opponents so
+        hard they left the bidding, and it rendered "uncontested" — correctly.
+        """
+        import tempfile
+
+        from fastapi.testclient import TestClient
+
+        import main
+        main.STATE_DIR = tempfile.mkdtemp()
+
+        def fake_rec(player, *args, **kwargs):
+            return BidRecommendation(
+                player_name=player.name,
+                max_bid=4.1,
+                action="BID",
+                reasoning="stub",
+                marginal_value=8.5,
+                market_ceiling=4.0,
+                value_cap=8.5,
+                expected_stop=4.1 if status == "live" else None,
+                stop_status=status,
+            )
+
+        monkeypatch.setattr(main, "compute_bid_recommendation", fake_rec)
+
+        with TestClient(main.app) as c:
+            c.post("/reset")
+            player = max(main.auction_state.available_players.values(),
+                         key=lambda p: p.projected_points)
+            bidders = [code for code in main.auction_state.teams if code != MY_TEAM][:2]
+            r = c.post("/bid-check", data={
+                "player": player.name, "price": "1.0",
+                "bidders": ",".join(bidders + [MY_TEAM]),
+            })
+            assert r.status_code == 200
+            assert expected in r.text, (
+                f"stop_status={status!r} should render {expected!r}; "
+                f"a missing branch falls through to the else and lies"
             )
             c.post("/reset")
 

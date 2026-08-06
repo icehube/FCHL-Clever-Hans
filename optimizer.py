@@ -457,15 +457,24 @@ def compute_bid_recommendation(
     # Ladder on value_cap, never on max_bid: value_cap doesn't move with price,
     # so the verdict can only soften as the price climbs — never harden then
     # soften again.
+    #
+    # All three quote value_cap and call it what the panel calls it ("worth").
+    # They used to say "max bid", a label the panel dropped when the figure was
+    # split in two, and CAUTION quoted max_bid — the forecast — while the verdict
+    # had been fired by value_cap, so the sentence explained itself with a number
+    # that wasn't the trigger. An explanation has to name the thing it explains.
     elif current_price >= value_cap:
         action = "DROP"
-        reasoning = f"Price ${current_price}M exceeds max bid ${value_cap}M"
+        reasoning = f"Price ${current_price}M exceeds what he's worth to you (${value_cap}M)"
     elif current_price >= value_cap - CAUTION_BAND:
         action = "CAUTION"
-        reasoning = f"Price ${current_price}M is near max bid ${max_bid}M — proceed carefully"
+        reasoning = (
+            f"Price ${current_price}M is closing on what he's worth "
+            f"(${value_cap}M) — proceed carefully"
+        )
     else:
         action = "BID"
-        reasoning = f"Worth up to ${max_bid}M (marginal value ${marginal}M, ceiling ${ceiling}M)"
+        reasoning = f"Worth up to ${value_cap}M (marginal value ${marginal}M, ceiling ${ceiling}M)"
 
     return BidRecommendation(
         player_name=player.name,

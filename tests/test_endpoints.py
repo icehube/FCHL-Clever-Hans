@@ -112,7 +112,10 @@ class TestBidCheck:
         assert r.status_code == 200
         assert "bid-win" in r.text
         assert "You" in r.text and "won at $2.5M" in r.text
-        assert "exceeds max bid" not in r.text
+        # Structural, not textual: this asserted on the DROP reasoning wording
+        # until that wording changed, at which point it would have passed for
+        # the wrong reason. The CSS class derives straight from `action`.
+        assert "bid-drop" not in r.text
         # Ceiling is meaningless with nobody left — must not show the $0.5M floor
         assert "Ceiling: &mdash;" in r.text
 

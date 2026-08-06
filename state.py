@@ -259,14 +259,20 @@ class TeamState:
     def add_acquired_player(self, player: PlayerOnRoster) -> bool:
         """Add a drafted or traded player. Returns True if routed to the minors.
 
-        CBA: 24 active, extras go to the minors with salary fully on cap. The
-        check lives here rather than at each endpoint because six call sites add
-        to a roster (/assign, /trade-between twice, three in trade.py), and a
-        guard missing from any one of them puts roster_count at 25 — where
-        `lineup_points` lets the extra player compete for a starting slot he
-        cannot legally hold. Measured, one 120-point forward on an otherwise
-        full roster was worth 70 phantom points, and that is the number
-        evaluate_trade accepts or declines on.
+        CBA: 24 active, extras go to the minors with salary fully on cap.
+
+        The check lives here because this method is the one door every path
+        takes to seat a player — drafts, both trade directions, evaluation
+        clones, scenario setup. A guard at the endpoints instead would have to
+        be repeated at each, and the one that got missed would put roster_count
+        at 25, where `lineup_points` lets the extra player compete for a
+        starting slot he cannot legally hold. Measured, one 120-point forward on
+        an otherwise full roster was worth 70 phantom points — and that is the
+        number evaluate_trade accepts or declines on.
+
+        (Deliberately not listing the call sites: the first draft of this
+        docstring counted them, and a refactor in the same commit made the count
+        wrong before it was ever read.)
 
         Callers that need to tell the operator where the player went read the
         return value; the rest can ignore it.

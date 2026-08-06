@@ -575,8 +575,13 @@ def _best_drain_candidate(
     pool: dict[str, Player],
     market_prices: dict[str, float],
     model_prices: dict[str, float],
-) -> tuple[str, Player] | None:
+) -> tuple[str, Player]:
     """The player whose sale burns the most opponent cap, per dollar gifted.
+
+    `pool` must be non-empty — both callers already check, and returning an
+    Optional here got handled two different ways: _pick_best_ufa guarded it,
+    _pick_best_rfa unpacked it bare and was safe only because an early return
+    sat 25 lines above. A total contract removes the second way to be wrong.
 
     Ranked on MARKET price, not model price, because that is the money that
     actually leaves an opponent's budget. compute_market_price IS the auction
@@ -598,9 +603,6 @@ def _best_drain_candidate(
     reads as "doesn't need forwards" in roster_needs while remaining perfectly
     free to bid on one. It survives as context in _drain_reasoning.
     """
-    if not pool:
-        return None
-
     def rank(item: tuple[str, Player]) -> tuple[float, float, str]:
         name, _ = item
         market = market_prices.get(name, MIN_SALARY)
@@ -656,9 +658,8 @@ def _pick_best_ufa(
 
     # Strategy 2: Drain — nominate player that forces opponents into bidding wars
     unwanted = {n: p for n, p in ufas.items() if n not in wanted}
-    best = _best_drain_candidate(unwanted, market_prices, model_prices)
-    if best is not None:
-        drain_name, drain = best
+    if unwanted:
+        drain_name, drain = _best_drain_candidate(unwanted, market_prices, model_prices)
         price = market_prices.get(drain_name, MIN_SALARY)
         # Gating the top candidate is sound only because the ranking is in
         # dollars: its market price is the most any nomination can drain, so

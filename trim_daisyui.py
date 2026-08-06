@@ -46,19 +46,37 @@ DYNAMIC_CLASSES = {
 
 _OPACITY_SUFFIX = re.compile(r"\\/\d+")
 _CLASS_IN_SELECTOR = re.compile(r"\.((?:[\w-]|\\.)+)")
-_LITERAL_CLASS = re.compile(
-    r"\b((?:bg|text|border|ring|outline|from|via|to|divide|shadow|fill|stroke)"
-    r"-[a-z0-9-]+/\d+)\b"
+
+# DaisyUI's colour tokens. The scan discriminates on THESE rather than on a
+# list of property prefixes, because any prefix list we write will be missing
+# one — upstream generates opacity utilities for placeholder-, divide-, from-,
+# via- and more, and a class we don't match is a class we silently drop.
+#
+# Matching on the colour also keeps ordinary Tailwind fractions out: `w-1/2` and
+# `h-1/3` end in /<digits> too, and a bare `*/N` pattern would wrongly demand
+# DaisyUI define them.
+#
+# Derived from upstream, not guessed: verified to match all 8,820 distinct
+# opacity-suffixed classes full.min.css defines. `transparent` is easy to
+# forget and was missing from the first draft.
+DAISY_COLOURS = (
+    r"(?:primary|secondary|accent|neutral|info|success|warning|error)(?:-content)?"
+    r"|base-(?:100|200|300|content)"
+    r"|transparent"
 )
+COLOUR_CLASS = re.compile(rf"\b([a-z][a-z0-9-]*-(?:{DAISY_COLOURS})/\d+)\b")
+
+# The same, with the colour supplied by Jinja at render time.
+INTERPOLATED_COLOUR_CLASS = re.compile(r"([a-z][a-z0-9-]*-\{\{[^}]+\}\}/\d+)")
 
 
 def used_classes(repo: Path = REPO) -> set[str]:
     """Every opacity-suffixed colour class the app can emit."""
     found = set(DYNAMIC_CLASSES)
     for tpl in sorted((repo / "templates").rglob("*.html")):
-        found |= set(_LITERAL_CLASS.findall(tpl.read_text()))
+        found |= set(COLOUR_CLASS.findall(tpl.read_text()))
     for js in sorted((repo / "static").glob("*.js")):
-        found |= set(_LITERAL_CLASS.findall(js.read_text()))
+        found |= set(COLOUR_CLASS.findall(js.read_text()))
     return found
 
 

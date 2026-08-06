@@ -176,9 +176,17 @@ def test_vendored_bundle_is_the_advertised_version(filename: str, marker: str):
 # DaisyUI generates ~21,600 of these (one per colour x opacity x variant x
 # property) and the vendored copy keeps only the handful the app uses — see
 # trim_daisyui.py. A missing one does not error, it just renders unstyled, so
-# these two tests are the only thing standing between a trim and a silently
+# these tests are the only thing standing between a trim and a silently
 # colourless panel mid-draft.
-_OPACITY_CLASS = re.compile(r"\b((?:bg|text|border|ring|outline|from|via|to|divide|shadow|fill|stroke)-[a-z0-9-]+/\d+)\b")
+#
+# The patterns are IMPORTED, not restated. Defining them here too would create
+# two copies of the same rule that agree until one is edited — the trap that
+# left the drain filter stale and is still open in BACKLOG.md.
+from trim_daisyui import (  # noqa: E402
+    COLOUR_CLASS,
+    DYNAMIC_CLASSES,
+    INTERPOLATED_COLOUR_CLASS,
+)
 
 # Interpolated at render time, so no static scan of the templates can see the
 # values. Each entry names the template and the expression that produces it.
@@ -212,12 +220,7 @@ def test_interpolated_colour_patterns_are_declared():
     """
     found = set()
     for tpl in _templates():
-        found |= set(
-            re.findall(
-                r"((?:bg|text|border|ring|outline|from|via|to)-\{\{[^}]+\}\}/\d+)",
-                tpl.read_text(),
-            )
-        )
+        found |= set(INTERPOLATED_COLOUR_CLASS.findall(tpl.read_text()))
     assert found == _INTERPOLATED_COLOUR_PATTERNS, (
         f"templates and the declared inventory disagree.\n"
         f"  undeclared (would be trimmed away, rendering unstyled): "
@@ -226,6 +229,26 @@ def test_interpolated_colour_patterns_are_declared():
         f"{sorted(_INTERPOLATED_COLOUR_PATTERNS - found)}\n"
         f"Update _INTERPOLATED_COLOUR_PATTERNS *and* trim_daisyui.py, then regenerate."
     )
+
+
+def test_every_interpolated_pattern_has_expansions():
+    """Declaring the pattern is half the job — the expansions do the work.
+
+    `bg-{{ verdict_class }}/10` tells the test something exists; only the
+    concrete `bg-error/10` / `bg-success/10` entries in DYNAMIC_CLASSES survive
+    the trim. Declaring one without the other is the natural half-step, and it
+    fails silently: the inventory test goes green while the panel renders
+    colourless.
+    """
+    for pattern in _INTERPOLATED_COLOUR_PATTERNS:
+        # Turn "bg-{{ x }}/10" into "^bg-.+/10$" and require a concrete entry.
+        regex = re.compile("^" + re.sub(r"\\\{\\\{.*?\\\}\\\}", ".+", re.escape(pattern)) + "$")
+        matches = [c for c in DYNAMIC_CLASSES if regex.match(c)]
+        assert matches, (
+            f"{pattern!r} is declared but no concrete class in "
+            f"trim_daisyui.DYNAMIC_CLASSES matches it — the trim would drop every "
+            f"colour that expression can produce"
+        )
 
 
 def test_every_rendered_colour_class_is_defined():
@@ -262,7 +285,7 @@ def test_every_rendered_colour_class_is_defined():
     emitted = set()
     for html in pages:
         for value in re.findall(r'class="([^"]*)"', html):
-            emitted |= set(_OPACITY_CLASS.findall(value))
+            emitted |= set(COLOUR_CLASS.findall(value))
 
     assert emitted, "no colour utilities rendered at all — the scan is checking nothing"
     missing = sorted(c for c in emitted if not _defines(css, c))

@@ -223,6 +223,23 @@ def _save_state():
     os.replace(tmp_path, path)
 
 
+def _legal_salary(value: float) -> float:
+    """Clamp to the legal range and quantize to the $0.1M auction increment.
+
+    Every salary field auto-submits whatever was typed, and neither can stop a
+    bad value on its own: the bid box's step= only drives the spinner, and it
+    sits in a different form from Assign so its validity is never checked on
+    submit. A typo'd 46 recorded as $46M corrupts the draft record loudly; a
+    typo'd 2.55 corrupts it quietly — the CBA has no such price, and it strands
+    $0.05M of the team's cap below the increment remaining_budget floors to.
+
+    Round rather than floor: _floor_to_increment guards budget headroom, where
+    the safe direction is down. A typo'd price has no safe direction, so take
+    the nearest and let the caller's toast make the change visible.
+    """
+    return round(max(MIN_SALARY, min(value, MAX_SALARY)), 1)
+
+
 def _toast(response: HTMLResponse, message: str, toast_type: str = "info") -> HTMLResponse:
     """Attach a toast notification to an HTMX response via HX-Trigger header."""
     response.headers["HX-Trigger"] = json.dumps(
@@ -361,15 +378,8 @@ async def assign_player(
             f"Player not found: {player}", "warning",
         )
 
-    # Clamp to the legal range AND quantize to the $0.1M auction increment,
-    # saying so either way. Silently recording $11.4M for a typo'd 46 corrupts
-    # the draft record; a typo'd 2.55 is subtler but no better — the CBA has no
-    # such price, and it strands $0.05M of the team's cap below the increment
-    # remaining_budget floors to. The price box can't prevent it: step= only
-    # drives the spinner, and it lives in a different form from Assign, so its
-    # validity is never checked on submit.
     raw_salary = salary
-    salary = round(max(MIN_SALARY, min(salary, MAX_SALARY)), 1)
+    salary = _legal_salary(salary)
     clamp_note = (
         f" (salary adjusted from ${raw_salary:g}M)" if salary != raw_salary else ""
     )
@@ -955,7 +965,7 @@ async def adjust_salary(
             _render(request, "partials/all_panels.html"),
             f"{player_name} is no longer on {team_code}", "warning",
         )
-    clamped = max(MIN_SALARY, min(new_salary, MAX_SALARY))
+    clamped = _legal_salary(new_salary)
     auction_state.save_snapshot()
     old_salary = p.salary
     t.adjust_salary(player_name, clamped)
@@ -967,7 +977,19 @@ async def adjust_salary(
     _recompute()
     _save_state()
     # Default context — see the note in /toggle-bench on the ctx["team"] leak.
-    return _render(request, "partials/all_panels.html")
+    response = _render(request, "partials/all_panels.html")
+    # Say so when the typed value wasn't recorded verbatim. This is the
+    # typo-fix endpoint, so it sees the most fat-fingered input of any — and
+    # silently storing something other than what was typed is the failure it
+    # exists to correct. _log_change already formats to .1f, so before the
+    # quantization the change log read "$2.5M" while the roster held 2.55.
+    if clamped != new_salary:
+        return _toast(
+            response,
+            f"{player_name} set to ${clamped}M (adjusted from ${new_salary:g}M)",
+            "warning",
+        )
+    return response
 
 
 @app.post("/move-to-minors", response_class=HTMLResponse)

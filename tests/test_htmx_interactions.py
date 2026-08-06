@@ -132,6 +132,45 @@ class TestAssignValidation:
         assert "adjusted from $2.55M" in trigger["showToast"]["message"]
         client.post("/undo")
 
+    def test_adjust_salary_quantizes_too(self, client):
+        """The typo-fix endpoint had the same hole, and it sees the most
+        fat-fingered input of any — storing something other than what was
+        typed is the failure it exists to correct. _log_change formats to .1f,
+        so the change log read "$2.5M" while the roster held 2.55.
+        """
+        import main
+
+        client.post("/assign", data={
+            "player": "Artemi Panarin", "team": "BOT", "salary": "2.5",
+        })
+        r = client.post("/adjust-salary", data={
+            "team_code": "BOT", "player_name": "Artemi Panarin",
+            "new_salary": "2.54",
+        })
+        assert r.status_code == 200
+        t = main.auction_state.teams["BOT"]
+        assert t.find_player("Artemi Panarin").salary == 2.5
+        tenths = t.total_salary * 10
+        assert abs(tenths - round(tenths)) < 1e-9, f"${t.total_salary}M is off-step"
+        trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
+        assert "adjusted from $2.54M" in trigger["showToast"]["message"]
+        client.post("/undo")
+        client.post("/undo")
+
+    def test_adjust_salary_stays_quiet_on_a_legal_price(self, client):
+        """No toast when the typed value is recorded verbatim."""
+        client.post("/assign", data={
+            "player": "Artemi Panarin", "team": "BOT", "salary": "2.5",
+        })
+        r = client.post("/adjust-salary", data={
+            "team_code": "BOT", "player_name": "Artemi Panarin",
+            "new_salary": "3.1",
+        })
+        assert r.status_code == 200
+        assert "showToast" not in r.headers.get("HX-Trigger", "")
+        client.post("/undo")
+        client.post("/undo")
+
     def test_a_legal_price_is_not_reported_as_adjusted(self, client):
         """The note must fire only on a real change — a spurious 'adjusted'
         on every pick would train the operator to ignore it."""

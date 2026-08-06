@@ -16,30 +16,50 @@ also *pins* Tailwind, which was previously loaded from the unversioned
 | File | Source URL | Upstream sha256 |
 |---|---|---|
 | `htmx-1.9.10.min.js` | `https://unpkg.com/htmx.org@1.9.10` | `b3bdcf5c741897a53648b1207fff0469a0d61901429ba1f6e88f98ebd84e669e` |
-| `daisyui-4.12.14.full.min.css` | `https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css` | `bf619937eca81b323ca601ab7347443a3c4c8b6ad3306bc9908ef127d207d0b6` |
+| `daisyui-4.12.14.trimmed.min.css` | `https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css` | `bf619937eca81b323ca601ab7347443a3c4c8b6ad3306bc9908ef127d207d0b6` |
 | `tailwindcss-play-3.4.17.js` | `https://cdn.tailwindcss.com` (Play CDN, resolved to v3.4.17) | `176e894661aa9cdc9a5cba6c720044cbbf7b8bd80d1c9a142a7c24b1b6c50d15` |
 
-htmx and Tailwind are committed byte-for-byte as downloaded.
+htmx and Tailwind are committed byte-for-byte as downloaded. **DaisyUI is the
+one derived file** — see below.
 
-## The one modification
+## DaisyUI is trimmed, not verbatim
 
-DaisyUI's published CSS ends with:
+Upstream `full.min.css` is 2.93 MB, and 84% of it (21,588 of 24,181 rules) is a
+generated matrix of opacity-suffixed colour utilities — `.via-base-300\/45`,
+`.focus\:outline-error-content\/95`, one rule per colour x opacity step x
+variant x property. This app uses **five** of them. `trim_daisyui.py` at the
+repo root drops the rest: **2.93 MB → 468 KB, 84% smaller**.
 
-```
-/*# sourceMappingURL=/sm/8db1e6…c679f770.map */
-```
+Everything else is copied through byte-for-byte — every component, the base
+layer, all the stock themes. Verified mechanically, not by eye: each kept rule
+is a verbatim subsequence of upstream, and zero non-opacity rules were dropped.
 
-That is an **absolute** path, so once the file is served from our own origin it
-resolves to `http://localhost:8000/sm/…map` and 404s in the uvicorn log whenever
-devtools is open — noise in exactly the log you'd be watching on draft night.
-It is stripped. The vendored file is a byte-exact prefix of upstream; those 96
-bytes are the only difference.
+The same pass strips upstream's trailing `sourceMappingURL` comment, which is an
+**absolute** path (`/sm/…map`) and so would resolve against our own origin and
+404 in the uvicorn log with devtools open — noise in exactly the log you'd be
+watching on draft night.
 
 ```bash
-sed '/^\/\*# sourceMappingURL=/d' full.min.css > daisyui-4.12.14.full.min.css
+python3 trim_daisyui.py /path/to/upstream/full.min.css
 ```
 
-As-vendored sha256: `08e190900e770fae650e3bb05c818598c4ee4c10d0f5dde25978387c9acd59f7`
+As-vendored sha256: `27785822a8fc393b9e4d6e7c95d99e9c6b71ac1d1aeede24a05e934829c09873`
+
+### Not `dist/styled.min.css`
+
+The obvious-looking fix, and wrong: it defines 609 classes to full's 24,940 and
+is missing 19 this app relies on, including `btn-sm`, `btn-xs`, `badge-xs`,
+`table-xs`, `select-sm`, `tooltip`, `text-warning` and `bg-base-200`. Swapping to
+it breaks the interface.
+
+### If you add a colour utility
+
+A missing utility does not error — the element just renders unstyled, and only
+someone looking at that panel would notice. Two tests in
+`tests/test_offline_assets.py` cover it: one drives the running app and checks
+every colour class it actually emits is defined here, the other fails if a
+template grows a `bg-{{ … }}/NN` expression that `DYNAMIC_CLASSES` in
+`trim_daisyui.py` doesn't know about. Update both, regenerate, re-run the suite.
 
 ## Why the Tailwind *Play* CDN and not a real build
 

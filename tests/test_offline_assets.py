@@ -156,7 +156,7 @@ def test_no_orphaned_vendor_files():
     [
         ("htmx-1.9.10.min.js", "1.9.10"),
         ("tailwindcss-play-3.4.17.js", "3.4.17"),
-        ("daisyui-4.12.14.full.min.css", ".btn{"),
+        ("daisyui-4.12.14.trimmed.min.css", ".btn{"),
     ],
 )
 def test_vendored_bundle_is_the_advertised_version(filename: str, marker: str):
@@ -169,6 +169,106 @@ def test_vendored_bundle_is_the_advertised_version(filename: str, marker: str):
     assert path.exists(), f"{filename} is missing from static/vendor/"
     assert marker in path.read_text(errors="replace"), (
         f"{filename} does not contain {marker!r} — wrong version or bad download"
+    )
+
+
+# Colour utilities carry an opacity suffix: bg-error/10, border-success/30.
+# DaisyUI generates ~21,600 of these (one per colour x opacity x variant x
+# property) and the vendored copy keeps only the handful the app uses — see
+# trim_daisyui.py. A missing one does not error, it just renders unstyled, so
+# these two tests are the only thing standing between a trim and a silently
+# colourless panel mid-draft.
+_OPACITY_CLASS = re.compile(r"\b((?:bg|text|border|ring|outline|from|via|to|divide|shadow|fill|stroke)-[a-z0-9-]+/\d+)\b")
+
+# Interpolated at render time, so no static scan of the templates can see the
+# values. Each entry names the template and the expression that produces it.
+_INTERPOLATED_COLOUR_PATTERNS = {
+    # templates/partials/buyout_panel.html — verdict_class is 'error'|'success'
+    # templates/partials/trade_panel.html   — verdict_class is 'success'|'error'
+    "bg-{{ verdict_class }}/10",
+    "border-{{ verdict_class }}/30",
+}
+
+
+def _daisyui_css() -> str:
+    """The vendored DaisyUI stylesheet, found by glob so a rename can't stale this."""
+    matches = [p for p in VENDOR.glob("daisyui-*.css")]
+    assert len(matches) == 1, f"expected exactly one vendored DaisyUI file, got {matches}"
+    return matches[0].read_text(errors="replace")
+
+
+def _defines(css: str, cls: str) -> bool:
+    """Is `cls` defined as a class selector in `css`? Handles CSS escaping."""
+    escaped = re.sub(r"([/:.\[\]])", r"\\\1", cls)
+    return re.search(r"\." + re.escape(escaped) + r"(?![\w\\-])", css) is not None
+
+
+def test_interpolated_colour_patterns_are_declared():
+    """A new `bg-{{ x }}/NN` in a template must be declared before it is trimmed in.
+
+    The rendered scan below can only cover states a test actually reaches. This
+    one is state-independent: it fails the moment a template grows an
+    interpolated colour class nobody has told trim_daisyui.py about.
+    """
+    found = set()
+    for tpl in _templates():
+        found |= set(
+            re.findall(
+                r"((?:bg|text|border|ring|outline|from|via|to)-\{\{[^}]+\}\}/\d+)",
+                tpl.read_text(),
+            )
+        )
+    assert found == _INTERPOLATED_COLOUR_PATTERNS, (
+        f"templates and the declared inventory disagree.\n"
+        f"  undeclared (would be trimmed away, rendering unstyled): "
+        f"{sorted(found - _INTERPOLATED_COLOUR_PATTERNS)}\n"
+        f"  declared but gone from templates: "
+        f"{sorted(_INTERPOLATED_COLOUR_PATTERNS - found)}\n"
+        f"Update _INTERPOLATED_COLOUR_PATTERNS *and* trim_daisyui.py, then regenerate."
+    )
+
+
+def test_every_rendered_colour_class_is_defined():
+    """Drive the real app and check what it actually emits.
+
+    Stronger than scanning source: it sees `bg-error/10` as the interpolation
+    produces it. Both branches of each verdict are exercised, because covering
+    only one would leave the other's colour untested — and they are different
+    classes.
+    """
+    from fastapi.testclient import TestClient
+    import main
+
+    css = _daisyui_css()
+    with TestClient(main.app) as client:
+        client.post("/reset")
+        pages = [client.get("/").text]
+
+        bot = main.auction_state.teams[main.MY_TEAM]
+        verdicts: dict[str, str] = {}
+        for p in (q for q in bot.all_players if q.can_be_bought_out):
+            html = client.get(f"/buyout-check/{p.name}").text
+            for verdict in ("BUYOUT", "KEEP"):
+                if f">{verdict}</span>" in html:
+                    verdicts.setdefault(verdict, html)
+            if len(verdicts) == 2:
+                break
+        assert len(verdicts) == 2, (
+            f"only reached {sorted(verdicts)} — both colour branches must render "
+            f"or half the trimmed classes go unchecked"
+        )
+        pages.extend(verdicts.values())
+
+    emitted = set()
+    for html in pages:
+        for value in re.findall(r'class="([^"]*)"', html):
+            emitted |= set(_OPACITY_CLASS.findall(value))
+
+    assert emitted, "no colour utilities rendered at all — the scan is checking nothing"
+    missing = sorted(c for c in emitted if not _defines(css, c))
+    assert not missing, (
+        f"the app renders {missing}, which the vendored DaisyUI does not define — "
+        f"those elements are unstyled. Add them to trim_daisyui.py and regenerate."
     )
 
 

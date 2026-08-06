@@ -152,7 +152,10 @@ function syncAssignPrice() {
     var label = document.getElementById('assign-price');
     if (!input || !label) return;
     var val = parseFloat(input.value);
-    label.textContent = '$' + (isNaN(val) ? 0.5 : val).toFixed(1) + 'M';
+    // An empty or unparseable box will 422 on submit, not assign at 0.5 —
+    // leave the last good price up rather than advertise one that won't post.
+    if (isNaN(val)) return;
+    label.textContent = '$' + val.toFixed(1) + 'M';
 }
 
 /* Delegated off document: the auction panel is swapped on every bid-check, so

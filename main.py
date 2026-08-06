@@ -361,12 +361,17 @@ async def assign_player(
             f"Player not found: {player}", "warning",
         )
 
-    # Clamp salary to valid range, and say so — silently recording $11.4M
-    # for a typo'd 46 corrupts the draft record
+    # Clamp to the legal range AND quantize to the $0.1M auction increment,
+    # saying so either way. Silently recording $11.4M for a typo'd 46 corrupts
+    # the draft record; a typo'd 2.55 is subtler but no better — the CBA has no
+    # such price, and it strands $0.05M of the team's cap below the increment
+    # remaining_budget floors to. The price box can't prevent it: step= only
+    # drives the spinner, and it lives in a different form from Assign, so its
+    # validity is never checked on submit.
     raw_salary = salary
-    salary = max(MIN_SALARY, min(salary, MAX_SALARY))
+    salary = round(max(MIN_SALARY, min(salary, MAX_SALARY)), 1)
     clamp_note = (
-        f" (salary clamped from ${raw_salary:g}M)" if salary != raw_salary else ""
+        f" (salary adjusted from ${raw_salary:g}M)" if salary != raw_salary else ""
     )
 
     auction_state.save_snapshot()

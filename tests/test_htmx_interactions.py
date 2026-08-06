@@ -96,6 +96,53 @@ class TestAssignValidation:
         assert f"${MAX_SALARY}M" in trigger["showToast"]["message"]
         client.post("/undo")
 
+    def test_salary_quantized_to_the_auction_increment(self, client):
+        """A sub-increment salary must never reach the roster.
+
+        The price box can't stop it: step= only drives the spinner, and the box
+        lives in a different form from Assign so its validity is never checked
+        on submit. Recording 2.55 puts a price in the draft record that the CBA
+        has no increment for, and lands total_salary on a half-step — stranding
+        $0.05M of cap below the increment remaining_budget floors to.
+        """
+        import main
+
+        for raw, expected in [("2.54", 2.5), ("3.06", 3.1), ("1.96", 2.0)]:
+            r = client.post("/assign", data={
+                "player": "Artemi Panarin", "team": "BOT", "salary": raw,
+            })
+            assert r.status_code == 200
+            p = main.auction_state.teams["BOT"].find_player("Artemi Panarin")
+            assert p.salary == expected, f"${raw}M recorded as ${p.salary}M"
+            client.post("/undo")
+
+    def test_exact_half_increment_still_lands_on_a_step(self, client):
+        """2.55 is a tie; which way it breaks depends on the float, not on
+        behaviour worth pinning. What matters is that it lands on a step."""
+        import main
+
+        r = client.post("/assign", data={
+            "player": "Artemi Panarin", "team": "BOT", "salary": "2.55",
+        })
+        assert r.status_code == 200
+        p = main.auction_state.teams["BOT"].find_player("Artemi Panarin")
+        tenths = p.salary * 10
+        assert abs(tenths - round(tenths)) < 1e-9, f"${p.salary}M is off-step"
+        trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
+        assert "adjusted from $2.55M" in trigger["showToast"]["message"]
+        client.post("/undo")
+
+    def test_a_legal_price_is_not_reported_as_adjusted(self, client):
+        """The note must fire only on a real change — a spurious 'adjusted'
+        on every pick would train the operator to ignore it."""
+        r = client.post("/assign", data={
+            "player": "Artemi Panarin", "team": "BOT", "salary": "2.5",
+        })
+        assert r.status_code == 200
+        trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
+        assert "adjusted" not in trigger["showToast"]["message"]
+        client.post("/undo")
+
 
 class TestOOBSwapIDs:
     """Buyout indicator OOB swap IDs must match roster panel placeholders."""

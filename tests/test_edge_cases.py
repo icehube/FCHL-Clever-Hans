@@ -122,8 +122,11 @@ class TestEndgameMarginalValue:
             + [PlayerOnRoster(name=f"G{i}", position="G", group="3", salary=1.0,
                               projected_points=30) for i in range(3)]
         )
-        team = _make_team(keepers=keepers)  # full roster: physical max 0.0
-        assert team.physical_max_bid == 0.0
+        # A full roster still has bidding CAPACITY (a 24-man team with cap
+        # space can draft into minors), so the DROP has to come from roster
+        # value, not from an inability to bid.
+        team = _make_team(keepers=keepers)
+        assert team.physical_max_bid > 0.0
         pool = {"S": _make_player("S", pts=90)}
         prices = {"S": 5.0}
         mi = MarketInfo(market_ceiling=5.0, highest_bidder="X", highest_bid=5.0,

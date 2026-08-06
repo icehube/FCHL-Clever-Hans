@@ -183,8 +183,13 @@ class TeamState:
 
     @property
     def min_budget_reserved(self) -> float:
-        """Budget that must be reserved for remaining roster spots at MIN_SALARY."""
-        return self.total_spots_remaining * MIN_SALARY
+        """Budget that must be reserved for remaining roster spots at MIN_SALARY.
+
+        Clamped at zero: total_spots_remaining goes NEGATIVE past 24, and a
+        negative reserve would *inflate* spendable_budget above the team's
+        actual remaining budget — a number the league table shows.
+        """
+        return max(0, self.total_spots_remaining) * MIN_SALARY
 
     @property
     def spendable_budget(self) -> float:
@@ -195,17 +200,27 @@ class TeamState:
     def physical_max_bid(self) -> float:
         """Maximum this team can bid on any single player.
 
-        This is spendable + MIN_SALARY because bidding on a player fills one
-        of the reserved spots (replacing its MIN_SALARY reservation with the
-        actual bid amount).
+        A full roster is NOT a zero ceiling. The CBA lets teams draft past 24;
+        the extra goes to minors, and since every biddable player ends up in
+        group 2 or 3 (/assign converts RFA1->2, RFA2->3, and both are in
+        MINOR_CAP_GROUPS) that salary counts fully on the cap. Owner confirmed
+        2026-08-05 that teams in this league do it. Returning 0.0 here made a
+        cap-rich full team invisible to market.py, so every late-draft ceiling
+        read too low and BOT under-bid exactly when the money was on the table.
+
+        Both branches say the same thing. With spots left, the bid FILLS a
+        reserved spot, so its MIN_SALARY reservation is replaced by the actual
+        amount — hence spendable + MIN_SALARY. With no spots left there is no
+        reservation to replace, so the whole remaining budget is biddable.
         """
-        if self.total_spots_remaining <= 0:
-            return 0.0
+        ceiling = (
+            self.remaining_budget
+            if self.total_spots_remaining <= 0
+            else self.spendable_budget + MIN_SALARY
+        )
         # Clamp at 0 so over-committed teams read as "can't bid", not a
         # nonsense negative ceiling in templates and projections.
-        return _floor_to_increment(
-            max(0.0, min(self.spendable_budget + MIN_SALARY, MAX_SALARY))
-        )
+        return _floor_to_increment(max(0.0, min(ceiling, MAX_SALARY)))
 
     @property
     def current_roster_points(self) -> int:

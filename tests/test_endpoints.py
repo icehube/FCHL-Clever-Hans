@@ -1,7 +1,11 @@
 """Tests for main.py: FastAPI endpoints."""
 
+from contextlib import contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
+
+from config import MIN_SALARY, SALARY_CAP
 
 
 @pytest.fixture(scope="module")
@@ -11,6 +15,33 @@ def client():
         # Reset to fresh state in case other test modules modified globals
         c.post("/reset")
         yield c
+
+
+@contextmanager
+def cannot_raise(code: str):
+    """Make a team unable to legally raise the price, without marking it done.
+
+    A FULL ROSTER is not enough: a 24-man team with cap space can still draft
+    (the extra goes to minors at full cap), so it is a live bidder and sets
+    ceilings like anyone else. Exhaust the budget instead — that is the only
+    thing that actually stops a team bidding.
+
+    The team stays not-done so it remains clickable in the bidder grid, which
+    is the situation these tests exist to cover.
+    """
+    import main
+
+    team = main.auction_state.teams[code]
+    saved = team.penalties
+    team.penalties = SALARY_CAP
+    team._invalidate_cache()  # roster_players is memoized
+    try:
+        assert team.physical_max_bid < MIN_SALARY, "fixture must be unable to bid"
+        assert not team.is_done, "must be broke but NOT done, to stay clickable"
+        yield team
+    finally:
+        team.penalties = saved
+        team._invalidate_cache()
 
 
 class TestIndexPage:
@@ -100,24 +131,12 @@ class TestBidCheck:
     def test_win_comes_with_an_assign_button(self, client):
         """Regression (2026-08-05): WIN must never render without Assign.
 
-        A cap-full team stays clickable in the bidder grid (the grid filters on
-        is_done only), so BOT + a full team satisfied the advisor's uncontested
-        check while the Assign gate's len(active_bidders) == 1 hid the button.
+        A broke team stays clickable in the bidder grid (the grid filters on
+        is_done only), so BOT + a team that cannot raise satisfied the
+        advisor's uncontested check while the Assign gate's
+        len(active_bidders) == 1 hid the button.
         """
-        import main
-        from state import PlayerOnRoster
-
-        victim = main.auction_state.teams["HSM"]
-        saved = list(victim.keeper_players)
-        victim.keeper_players = [
-            PlayerOnRoster(name=f"HSM_F{i}", position="F", group="3",
-                           salary=1.0, projected_points=50)
-            for i in range(24)
-        ]
-        victim._invalidate_cache()  # roster_players is memoized
-        try:
-            assert victim.physical_max_bid == 0.0, "fixture must be cap-full"
-            assert not victim.is_done, "must be full but NOT done to be clickable"
+        with cannot_raise("HSM"):
             r = client.post("/bid-check", data={
                 "player": "Connor McDavid",
                 "bidders": "BOT,HSM",
@@ -127,9 +146,6 @@ class TestBidCheck:
             assert r.status_code == 200
             assert "bid-win" in r.text, "should be a WIN — HSM cannot raise the price"
             assert 'name="team" value="BOT"' in r.text, "Assign form must be present"
-        finally:
-            victim.keeper_players = saved
-            victim._invalidate_cache()
 
     def test_uncontested_overpay_still_drops(self, client):
         """No opponents left, but above value — DROP and name the overpay."""
@@ -160,21 +176,10 @@ class TestAssignSalaryIsLive:
     def _panel(self, client) -> str:
         """A rendered auction panel with the Assign form showing.
 
-        Cap-fill an opponent so BOT is the last team that can raise — same
-        trick as test_win_comes_with_an_assign_button.
+        Break the only other bidder so BOT is last standing — same fixture as
+        test_win_comes_with_an_assign_button, shared so the two can't drift.
         """
-        import main
-        from state import PlayerOnRoster
-
-        victim = main.auction_state.teams["HSM"]
-        saved = list(victim.keeper_players)
-        victim.keeper_players = [
-            PlayerOnRoster(name=f"HSM_F{i}", position="F", group="3",
-                           salary=1.0, projected_points=50)
-            for i in range(24)
-        ]
-        victim._invalidate_cache()  # roster_players is memoized
-        try:
+        with cannot_raise("HSM"):
             r = client.post("/bid-check", data={
                 "player": "Connor McDavid",
                 "bidders": "BOT,HSM",
@@ -184,9 +189,6 @@ class TestAssignSalaryIsLive:
             assert r.status_code == 200
             assert 'name="team" value="BOT"' in r.text, "Assign form must render"
             return r.text
-        finally:
-            victim.keeper_players = saved
-            victim._invalidate_cache()
 
     def test_panel_holds_no_salary_snapshot(self, client):
         """The assertion that pins the fix: no render-time salary to go stale."""

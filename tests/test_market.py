@@ -2,7 +2,7 @@
 
 import pytest
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM, ROSTER_SIZE, SALARY_CAP
 from market import (
     MarketInfo,
     compute_all_market_prices,
@@ -262,6 +262,30 @@ class TestLiveOpponents:
         }
         assert teams["A"].physical_max_bid < MIN_SALARY
         assert live_opponents(["A"], teams) == []
+
+    def test_full_roster_with_money_is_still_a_live_bidder(self):
+        """The bug this pins: a 24-man team with cap space used to report
+        physical_max_bid 0.0, so it vanished from live_opponents and from
+        every ceiling — late-draft ceilings read too low and BOT under-bid.
+        The CBA lets teams draft past 24 (extra goes to minors at full cap).
+        """
+        teams = {
+            "FULL": _make_team("FULL", keeper_salary=24.0, num_keepers=ROSTER_SIZE),
+        }
+        assert teams["FULL"].total_spots_remaining == 0
+        assert teams["FULL"].physical_max_bid >= MIN_SALARY
+        assert live_opponents(["FULL"], teams) == ["FULL"]
+
+    def test_full_roster_with_money_lifts_the_ceiling(self):
+        """Asserted at the layer where the bug did harm: the ceiling itself."""
+        broke = _make_team("BROKE", penalties=SALARY_CAP)
+        rich_and_full = _make_team("FULL", keeper_salary=24.0, num_keepers=ROSTER_SIZE)
+        teams = {"BROKE": broke, "FULL": rich_and_full}
+        # Highest opponent max, since BOT is among the bidders and must outbid
+        # the strongest of them to win.
+        ceiling = compute_live_ceiling([MY_TEAM, "BROKE", "FULL"], teams)
+        assert ceiling == rich_and_full.physical_max_bid
+        assert ceiling > MIN_SALARY, "a full team's budget must reach the ceiling"
 
     def test_bot_alone_has_no_opponents(self):
         """The uncontested case: BOT is the only bidder left."""

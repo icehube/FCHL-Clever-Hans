@@ -287,6 +287,16 @@ def compute_marginal_value(
     Binary search for the salary at which adding the player no longer
     improves the optimal roster. That salary is the marginal value.
     """
+    if team.total_spots_remaining <= 0:
+        # A full roster can't seat him: the extra goes to minors and scores
+        # nothing, so no price makes him worth having. Kept separate from
+        # CAPACITY, which is real — physical_max_bid reports the team's whole
+        # remaining budget so opponents' ceilings still see them (2026-08-05).
+        # Conflating the two is what this guard prevents: without it the
+        # binary search returns MIN_SALARY, which reads as "worth the floor"
+        # and the ladder recommends BID on a player who cannot play.
+        return 0.0
+
     # Check if player improves the roster at MIN_SALARY
     with_at_min = solve_optimal_roster(
         team, available_players, market_prices,

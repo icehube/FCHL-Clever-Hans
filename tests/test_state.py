@@ -148,6 +148,40 @@ class TestTeamStateBudget:
         assert SALARY_CAP - team.total_salary != 4.2, "precondition: float error"
         assert team.remaining_budget == 4.2
 
+    def test_full_roster_with_cap_space_can_still_bid(self):
+        """A 24-man team is not a spent force.
+
+        The CBA lets teams draft past 24 — the extra goes to minors, and since
+        every biddable player ends up in group 2 or 3 the salary counts fully
+        on the cap. Returning 0.0 here made a cap-rich full team invisible to
+        market.py, so late-draft ceilings read too low. Owner confirmed
+        2026-08-05 that teams in this league do draft past 24.
+        """
+        keepers = [_make_player_on_roster(f"P{i}", salary=1.0) for i in range(ROSTER_SIZE)]
+        team = _make_team(keepers=keepers)
+        assert team.total_spots_remaining == 0
+        assert team.remaining_budget == pytest.approx(SALARY_CAP - ROSTER_SIZE)
+        # No spot reservation left to replace, so the whole budget is biddable
+        # (capped at the max any single bid can be).
+        assert team.physical_max_bid == min(team.remaining_budget, MAX_SALARY)
+
+    def test_full_roster_without_cap_space_still_cannot_bid(self):
+        """Budget, not roster size, is what actually stops a team bidding."""
+        keepers = [_make_player_on_roster(f"P{i}", salary=1.0) for i in range(ROSTER_SIZE)]
+        team = _make_team(keepers=keepers)
+        team.penalties = SALARY_CAP - ROSTER_SIZE  # spend every last dollar
+        assert team.total_spots_remaining == 0
+        assert team.physical_max_bid < MIN_SALARY
+
+    def test_over_full_roster_reserves_nothing(self):
+        """Past 24, total_spots_remaining goes negative — the reserve must not
+        follow it down, or spendable_budget reads ABOVE the real budget."""
+        keepers = [_make_player_on_roster(f"P{i}", salary=1.0) for i in range(ROSTER_SIZE + 1)]
+        team = _make_team(keepers=keepers)
+        assert team.total_spots_remaining == -1
+        assert team.min_budget_reserved == 0.0
+        assert team.spendable_budget == team.remaining_budget
+
     def test_roster_count_excludes_minors(self):
         keepers = [_make_player_on_roster("P1"), _make_player_on_roster("P2")]
         minors = [_make_player_on_roster("M1", is_minor=True)]

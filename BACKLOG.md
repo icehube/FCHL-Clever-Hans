@@ -16,12 +16,11 @@ Triaged 2026-07-05.
 
 - [2026-07-05] [review] optimizer.py:87 — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in auction_control.html so it's no longer silent; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — needs a plan-with-fewer-spots MILP mode
 - [2026-07-05] [review] optimizer.py:401 — drain score divides by can_afford, so it nominates players FEW opponents can afford — gifting the rich opponent a bargain at second-highest ceiling instead of draining budgets — rework drain heuristic
-- [2026-07-05] [review] state.py:141 — physical_max_bid=0 when roster full excludes that team from market ceiling, but CBA allows drafting beyond 24 (extras to minors, full cap) — a cap-rich full team is an invisible live bidder — needs design: spots vs minors-overflow in physical max
 
 ### domain/state
 
 - [2026-07-05] [review] trade.py:240 — buyout of a non-cap-counting minors player (groups A-E) INCREASES cap hit while evaluator reports positive net_cap_freed (verified: +2.0 cap on $4M group-E buyout) — buyout math needs a minors-aware branch
-- [2026-07-05] [review] state.py:199 — recall_from_minors/add_acquired_player have no 24-man check: roster_count 25 reachable via legal endpoints (verified); team then vanishes from market math — awaiting triage
+- [2026-08-05] [review] state.py:199 — recall_from_minors/add_acquired_player have no 24-man check, so roster_count 25 is reachable via legal endpoints (verified). The "team then vanishes from market math" half is fixed — a full team now reports its real budget as physical_max_bid. What remains is whether a 25th player should sit in acquired_players at all: the CBA says extras go to *minors*, so this is arguably an invalid state rather than a market bug. Needs a decision (auto-route to minors on assign vs. refuse the recall). Note a 25-man roster makes total_spots_remaining negative, which makes solve_optimal_roster infeasible for that team — harmless for an opponent, but it would degrade every recommendation if it ever happened to BOT — awaiting that decision
 
 ### frontend/UX
 

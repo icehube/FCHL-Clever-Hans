@@ -233,12 +233,23 @@ class TestUncontestedBidding:
         assert "0.8" in rec.reasoning, f"should name the overpay: {rec.reasoning}"
 
     def test_uncontested_full_roster_still_drops(self):
-        """A full roster can't bid at all — uncontested doesn't override that."""
+        """A full roster gains nothing from another player — uncontested
+        doesn't override that.
+
+        Note the reason: NOT that the team can't bid. A 24-man team with cap
+        space still can (the extra goes to minors at full cap), and as of
+        2026-08-05 physical_max_bid reports that capacity so the team stays
+        visible to market ceilings. What stops the bid is roster value — with
+        no spots left the MILP can't seat him, so marginal value is zero — and
+        zero, not MIN_SALARY, so the ladder can tell "worthless" apart from
+        "worth the floor" and DROP instead of recommending a $0.5M BID.
+        """
         team, pool, prices = self._setup()
         team.keeper_players.append(PlayerOnRoster(
             name="F99", position="F", group="3", salary=2.0, projected_points=50,
         ))
-        assert team.physical_max_bid == 0.0
+        assert team.physical_max_bid > 0.0, "full roster still has bidding capacity"
+        assert compute_marginal_value(pool["Star"], team, pool, prices) == 0.0
         rec = compute_bid_recommendation(
             pool["Star"], team, pool, prices, self._floor_ceiling(),
             current_price=2.5, bot_uncontested=True,

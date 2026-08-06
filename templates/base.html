@@ -5,9 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FCHL Auction Manager</title>
     <link rel="icon" type="image/gif" href="/fchl_logos/0.gif">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vendored, not CDN: every panel and every Assign is an htmx request, so a
+         network blip mid-auction wouldn't degrade the cockpit, it would kill it.
+         Provenance and upgrade steps in static/vendor/README.md. -->
+    <script src="/static/vendor/htmx-1.9.10.min.js"></script>
+    <link href="/static/vendor/daisyui-4.12.14.full.min.css" rel="stylesheet" type="text/css" />
+    <script src="/static/vendor/tailwindcss-play-3.4.17.js"></script>
     <style>
     /* Bump root font 16 → 18px so all rem-based sizes scale up ~12.5%. */
     html { font-size: 18px; }

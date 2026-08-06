@@ -75,6 +75,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 - **Buyout indicators**: A manual "Scan Roster" button fires `GET /buyout-indicators` (one MILP solve per roster player), which returns OOB-swapped green/red dots into the placeholder dots.
 - **Atomic saves**: `_save_state()` writes to `.tmp` then `os.replace()` (POSIX atomic). Previous state kept as `.backup`.
 - **Responsive layout**: CSS grid with 1-col (mobile), 2-col (768px+), 3-col (1024px+) breakpoints.
+- **No CDNs**: htmx, DaisyUI and Tailwind are vendored in `static/vendor/` — the app must run with the network down, because every panel and every Assign is an htmx request. `tests/test_offline_assets.py` fails any template that loads an asset from another origin. Also: **do not add a CSP** without reading `static/vendor/README.md` — the Assign button's `hx-vals='js:{...}'` needs htmx's eval path.
 
 ## Auction rules (from CBA)
 

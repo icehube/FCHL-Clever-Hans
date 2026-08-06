@@ -55,8 +55,25 @@ because DaisyUI's prebuilt CSS carries every `alert-*` variant. Any future
 runtime-built utility would silently lose its styling — and would surface on
 draft night, not in a test.
 
+The bundle also runs a `MutationObserver` over `document.documentElement` with
+`childList` + `subtree`, which is *why* it suits this app specifically: every
+panel arrives as an htmx swap, and the observer restyles each one as it lands.
+
 Verified before vendoring: the Play bundle contains no `fetch(`,
-`XMLHttpRequest`, `importScripts`, or `WebSocket`. It needs no network.
+`XMLHttpRequest`, `importScripts`, or `WebSocket`. It needs no network. Its lone
+`require(` is esbuild's shim for an unreachable node path — it throws if called.
+
+### The console warning is expected
+
+On every page load the bundle prints:
+
+> cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in
+> production, install it as a PostCSS plugin or use the Tailwind CLI…
+
+That is baked into the bundle and has been printing all along, from the CDN too.
+Nothing is misconfigured — see the section above for why we accept it. Noted
+here because a vendored file feels like ours, so the warning now invites a
+"did I break something?" mid-draft. You did not.
 
 ## Do not add a Content-Security-Policy without reading this
 

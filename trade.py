@@ -350,8 +350,14 @@ def execute_trade(
             raise ValueError(f"Unknown team {source_team_code}")
         other = state.teams[source_team_code]
 
-        for p in give:
-            removed = bot.remove_player(p.name)
+        # Remove from BOTH teams before adding to either. add_acquired_player
+        # routes to the minors at 24, so a full team that gains before it loses
+        # would send the incoming player down on a trade that leaves its roster
+        # exactly the same size.
+        out_of_bot = [bot.remove_player(p.name) for p in give]
+        out_of_other = [other.remove_player(p.name) for p in receive]
+
+        for removed in out_of_bot:
             other.add_acquired_player(PlayerOnRoster(
                 name=removed.name,
                 position=removed.position,
@@ -361,8 +367,7 @@ def execute_trade(
                 nhl_team=removed.nhl_team,
             ))
 
-        for p in receive:
-            removed = other.remove_player(p.name)
+        for removed in out_of_other:
             # Carry the authoritative roster object's identity: group drives
             # minors cap semantics (A-E don't count), salary is unchanged by
             # a trade, and a fresh PlayerOnRoster resets is_bench/is_minor.

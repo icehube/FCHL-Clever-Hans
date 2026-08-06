@@ -407,7 +407,10 @@ async def assign_player(
         projected_points=p.projected_points,
         nhl_team=p.nhl_team,
     )
-    auction_state.teams[team].add_acquired_player(roster_player)
+    to_minors = auction_state.teams[team].add_acquired_player(roster_player)
+    # The sale still succeeds — refusing it mid-auction would cost clicks at the
+    # worst moment — but the operator has to be told the player went down.
+    minors_note = " — roster full, sent to minors" if to_minors else ""
 
     # Capture prices before removing from dicts
     model_price_val = model_prices[player].expected_price if player in model_prices else 0.0
@@ -430,7 +433,8 @@ async def assign_player(
     _save_state()
     return _toast(
         _render(request, "partials/all_panels.html"),
-        f"{p.name} → {team} at ${salary}M{clamp_note}", "success",
+        f"{p.name} → {team} at ${salary}M{clamp_note}{minors_note}",
+        "warning" if to_minors else "success",
     )
 
 
@@ -1044,11 +1048,12 @@ async def move_to_roster(
     auction_state.save_snapshot()
     try:
         t.recall_from_minors(player_name)
-    except ValueError:
+    except ValueError as e:
         auction_state.restore_snapshot()
+        # Surface the real reason: this used to hardcode "not in minors", which
+        # is an actively wrong explanation for a roster-capacity refusal.
         return _toast(
-            _render(request, "partials/all_panels.html"),
-            f"{player_name} not in minors", "error",
+            _render(request, "partials/all_panels.html"), str(e), "error",
         )
     _log_change("move-to-roster", team_code, f"{player_name} → active")
     _recompute()
@@ -1095,23 +1100,28 @@ async def trade_between(
         )
     auction_state.save_snapshot()
     now = datetime.now().isoformat()
-    for name in names_a:
-        p = ta.remove_player(name)
+    # Remove from both rosters before adding to either: add_acquired_player
+    # routes to the minors at 24, so a full team that gains before it loses
+    # would send the incoming player down on an even swap.
+    out_of_a = [ta.remove_player(name) for name in names_a]
+    out_of_b = [tb.remove_player(name) for name in names_b]
+
+    demoted: list[str] = []
+    for source, dest, p in (
+        [(team_a, team_b, p) for p in out_of_a] + [(team_b, team_a, p) for p in out_of_b]
+    ):
         p.is_minor = False
         p.is_bench = False
-        tb.add_acquired_player(p)
-        _log_transaction(p.name, p.position, f"{team_a}→{team_b}", p.salary, "trade", timestamp=now)
-    for name in names_b:
-        p = tb.remove_player(name)
-        p.is_minor = False
-        p.is_bench = False
-        ta.add_acquired_player(p)
-        _log_transaction(p.name, p.position, f"{team_b}→{team_a}", p.salary, "trade", timestamp=now)
+        target = tb if dest == team_b else ta
+        if target.add_acquired_player(p):
+            demoted.append(f"{p.name} → {dest} minors")
+        _log_transaction(p.name, p.position, f"{source}→{dest}", p.salary, "trade", timestamp=now)
     _recompute()
     _save_state()
+    note = f" ({'; '.join(demoted)} — roster full)" if demoted else ""
     return _toast(
         _render(request, "partials/all_panels.html"),
-        f"Trade executed: {team_a} ↔ {team_b}", "success",
+        f"Trade executed: {team_a} ↔ {team_b}{note}", "success",
     )
 
 

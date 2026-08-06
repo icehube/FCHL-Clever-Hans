@@ -256,10 +256,33 @@ class TeamState:
                 return player_list.pop(i)
         raise ValueError(f"Player '{name}' not found on team {self.code}")
 
-    def add_acquired_player(self, player: PlayerOnRoster) -> None:
-        """Add a player drafted during the auction."""
+    def add_acquired_player(self, player: PlayerOnRoster) -> bool:
+        """Add a drafted or traded player. Returns True if routed to the minors.
+
+        CBA: 24 active, extras go to the minors with salary fully on cap. The
+        check lives here rather than at each endpoint because six call sites add
+        to a roster (/assign, /trade-between twice, three in trade.py), and a
+        guard missing from any one of them puts roster_count at 25 — where
+        `lineup_points` lets the extra player compete for a starting slot he
+        cannot legally hold. Measured, one 120-point forward on an otherwise
+        full roster was worth 70 phantom points, and that is the number
+        evaluate_trade accepts or declines on.
+
+        Callers that need to tell the operator where the player went read the
+        return value; the rest can ignore it.
+        """
+        if self.roster_count >= ROSTER_SIZE:
+            player.is_minor = True
+            # Benched on arrival, mirroring send_to_minors' precondition, so a
+            # later recall lands on the bench instead of displacing a starter.
+            player.is_bench = True
+            self.minor_players.append(player)
+            self._invalidate_cache()
+            return True
+
         self.acquired_players.append(player)
         self._invalidate_cache()
+        return False
 
     def send_to_minors(self, player_name: str) -> None:
         """Move an active-roster player to minors. Player must be benched first.
@@ -290,9 +313,21 @@ class TeamState:
         raise ValueError(f"Player '{player_name}' not on active roster of {self.code}")
 
     def recall_from_minors(self, player_name: str) -> None:
-        """Move a player from minors back to acquired (active roster)."""
+        """Move a player from minors back to acquired (active roster).
+
+        The one move that cannot auto-route to the minors when the roster is
+        full — recalling INTO a full roster is the illegal act itself, and the
+        player is already where the overflow would go. Refused, and validated
+        before mutating so a rejected recall leaves the player untouched.
+        """
         i = _index_of(self.minor_players, player_name)
         if i is not None:
+            if self.roster_count >= ROSTER_SIZE:
+                raise ValueError(
+                    f"{self.code}'s active roster is full ({ROSTER_SIZE}) — "
+                    f"bench a player and send them down before recalling "
+                    f"'{player_name}'"
+                )
             self.minor_players[i].is_minor = False
             self.acquired_players.append(self.minor_players.pop(i))
             self._invalidate_cache()

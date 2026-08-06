@@ -32,7 +32,11 @@
         </div>
         <div class="tooltip tooltip-bottom" data-tip="Roster spots remaining (out of 24 active + bench)">
             <div class="text-xs opacity-60">Spots</div>
-            <div class="text-sm font-semibold">{{ team.total_spots_remaining }}</div>
+            {# Clamped: endpoints can no longer push a roster past 24, but a
+               state file or fchl_teams.json written before that guard can still
+               hold one, and "-1" reads as a bug with no action it implies. The
+               property stays signed — solve_optimal_roster uses the negative. #}
+            <div class="text-sm font-semibold">{{ [team.total_spots_remaining, 0]|max }}</div>
         </div>
         <div class="tooltip tooltip-bottom" data-tip="Highest single bid this team can physically afford right now (capped at $11.4M)">
             <div class="text-xs opacity-60">Max Bid</div>

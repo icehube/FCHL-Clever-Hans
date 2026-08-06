@@ -10,12 +10,13 @@ The single work list for this project: deferred review findings plus forward-loo
 
 ## Open findings
 
-Triaged 2026-07-05.
+Last triaged 2026-08-05.
 
 ### engine/market
 
 - [2026-07-05] [review] optimizer.py:87 — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in auction_control.html so it's no longer silent; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — needs a plan-with-fewer-spots MILP mode
-- [2026-07-05] [review] optimizer.py:401 — drain score divides by can_afford, so it nominates players FEW opponents can afford — gifting the rich opponent a bargain at second-highest ceiling instead of draining budgets — rework drain heuristic
+- [2026-08-05] [grill] optimizer.py:594 — drain score is `model_price * max(needing, 1) / max(can_afford, 1)`, so dividing by can_afford makes it favour players FEW opponents can afford — gifting the rich opponent a bargain at second-highest ceiling instead of draining budgets. **Its inputs changed on 2026-08-05** (`0bb86c0`): `_bidding_opponents` now counts cap-rich full teams, so `can_afford` is larger than before and every drain score shifted. The heuristic was already wrong in direction, so this made it no worse — but any before/after comparison of nomination output across that commit is invalid — rework the drain heuristic
+- [2026-08-05] [grill] optimizer.py:326 — `hi = min(team.spendable_budget + MIN_SALARY, MAX_SALARY)` re-derives the with-spots branch of `physical_max_bid` by hand instead of calling it. They agree today only because the `total_spots_remaining <= 0` early return at :290 means this line never runs for a full roster. If `physical_max_bid` changes again the binary search silently won't follow — deferred: no bug today, but it is the same duplicate-predicate trap that left the drain filter stale
 
 ### domain/state
 
@@ -29,6 +30,7 @@ Triaged 2026-07-05.
 - [2026-08-05] [owner] templates/partials/auction_control.html:124 — the price input's `change` (fires on BLUR) swaps the whole `#auction-control`, so a /bid-check response landing between mousedown and mouseup removes the Assign button and swallows the click — it looks like nothing happened. The stale-salary half of this is fixed (Assign now reads #bid-price at submit time), and /bid-check runs a binary search over MILP solves so the response almost always lands after mouseup — deferred: fixing it properly means reworking how the price input re-renders the panel
 - [2026-08-05] [owner] main.py:918 — editing an opponent's roster via /toggle-bench or /adjust-salary now snaps the team panel back to BOT, because the ctx["team"] override that kept it on the edited team was leaking that team into the Trade and buyout panels (fixed 2026-08-05). Restoring the view without the leak needs a separate `viewed_team` context key used only by team_panel.html, leaving `team` as BOT everywhere else — and a decision about which team the buyout "Scan Roster" dots belong to, since they OOB-swap into whichever roster the panel is showing — deferred: ~20 mechanical edits in team_panel.html plus that decision
 - [2026-07-05] [review] main.py:781 — /set-nominator (and /nominate, and unknown-player /bid-check) re-renders auction_control with base context, destroying an in-flight bidding session (player, price, bidder toggles live only in the DOM) — awaiting triage
+- [2026-08-05] [grill] templates/partials/team_panel.html:35 — the Spots box renders `total_spots_remaining` raw, which goes negative past 24 (a 25-man roster shows "-1"). Cosmetic, but it reads like a bug to the operator mid-draft. Related: the same negative value makes `solve_optimal_roster` infeasible for that team — see the state.py:199 entry, which owns the underlying question of whether a 25-man active roster should exist at all — deferred: display fix is trivial, but pointless until that decision lands
 - [2026-08-05] [grill] templates/partials/auction_control.html:101 — "Max bid" is a single number blending two different things: the value cap (`min(marginal, physical_max)` — a hard never-exceed) and the expected stop (`ceiling + 0.1` — a forecast of where bidding ends). The verdict ladder no longer runs on the blend (fixed a3de737), but the displayed number still jumps without explanation when the forecast releases — e.g. $1.1M at a price of $1.0M, then $4.1M at $1.1M. Surfacing both ("worth up to $4.1M; $1.1M should win it") would make the jump legible and the advice self-explaining — deferred: UI redesign of the bid panel, and the engine now behaves correctly either way
 
 ### code quality
@@ -39,6 +41,7 @@ Triaged 2026-07-05.
 ### test infrastructure
 
 - [2026-08-05] [review] tests/test_data_loader.py — 15+ assertions pin the live players.csv (704 biddable, salaries, penalties, McDavid's team); every data refresh breaks them with no correctness signal. Same class: `test_endpoints.py::TestPriceColumn::test_nothing_capped_at_full_budgets` holds only because the top model price (~$9.5M) sits under the full-budget ceiling ($11.4M) — a pricier pool would fail it without anything being wrong — awaiting triage
+- [2026-08-05] [grill] tests/test_endpoints.py:11 — the `client` fixture is `scope="module"`, so `POST /reset` runs ONCE for the whole file, not per test. Any test that mutates global state without restoring it leaks into every later test in the module (`TestPanelContextIsolation` leaves a bench toggle flipped; the salary tests rely on `/undo` to clean up). Nothing is broken today, but it makes test order load-bearing and it is invisible at the call site — I asserted the opposite during a review before checking. Options: switch to function scope and eat the per-test `/reset` cost, or add a teardown that snapshots and restores — awaiting triage
 - [2026-07-05] [review] tests/ — coverage gaps: /trade-between happy path, undo-after-{adjust-salary,move-to-minors,move-to-roster,set-nominator}, MILP-infeasible rendering, corrupt-state startup fallback; assert-nothing tests in test_stress.py:146 (pass-body loop), test_bid_calculator.py:157 (>=0 tautology), test_edge_cases.py:312 (500 accepted) — partially reduced (trade guards, combo turn, endgame, live ceiling now tested); rest awaiting triage
 
 ---
@@ -67,7 +70,7 @@ From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items 
 
 ### Testing
 
-- **More scenarios.** Extend the pre-baked set behind `POST /load-scenario` — the gaps worth covering are the ones that keep producing findings: last-goalie endgame, drained-budget late draft, a cap-rich team with a full roster, and bidding down to a single remaining bidder (see the DROP finding above).
+- **More scenarios.** Extend the pre-baked set behind `POST /load-scenario` — the gaps worth covering are the ones that keep producing findings: last-goalie endgame, drained-budget late draft, a cap-rich team with a full roster (now a live bidder as of `4dc59da` — a scenario would let you see its effect on ceilings rather than trusting the unit tests), and bidding down to a single remaining bidder.
 
 ### Performance
 
@@ -77,4 +80,10 @@ From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items 
 
 ## Resolved
 
-Resolved findings live in git history — see fix commits `200e80d`, `e4a5871`, `c30a636`, `8622f74`, `6dd17e6`, `9aece0d`.
+Resolved findings live in git history. Fix commits, oldest first:
+
+- Pre-2026-08: `200e80d`, `e4a5871`, `c30a636`, `8622f74`, `6dd17e6`, `9aece0d`
+- 2026-08-05 bid advisor: `8b928eb` (WIN not DROP when last bidder standing), `a3de737` (verdict ladder runs on value, not the blended max_bid), `ce20814` (one definition of "last bidder standing")
+- 2026-08-05 money handling: `fa60955` (floor budgets to the $0.1M step), `d9e4fd2` + `4d77c21` (quantize salary on /assign and /adjust-salary via `_legal_salary`)
+- 2026-08-05 market: `4dc59da` (a full roster is capacity, not a zero ceiling), `0bb86c0` (demand counts use "can bid", not "has spots")
+- 2026-08-05 UI: `d57d344` (Assign reads the live price — **still needs the manual browser check filed above**), `713f029` (zero counterfactual delta is a toss-up), `a779ec2` (one price column), `fcd9647` (chart label size)

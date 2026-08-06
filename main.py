@@ -1107,12 +1107,16 @@ async def trade_between(
     out_of_b = [tb.remove_player(name) for name in names_b]
 
     demoted: list[str] = []
-    for source, dest, p in (
-        [(team_a, team_b, p) for p in out_of_a] + [(team_b, team_a, p) for p in out_of_b]
+    # Carry the destination TEAM, not just its code — recovering the object by
+    # comparing codes would be correct only because team_a == team_b is rejected
+    # 40 lines up, and that is the duplicate-predicate trap this repo keeps
+    # finding.
+    for source, dest, target, p in (
+        [(team_a, team_b, tb, p) for p in out_of_a]
+        + [(team_b, team_a, ta, p) for p in out_of_b]
     ):
         p.is_minor = False
         p.is_bench = False
-        target = tb if dest == team_b else ta
         if target.add_acquired_player(p):
             demoted.append(f"{p.name} → {dest} minors")
         _log_transaction(p.name, p.position, f"{source}→{dest}", p.salary, "trade", timestamp=now)

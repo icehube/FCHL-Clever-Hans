@@ -231,6 +231,98 @@ class TestTradeOrdering:
             assert not any(p.name == incoming for p in team.minor_players)
 
 
+class TestFullRosterTrades:
+    """Routing to the minors changed what a trade is worth, and nothing covered it.
+
+    A player received onto a full roster now lands in the minors and scores
+    nothing, so a pure acquisition that used to look like an upgrade is correctly
+    a decline. The guarantee worth pinning is that the PREVIEW cannot promise
+    points the EXECUTION won't deliver — before this change the two could
+    disagree, because evaluate seated the player where execute would not.
+    """
+
+    def _full_bot(self):
+        from data_loader import build_initial_state
+        from market import compute_market_ceiling, compute_market_price
+        from price_model import load_model_params, predict_all_prices
+
+        state = build_initial_state()
+        _fill_active_roster(state.teams[MY_TEAM])
+        preds = predict_all_prices(state.available_players, load_model_params())
+        model = {n: p.expected_price for n, p in preds.items()}
+        info = compute_market_ceiling(state.teams)
+        mp = {n: compute_market_price(model[n], info) for n in model}
+        return state, mp
+
+    def _best_forward(self, state):
+        return max((p for p in state.available_players.values() if p.position == "F"),
+                   key=lambda p: p.projected_points)
+
+    def test_pure_acquisition_onto_a_full_roster_is_declined(self):
+        from trade import PlayerTrade, evaluate_trade
+
+        state, mp = self._full_bot()
+        stud = self._best_forward(state)
+        assert stud.projected_points > 50, "must out-score every filler starter"
+
+        result = evaluate_trade(
+            state, give=[],
+            receive=[PlayerTrade(name=stud.name, position=stud.position,
+                                 salary=2.0, projected_points=stud.projected_points)],
+            market_prices=mp,
+        )
+
+        assert result.recommendation == "decline", (
+            f"{stud.name} ({stud.projected_points}pts) cannot start from the minors, "
+            "so acquiring him onto a full roster buys nothing but cap"
+        )
+
+    def test_preview_points_match_what_execution_delivers(self):
+        from copy import deepcopy
+
+        from trade import PlayerTrade, evaluate_trade, execute_trade
+
+        state, mp = self._full_bot()
+        stud = self._best_forward(state)
+        recv = [PlayerTrade(name=stud.name, position=stud.position,
+                            salary=2.0, projected_points=stud.projected_points)]
+
+        previewed = evaluate_trade(state, give=[], receive=recv,
+                                   market_prices=mp).best_scenario.total_points
+
+        live = deepcopy(state)
+        execute_trade(live, give=[], receive=[PlayerTrade(
+            name=stud.name, position=stud.position,
+            salary=2.0, projected_points=stud.projected_points)])
+        bot = live.teams[MY_TEAM]
+
+        assert bot.roster_count == ROSTER_SIZE
+        assert any(p.name == stud.name for p in bot.minor_players)
+        assert bot.current_roster_points == previewed, (
+            f"preview promised {previewed} lineup points, execution delivered "
+            f"{bot.current_roster_points}"
+        )
+
+    def test_received_player_still_costs_full_cap(self):
+        from copy import deepcopy
+
+        from trade import PlayerTrade, execute_trade
+
+        state, mp = self._full_bot()
+        stud = self._best_forward(state)
+        before = state.teams[MY_TEAM].total_salary
+
+        live = deepcopy(state)
+        execute_trade(live, give=[], receive=[PlayerTrade(
+            name=stud.name, position=stud.position,
+            salary=2.0, projected_points=stud.projected_points)])
+
+        assert live.teams[MY_TEAM].total_salary == pytest.approx(before + 2.0), (
+            "a group-3 player in the minors is a full cap hit — the trade costs "
+            "real money for zero lineup points, which is why it declines"
+        )
+
+
 class TestSpotsDisplay:
     def test_spots_never_renders_negative(self, client):
         """A 25-man roster is no longer reachable through an endpoint, but a

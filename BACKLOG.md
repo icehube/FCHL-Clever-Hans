@@ -24,7 +24,7 @@ outstanding ones were confirmed in a browser that day.
 - [2026-07-05] [review] optimizer.py:247 (solve_optimal_roster) — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in auction_control.html so it's no longer silent; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — needs a plan-with-fewer-spots MILP mode
 - [2026-08-05] [grill] optimizer.py:327 (compute_marginal_value) — `hi = min(team.spendable_budget + MIN_SALARY, MAX_SALARY)` re-derives the with-spots branch of `physical_max_bid` by hand instead of calling it. They agree today only because the `total_spots_remaining <= 0` early return at :290 means this line never runs for a full roster. If `physical_max_bid` changes again the binary search silently won't follow — deferred: no bug today, but it is the same duplicate-predicate trap that left the drain filter stale
 
-*(none open)*
+- [2026-08-06] [grill] main.py:1065 (trade_between) — `/trade-between` validates team codes, name resolution and self-trade, but never checks the cap: either side can end up over `SALARY_CAP` and the endpoint reports success. `evaluate_trade` shows cap_remaining for BOT-side trades, so the BOT path has a human check; a two-team trade between opponents has none. Surfaced while grilling the roster-capacity change (which added the roster-size guard next door) — deferred: needs an owner decision on whether an over-cap trade should be refused outright or allowed with a warning, since the league does permit temporary over-cap states that get resolved by buyouts
 
 ### frontend/UX
 

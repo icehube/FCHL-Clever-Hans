@@ -60,29 +60,32 @@ milp_solution = None
 last_trade_eval = None
 
 
-def _backfill_nhl_teams(csv_path: str = "data/players.csv"):
+# The backfills take the state explicitly rather than reading the global: a
+# candidate loaded off disk has to be validated BEFORE it is installed, or a
+# half-backfilled corrupt state is already the live one by the time it raises.
+def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv"):
     """Fill in nhl_team for roster players loaded from old state files."""
     import csv
     nhl_lookup: dict[str, str] = {}
     with open(csv_path) as f:
         for row in csv.DictReader(f):
             nhl_lookup[row["PLAYER"].strip()] = row["NHL TEAM"].strip()
-    for team in auction_state.teams.values():
+    for team in state.teams.values():
         for p in team.keeper_players + team.acquired_players + team.minor_players:
             if not p.nhl_team:
                 p.nhl_team = nhl_lookup.get(p.name, "")
 
 
-def _backfill_team_metadata(teams_path: str = "data/fchl_teams.json"):
+def _backfill_team_metadata(state: AuctionState, teams_path: str = "data/fchl_teams.json"):
     """Refresh team metadata (logos, colors) from fchl_teams.json for old state files."""
     with open(teams_path) as f:
         meta = json.load(f)
-    for code, team in auction_state.teams.items():
+    for code, team in state.teams.items():
         if code in meta:
             team.logo = meta[code].get("logo", team.logo)
 
 
-def _backfill_model_inputs():
+def _backfill_model_inputs(state: AuctionState):
     """Fill model inputs missing from pre-round-2 state files.
 
     pos_rank is recomputed over the remaining pool (approximate for
@@ -90,7 +93,7 @@ def _backfill_model_inputs():
     legacy snapshots ever hit this path). Goalie wins come from the
     projection stats file; unmatched goalies use the points fallback.
     """
-    pool = auction_state.available_players
+    pool = state.available_players
     if any(p.pos_rank <= 0 for p in pool.values()):
         for name, rank in compute_pos_ranks(pool).items():
             pool[name].pos_rank = rank
@@ -107,24 +110,55 @@ def _backfill_model_inputs():
             p.proj_wins = goalie_wins.get(p.name)
 
 
+def _load_saved_state(path: str) -> AuctionState | None:
+    """A usable state from `path`, or None with the reason logged.
+
+    Broad `except` on purpose, and it is handling rather than swallowing: this
+    runs at startup of a tool that may be four hours into a live auction, and
+    every alternative to degrading is worse than degrading. The narrow net it
+    replaces (JSONDecodeError/KeyError/ValueError) let an AttributeError from a
+    shape mismatch stop the app booting outright. A genuinely missing data file
+    still fails loudly — build_initial_state() reads the same CSVs and raises.
+    """
+    if not os.path.exists(path):
+        return None  # absent is not an error worth logging
+    try:
+        with open(path) as f:
+            state = AuctionState.from_json(f.read())
+        _backfill_nhl_teams(state)
+        _backfill_team_metadata(state)
+        _backfill_model_inputs(state)
+        return state
+    except Exception as e:
+        logging.warning("Cannot use %s: %s: %s", path, type(e).__name__, e)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
     global auction_state, model_params, model_prices
     os.makedirs(STATE_DIR, exist_ok=True)
     model_params = load_model_params()
+    # Recovery ladder: current -> backup -> fresh. A fresh state is 150 picks
+    # thrown away, so it is the last resort rather than the first fallback.
     saved_path = os.path.join(STATE_DIR, "auction_state.json")
-    if os.path.exists(saved_path):
+    auction_state = _load_saved_state(saved_path)
+    if auction_state is None and os.path.exists(saved_path):
+        # Move the unusable file aside rather than leaving it for _save_state
+        # to rotate over the good backup — one restart plus one click would
+        # otherwise destroy both copies. Renaming rather than an in-memory
+        # "don't trust the current file" flag because the outcome is then
+        # visible on disk: you can see what happened without reading the log.
         try:
-            with open(saved_path) as f:
-                auction_state = AuctionState.from_json(f.read())
-            _backfill_nhl_teams()
-            _backfill_team_metadata()
-            _backfill_model_inputs()
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            logging.warning("Corrupt state file, starting fresh: %s", e)
-            auction_state = build_initial_state()
-    else:
+            os.replace(saved_path, saved_path + ".corrupt")
+        except OSError as e:
+            logging.warning("Could not set aside %s: %s", saved_path, e)
+    if auction_state is None:
+        auction_state = _load_saved_state(saved_path + ".backup")
+        if auction_state is not None:
+            logging.warning("Recovered the draft from the backup file")
+    if auction_state is None:
         auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()

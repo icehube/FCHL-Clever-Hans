@@ -279,7 +279,13 @@ class TestDryRun:
 
     def test_12_atomic_save_backup(self, client):
         """Atomic save should create backup file."""
-        backup_path = "data/state/auction_state.json.backup"
+        # main.STATE_DIR, not the hardcoded data/state/ — conftest redirects the
+        # app to a temp dir precisely so pytest cannot read or clobber a real
+        # draft. Hardcoding it made this pass only on a machine that happened to
+        # have a live state file, and pass without ever exercising the app's own
+        # backup path.
+        import main
+        backup_path = os.path.join(main.STATE_DIR, "auction_state.json.backup")
         assert os.path.exists(backup_path), "Backup file should exist after saves"
         # Backup should be valid JSON
         with open(backup_path) as f:

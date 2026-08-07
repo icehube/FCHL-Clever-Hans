@@ -952,3 +952,88 @@ class TestOverCapRosterEdits:
         r = self._recall(client, "BOT", already_counted.name)
 
         assert r.headers.get("HX-Trigger") is None, r.headers.get("HX-Trigger")
+
+    def _cheapest_bot_player(self):
+        """Cheapest player on BOT's active roster.
+
+        Cheapest so the raises below stay well under MAX_SALARY — a clamp there
+        would add a second note and muddy which warning is being asserted.
+        """
+        import main
+        return min(main.auction_state.teams["BOT"].roster_players,
+                   key=lambda p: p.salary)
+
+    def _adjust(self, client, name: str, new_salary: float):
+        r = client.post("/adjust-salary", data={
+            "team_code": "BOT", "player_name": name, "new_salary": str(new_salary)})
+        assert r.status_code == 200
+        return r
+
+    def test_adjust_salary_over_cap_warns(self, client):
+        """`_legal_salary` clamps to MIN/MAX/increment but knows nothing of the cap."""
+        p = self._cheapest_bot_player()
+        self._squeeze("BOT", headroom=1.0)
+
+        new_salary = round(p.salary + 1.5, 1)
+        toast = _toast_of(self._adjust(client, p.name, new_salary))
+
+        assert toast.get("type") == "warning", toast
+        # Named subject, not a bare fact about the team: with no clamp note to
+        # lead, the cap note on its own would not say what caused it.
+        assert toast.get("message") == (
+            f"{p.name} set to ${new_salary}M — BOT $0.5M over cap"
+        ), toast
+
+    def test_adjust_salary_reports_clamp_and_overage_together(self, client):
+        """One toast, both clauses.
+
+        A fat-fingered figure is often off-increment AND too big at once. The
+        early `return` this replaced would have shipped the clamp note and
+        dropped the cap note on the floor — the more serious of the two.
+        """
+        p = self._cheapest_bot_player()
+        self._squeeze("BOT", headroom=1.0)
+
+        from main import _legal_salary
+        typed = round(p.salary + 1.55, 2)
+        # Assert the precondition rather than trust the arithmetic: which way
+        # $x.x5 quantizes depends on its float repr, and a data refresh moving
+        # the cheapest salary could land on an already-legal value, leaving this
+        # test passing for the wrong reason.
+        assert _legal_salary(typed) != typed, typed
+
+        message = _toast_of(self._adjust(client, p.name, typed)).get("message", "")
+
+        assert "adjusted from" in message, message
+        assert "over cap" in message, message
+
+    def test_adjust_salary_within_cap_keeps_its_old_behaviour(self, client):
+        """The control: neither wording nor silence changed for legal input."""
+        p = self._cheapest_bot_player()  # BOT has ~$26M of room at reset
+
+        legal = _toast_of(self._adjust(client, p.name, round(p.salary + 1.0, 1)))
+        assert legal == {}, legal
+
+        off_increment = _toast_of(self._adjust(client, p.name, 2.55))
+        assert off_increment.get("type") == "warning", off_increment
+        assert off_increment.get("message") == (
+            f"{p.name} set to $2.5M (adjusted from $2.55M)"
+        ), off_increment
+
+    def test_assign_over_cap_warns(self, client):
+        """The safety net, and the `to_minors or over` tier alongside it."""
+        import main
+        pool = sorted(main.auction_state.available_players.values(),
+                      key=lambda p: -p.projected_points)
+
+        legal = _toast_of(client.post("/assign", data={
+            "player": pool[0].name, "team": "BOT", "salary": "2.0"}))
+        assert legal.get("type") == "success", legal
+
+        self._squeeze("BOT", headroom=1.0)
+        toast = _toast_of(client.post("/assign", data={
+            "player": pool[1].name, "team": "BOT", "salary": "2.0"}))
+
+        assert toast.get("type") == "warning", toast
+        assert "BOT $1.0M over cap" in toast.get("message", ""), toast
+        assert f"{pool[1].name} → BOT at $2.0M" in toast.get("message", ""), toast

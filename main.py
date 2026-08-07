@@ -487,10 +487,16 @@ async def assign_player(
         auction_state.advance_nomination()
     _recompute()
     _save_state()
+    # Should essentially never fire: the league's commissioner software refuses
+    # bids a team cannot afford. Kept because it costs one pass over a roster
+    # next to a MILP solve, and leaving the busiest endpoint the silent one
+    # would make the same warning elsewhere hard to trust.
+    over = _cap_overages(team)
     return _toast(
         _render(request, "partials/all_panels.html"),
-        f"{p.name} → {team} at ${salary}M{clamp_note}{minors_note}",
-        "warning" if to_minors else "success",
+        f"{p.name} → {team} at ${salary}M{clamp_note}{minors_note}"
+        + (f" — {'; '.join(over)}" if over else ""),
+        "warning" if (to_minors or over) else "success",
     )
 
 
@@ -1062,17 +1068,29 @@ async def adjust_salary(
     _save_state()
     # Default context — see the note in /toggle-bench on the ctx["team"] leak.
     response = _render(request, "partials/all_panels.html")
+    # Two independent warnings can fire here, so collect rather than return on
+    # the first: a fat-fingered figure is often both off-increment AND too big.
+    notes: list[str] = []
     # Say so when the typed value wasn't recorded verbatim. This is the
     # typo-fix endpoint, so it sees the most fat-fingered input of any — and
     # silently storing something other than what was typed is the failure it
     # exists to correct. _log_change already formats to .1f, so before the
     # quantization the change log read "$2.5M" while the roster held 2.55.
     if clamped != new_salary:
-        return _toast(
-            response,
-            f"{player_name} set to ${clamped}M (adjusted from ${new_salary:g}M)",
-            "warning",
+        notes.append(
+            f"{player_name} set to ${clamped}M (adjusted from ${new_salary:g}M)"
         )
+    # _legal_salary clamps to MIN/MAX/increment but knows nothing about the cap,
+    # so a typo'd correction could put a team over and still read as a success.
+    over = _cap_overages(team_code)
+    if over:
+        # The cap note needs a subject. On its own it reads as a bare fact about
+        # the team, with nothing tying it to the edit that just caused it.
+        if not notes:
+            notes.append(f"{player_name} set to ${clamped}M")
+        notes.extend(over)
+    if notes:
+        return _toast(response, " — ".join(notes), "warning")
     return response
 
 

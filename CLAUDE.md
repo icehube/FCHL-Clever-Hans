@@ -98,7 +98,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 ### Owner decisions (2026-08-06)
 
 - The league **commissioner software refuses any bid that would leave a team unable to fill a full roster**. So `remaining_budget < spots_remaining * MIN_SALARY` is unreachable through legal bidding, and the MILP's `== spots` constraint is correct rather than over-strict — don't "fix" it.
-- **An over-cap trade warns, it does not refuse.** `/trade-between` should execute and return a warning toast naming the team and the overage; the league permits temporary over-cap states that get resolved by buyouts.
+- **Going over the cap warns, it does not refuse.** The league permits temporary over-cap states that get resolved by buyouts, so every endpoint that can raise a team's cap load executes and returns a warning toast naming the team and the overage — `/trade-between`, `/trade-execute`, `/assign`, `/adjust-salary`, `/move-to-roster`. Use the shared `_cap_overages()` helper; any new cap-raising endpoint joins the list.
 - Drafting past 24 **auto-routes to the minors** rather than being blocked, so a live sale never gets stopped by the tool.
 
 ## Key design decisions

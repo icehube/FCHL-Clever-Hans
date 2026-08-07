@@ -1,12 +1,14 @@
 """Tests for main.py: FastAPI endpoints."""
 
+import json
 import re
+import tempfile
 from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
 
-from config import MIN_SALARY, SALARY_CAP
+from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
 
 
 @pytest.fixture(scope="module")
@@ -840,3 +842,113 @@ class TestRoundThreeMutators:
         client.post("/team-done", data={"team_code": "MAC"})
         kinds = [c["kind"] for c in client.get("/state").json()["change_log"]]
         assert "team-done" in kinds
+
+
+def _toast_of(response) -> dict:
+    """The showToast payload an endpoint attached, or {} if it attached none."""
+    header = response.headers.get("HX-Trigger")
+    return json.loads(header)["showToast"] if header else {}
+
+
+class TestOverCapRosterEdits:
+    """Roster edits that can push a team over the cap must say so.
+
+    Owner decision 2026-08-06, first applied to trades and extended here: warn,
+    do not refuse. The league permits temporary over-cap states and resolves
+    them with buyouts, so blocking would stop a legal manoeuvre. The bug is that
+    an accidental over-cap edit looks exactly like a deliberate one.
+    """
+
+    @pytest.fixture
+    def client(self):
+        """Function-scoped, shadowing the module fixture on purpose.
+
+        These tests mangle a team's `penalties` to manufacture a near-cap state.
+        The module fixture resets once for the whole file, so a leaked cap would
+        follow every later test in it.
+        """
+        import main
+        main.STATE_DIR = tempfile.mkdtemp()
+        with TestClient(main.app) as c:
+            c.post("/reset")
+            yield c
+            c.post("/reset")
+
+    def _squeeze(self, code: str, headroom: float) -> None:
+        """Set `code`'s penalties so exactly `headroom` of cap space remains."""
+        import main
+        team = main.auction_state.teams[code]
+        team.penalties = 0.0
+        team._invalidate_cache()
+        team.penalties = round(SALARY_CAP - team.total_salary - headroom, 1)
+        team._invalidate_cache()
+
+    def _cap_free_minor(self, code: str):
+        """The priciest minor whose salary is NOT already on `code`'s cap.
+
+        Group A-E, i.e. the ordinary case: 145 of the 149 minors at reset. Their
+        salary lands on the cap only once they are recalled, which is the whole
+        gap under test.
+        """
+        import main
+        team = main.auction_state.teams[code]
+        cap_free = [m for m in team.minor_players if m.group not in MINOR_CAP_GROUPS]
+        assert cap_free, f"{code} has no cap-free minor to recall"
+        return max(cap_free, key=lambda m: m.salary)
+
+    def _recall(self, client, code: str, name: str):
+        r = client.post("/move-to-roster", data={
+            "team_code": code, "player_name": name})
+        assert r.status_code == 200
+        return r
+
+    def test_recall_over_cap_warns_and_names_the_team(self, client):
+        minor = self._cap_free_minor("BOT")
+        self._squeeze("BOT", headroom=minor.salary - 0.5)
+
+        toast = _toast_of(self._recall(client, "BOT", minor.name))
+
+        assert toast.get("type") == "warning", toast
+        assert "BOT $0.5M over cap" in toast.get("message", ""), toast
+        assert minor.name in toast.get("message", ""), toast
+
+    def test_recall_over_cap_still_happens(self, client):
+        """The owner decision, asserted on its own: warned, not refused."""
+        minor = self._cap_free_minor("BOT")
+        self._squeeze("BOT", headroom=minor.salary - 0.5)
+
+        self._recall(client, "BOT", minor.name)
+
+        bot = client.get("/state").json()["teams"]["BOT"]
+        assert minor.name in [p["name"] for p in bot["acquired_players"]]
+        assert minor.name not in [p["name"] for p in bot["minor_players"]]
+
+    def test_legal_recall_stays_silent(self, client):
+        """The control — and a pin on the deliberate lack of a success toast.
+
+        This endpoint had no toast at all before the cap check; the re-rendered
+        panels already show the move. Adding a green one would be a UX change
+        nobody asked for, so a legal recall must attach nothing.
+        """
+        minor = self._cap_free_minor("BOT")  # BOT has ~$26M of room at reset
+
+        r = self._recall(client, "BOT", minor.name)
+
+        assert r.headers.get("HX-Trigger") is None, r.headers.get("HX-Trigger")
+
+    def test_recalling_an_auto_routed_draftee_is_cap_neutral(self, client):
+        """Group 2/3 minors already count on the cap, so recall cannot add to it.
+
+        Proves the warning tracks `counts_on_cap` rather than merely firing
+        whenever a recall happens near the cap. Squeezed to $0.1M of room —
+        anything that charged the salary again would blow through it.
+        """
+        import main
+        team = main.auction_state.teams["BOT"]
+        already_counted = next(
+            m for m in team.minor_players if m.group in MINOR_CAP_GROUPS)
+        self._squeeze("BOT", headroom=0.1)
+
+        r = self._recall(client, "BOT", already_counted.name)
+
+        assert r.headers.get("HX-Trigger") is None, r.headers.get("HX-Trigger")

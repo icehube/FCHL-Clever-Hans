@@ -1124,7 +1124,19 @@ async def move_to_roster(
     _log_change("move-to-roster", team_code, f"{player_name} → active")
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    response = _render(request, "partials/all_panels.html")
+    # A group A-E minor is cap-free while down and cap-counted the moment it is
+    # recalled (PlayerOnRoster.counts_on_cap), and 145 of the 149 minors at reset
+    # are group A-E — so this is the ordinary recall, not an edge case. It went
+    # unreported because the endpoint had no toast at all on success.
+    over = _cap_overages(team_code)
+    if over:
+        return _toast(
+            response, f"{player_name} recalled — {'; '.join(over)}", "warning",
+        )
+    # Still silent on a legal recall: the panel re-render already shows the move,
+    # and the warning is the only new information here.
+    return response
 
 
 @app.post("/trade-between", response_class=HTMLResponse)

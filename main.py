@@ -575,6 +575,15 @@ def _context(request: Request) -> dict:
         c for c in auction_state.nomination_order if not auction_state.teams[c].is_done
     )
 
+    # Resolved once and read twice below. Written out at both keys, the two
+    # could be edited apart, and `buyout_dots_on_screen` disagreeing with
+    # `viewed_team` IS the bug the boolean exists to prevent — the Scan button
+    # offered against a panel that renders no dots for it to fill.
+    #
+    # Falls back to BOT rather than KeyError-ing, so a stored code that no
+    # longer resolves renders your own roster instead of a panel for nobody.
+    on_screen = auction_state.teams.get(_viewed_team, team)
+
     return {
         "request": request,
         "team": team,
@@ -583,18 +592,13 @@ def _context(request: Request) -> dict:
         # "I Give" list and the Buyout Analyzer act on: pointing that at the
         # team being viewed put an opponent's players in BOT's trade form
         # (fixed 2026-08-05). Only team_panel.html reads this.
-        #
-        # Falls back to BOT rather than KeyError-ing, so a stored code that no
-        # longer resolves renders your own roster instead of a panel for nobody.
-        "viewed_team": auction_state.teams.get(_viewed_team, team),
+        "viewed_team": on_screen,
         # Whether the `bo-` dot placeholders the buyout scan swaps into are
         # actually in the document — team_panel.html renders them for BOT only.
         # A DOM fact, deliberately not `viewed_team` itself: CLAUDE.md allows no
         # panel but team_panel.html to read that, and the rule exists to stop a
         # panel acting on the wrong roster. A boolean carries no roster.
-        "buyout_dots_on_screen": auction_state.teams.get(
-            _viewed_team, team
-        ).is_my_team,
+        "buyout_dots_on_screen": on_screen.is_my_team,
         "teams": auction_state.teams,
         "available_players": auction_state.available_players,
         "transaction_log": auction_state.transaction_log,

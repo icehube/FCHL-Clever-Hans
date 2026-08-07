@@ -6,12 +6,18 @@ validation responses.
 """
 
 import json
+import os
 import re
 
 import pytest
 from fastapi.testclient import TestClient
 
 from config import MAX_SALARY, MIN_SALARY
+
+# Repo-relative so the scan works from any rootdir pytest is invoked with.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEMPLATE_DIR = os.path.join(_REPO_ROOT, "templates")
+SHORTCUTS_JS = os.path.join(_REPO_ROOT, "static", "shortcuts.js")
 
 
 @pytest.fixture(scope="module")
@@ -217,6 +223,71 @@ class TestOOBSwapIDs:
         ids = re.findall(r'id="bo-([^"]+)"', r.text)
         for bid in ids:
             assert re.match(r'^[A-Za-z0-9_-]+$', bid), f"Invalid ID chars: bo-{bid}"
+
+
+class TestSwapTargetsResolve:
+    """Every hx-target must name an element that actually exists.
+
+    htmx fails a bad target *silently* — it logs to the console and swaps
+    nothing, so the app just looks dead. Nothing else catches this: the
+    endpoint tests assert what a response contains, never that the thing it
+    is aimed at is there. Added after the 2026-08-06 panel split re-pointed
+    seven triggers and one htmx.ajax call in shortcuts.js; a typo like
+    `#nomination_panel` would have passed the entire suite and only shown up
+    mid-draft as a key that did nothing.
+
+    Targets are collected from the templates and from shortcuts.js, which is
+    the only place a swap target lives outside an attribute.
+    """
+
+    def _targets(self) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for root, _, files in os.walk(TEMPLATE_DIR):
+            for name in files:
+                path = os.path.join(root, name)
+                with open(path) as fh:
+                    for m in re.finditer(r'hx-target="#([\w-]+)"', fh.read()):
+                        found.setdefault(m.group(1), []).append(path)
+        with open(SHORTCUTS_JS) as fh:
+            for m in re.finditer(r"target:\s*'#([\w-]+)'", fh.read()):
+                found.setdefault(m.group(1), []).append(SHORTCUTS_JS)
+        return found
+
+    def test_every_target_exists_in_the_rendered_page(self, client):
+        page = client.get("/").text
+        broken = {
+            target: sources
+            for target, sources in self._targets().items()
+            if f'id="{target}"' not in page
+        }
+        assert not broken, (
+            "hx-target names an element that does not exist — htmx will swap "
+            f"nothing and log only to the console: {broken}"
+        )
+
+    def test_the_split_panels_are_both_targeted_and_present(self, client):
+        """The two ids the panel split introduced, specifically."""
+        targets = self._targets()
+        page = client.get("/").text
+        for panel in ("nomination-panel", "bid-panel"):
+            assert panel in targets, f"#{panel} is no longer targeted by anything"
+            assert f'id="{panel}"' in page, f"#{panel} missing from the page"
+
+    def test_the_n_shortcut_targets_the_nomination_panel(self, client):
+        """The bare `n` key must not be able to reach the bid session.
+
+        This is the regression the split fixed: shortcuts.js fires /nominate
+        on a keypress whose guard only covers INPUT/TEXTAREA/SELECT, so focus
+        on a button leaves it live. Pointing it back at #auction-control would
+        restore the bug with every response-level test still green.
+        """
+        with open(SHORTCUTS_JS) as fh:
+            js = fh.read()
+        nominate = re.search(r"htmx\.ajax\('GET',\s*'/nominate',\s*\{([^}]*)\}", js)
+        assert nominate, "the /nominate shortcut is gone or was reshaped"
+        assert "'#nomination-panel'" in nominate.group(1), (
+            f"`n` must target #nomination-panel, got: {nominate.group(1)}"
+        )
 
 
 class TestPositionFilterAttributes:

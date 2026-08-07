@@ -750,6 +750,20 @@ class TestEveryMutatingPostTakesASnapshot:
     Same shape as `TestShortcutsModal`: a set-equality check over a list that
     is otherwise maintained by memory. Adding an endpoint means either taking a
     snapshot or naming it here with a reason, in the same commit.
+
+    **What this can and cannot prove.** It proves that a `save_snapshot()` call
+    appears somewhere in each handler's body. It does NOT prove the call is
+    reachable, that it runs before the mutation, or that it runs on every path
+    — a call inside a branch that never fires reads as covered. And it only
+    inspects `@app.post`; a GET that mutated `auction_state` would sail past.
+    No GET does today (checked 2026-08-07 across all 24 routes, and the two
+    that write anything write view state and the indicator cache, neither of
+    which undo is responsible for), but nothing here enforces that.
+
+    Those gaps are deliberate: the failure this exists to catch is a whole
+    endpoint written without a snapshot at all, which is what actually happens.
+    The per-endpoint undo tests in `tests/test_trade_buyout_undo.py` are what
+    prove a snapshot is taken on the path that matters.
     """
 
     # Every POST that legitimately takes no snapshot, and why. Not a

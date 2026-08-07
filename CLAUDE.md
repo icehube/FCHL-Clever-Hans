@@ -145,7 +145,28 @@ Verification loop for every change:
 ```bash
 pytest tests/ -v              # Run all tests
 pytest tests/test_market.py   # Run specific module tests
+pytest tests/ -m "not browser"  # Skip the Playwright tests
 ```
+
+### Browser tests
+
+`tests/test_browser_ui.py` drives the installed Google Chrome via Playwright,
+for the handful of things `TestClient` physically cannot answer: where an
+element sits on screen, whether a trigger re-fires, whether a click lands.
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt   # one-off; NO `playwright install`
+```
+
+`channel="chrome"` uses the system browser, so nothing is downloaded. The file
+`importorskip`s, so a checkout without the dev requirements still runs the full
+suite green — **keep it that way**: playwright must not become required, and it
+must never appear in `requirements.txt`, which has to install with the network
+down on draft day.
+
+Add a test there only if the endpoint tests genuinely cannot cover it; they are
+~100x faster. If one goes flaky mid-draft-prep, `-m "not browser"` is the
+escape hatch rather than deleting it.
 
 ## Testing
 

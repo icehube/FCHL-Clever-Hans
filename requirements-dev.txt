@@ -1,0 +1,7 @@
+# Test-only dependencies. Deliberately NOT in requirements.txt: the app must
+# install and run with the network down on draft day, and nothing needed only
+# by the test suite belongs in that path.
+#
+# playwright drives the installed Google Chrome via channel="chrome", so
+# `playwright install` is NOT needed and no browser is downloaded.
+playwright>=1.62

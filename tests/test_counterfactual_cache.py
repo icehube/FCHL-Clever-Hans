@@ -12,6 +12,7 @@ invalidation tells you to draft someone who has already been sold.
 
 import re
 import tempfile
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -269,6 +270,82 @@ class TestCacheActuallySaves:
         assert not main._counterfactual_cache, (
             "/bid-check populated the counterfactual cache — it should not "
             "compute one at all"
+        )
+
+
+class TestResponsesCannotOvertakeEachOther:
+    """Why the stale-counterfactual race is unreachable — and a tripwire.
+
+    The bid panel's mount targets a static `#bid-counterfactual`, and htmx
+    1.9.10 does not abort an in-flight XHR when the issuing element is removed
+    (verified in the vendored bundle: abort happens only through the
+    `htmx:abort` listener `hx-sync` fires). So *if* two `/explain` responses
+    could arrive out of order, a late one for player A would land inside the
+    panel now showing player B.
+
+    They cannot. `/explain` is `async def` but `_counterfactual` is a blocking
+    MILP solve, so it holds the single event loop for its whole ~200ms and
+    requests are serialised FIFO. Measured: firing a WARM request 20ms after a
+    COLD one still finished it last (202.5ms vs 198.8ms).
+
+    That is a property of how the endpoint is written, not a guarantee of the
+    design — and the obvious optimisation for the 200ms cold path is to move
+    the solve off the loop (`run_in_threadpool`, or simply dropping `async`),
+    which would make responses concurrent and reintroduce the hazard silently.
+    This test fails the moment that happens. The fix at that point is
+    `hx-sync="#app:replace"` on the mount in `bid_panel.html` — htmx stores
+    sync state on the resolved sync element, so `#app` survives panel swaps
+    where `this` cannot.
+    """
+
+    def test_a_warm_request_cannot_overtake_a_cold_one(self, client, live_server):
+        import threading
+        import urllib.parse
+
+        import httpx
+
+        httpx.post(f"{live_server}/reset", timeout=60)
+        ranked = sorted(
+            main.auction_state.available_players.values(),
+            key=lambda p: -p.projected_points,
+        )
+        cold, warm = ranked[0].name, ranked[1].name
+
+        # Warm one and leave the other cold, so the second request is the one
+        # with far less work to do — the only shape that could overtake.
+        httpx.get(
+            f"{live_server}/explain/{urllib.parse.quote(warm)}?inline=1", timeout=60
+        )
+        main._counterfactual_cache.pop(cold, None)
+
+        finished: dict[str, float] = {}
+
+        def fire(tag: str, name: str, delay: float) -> None:
+            time.sleep(delay)
+            start = time.perf_counter()
+            httpx.get(
+                f"{live_server}/explain/{urllib.parse.quote(name)}?inline=1",
+                timeout=60,
+            )
+            finished[tag] = time.perf_counter() - start + delay
+
+        threads = [
+            threading.Thread(target=fire, args=("cold", cold, 0.0)),
+            threading.Thread(target=fire, args=("warm", warm, 0.02)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert finished["warm"] > finished["cold"], (
+            f"a /explain request that started 20ms later finished FIRST "
+            f"(warm {finished['warm'] * 1000:.0f}ms vs cold "
+            f"{finished['cold'] * 1000:.0f}ms), so responses can now arrive out "
+            f"of order. The counterfactual mount targets a static id and htmx "
+            f"will not abort the superseded request, so a stale analysis can "
+            f"land under the wrong player. Add hx-sync=\"#app:replace\" to the "
+            f"mount in templates/partials/bid_panel.html."
         )
 
 

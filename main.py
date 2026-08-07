@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
 from data_loader import build_initial_state, load_goalie_wins
 from market import (
     MarketInfo,
@@ -273,6 +273,30 @@ def _legal_salary(value: float) -> float:
     the nearest and let the caller's toast make the change visible.
     """
     return round(max(MIN_SALARY, min(value, MAX_SALARY)), 1)
+
+
+def _cap_overages(*team_codes: str) -> list[str]:
+    """Teams currently over the cap, worst first, as '<CODE> $X.XM over cap'.
+
+    Trades are allowed to leave a team over — the league resolves those with
+    buyouts (owner decision 2026-08-06) — so this reports rather than blocks.
+    Without it an accidental over-cap trade returned the same green toast as a
+    legal one, which is the whole gap being closed.
+
+    An unknown or empty code is skipped by design: /trade-execute may have no
+    source_team, and the alternative is a conditional at every call site.
+    """
+    over: list[tuple[float, str]] = []
+    for code in team_codes:
+        team = auction_state.teams.get(code)
+        if team is None:
+            continue
+        # Round before testing: total_salary sums many $0.1M values, so float
+        # noise would otherwise report "$0.0M over cap" on an exactly-legal team.
+        overage = round(team.total_salary - SALARY_CAP, 1)
+        if overage > 0:
+            over.append((overage, f"{code} ${overage:.1f}M over cap"))
+    return [msg for _, msg in sorted(over, reverse=True)]
 
 
 def _toast(response: HTMLResponse, message: str, toast_type: str = "info") -> HTMLResponse:
@@ -660,9 +684,11 @@ async def trade_execute(request: Request, trade_id: str = Form("")):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
+    over = _cap_overages(MY_TEAM, source_team)
     return _toast(
         _render(request, "partials/all_panels.html"),
-        "Trade executed", "success",
+        "Trade executed" + (f" — {'; '.join(over)}" if over else ""),
+        "warning" if over else "success",
     )
 
 
@@ -1161,9 +1187,15 @@ async def trade_between(
     _recompute()
     _save_state()
     note = f" ({'; '.join(demoted)} — roster full)" if demoted else ""
+    over = _cap_overages(team_a, team_b)
+    if over:
+        note += f" — {'; '.join(over)}"
     return _toast(
         _render(request, "partials/all_panels.html"),
-        f"Trade executed: {team_a} ↔ {team_b}{note}", "success",
+        f"Trade executed: {team_a} ↔ {team_b}{note}",
+        # A demotion alone stays a success: that note is informational and
+        # pre-dates this. Only going over the cap lifts the tier.
+        "warning" if over else "success",
     )
 
 

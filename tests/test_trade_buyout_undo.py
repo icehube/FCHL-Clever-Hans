@@ -518,3 +518,164 @@ class TestTwoTeamTradeFlow:
         assert sorted(by_team["BOT"]) == ["trade_in", "trade_out"], by_team
         assert sorted(by_team[source_code]) == ["trade_in", "trade_out"], by_team
 
+
+def _toast_of(response) -> dict:
+    """The showToast payload an endpoint attached, or {} if it attached none."""
+    header = response.headers.get("HX-Trigger")
+    return json.loads(header)["showToast"] if header else {}
+
+
+class TestOverCapTradesWarn:
+    """A trade may leave a team over the cap; it must not look like it didn't.
+
+    Owner decision 2026-08-06: warn, do not refuse — the league permits
+    temporary over-cap states and resolves them with buyouts. So the bug was
+    never that the trade went through, it was that it returned the same green
+    "Trade executed" as a legal one.
+    """
+
+    @pytest.fixture
+    def client(self):
+        """Function-scoped, shadowing the module fixture deliberately.
+
+        These tests push a team near the cap by writing `penalties`. The module
+        fixture resets once for the whole file, so that mangled cap would leak
+        into every test after them — which is a tracked backlog finding on its
+        own and not worth feeding.
+        """
+        from main import app
+        with TestClient(app) as c:
+            c.post("/reset")
+            yield c
+            c.post("/reset")
+
+    def _squeeze(self, code: str, headroom: float) -> None:
+        """Set `code`'s penalties so exactly `headroom` of cap space remains."""
+        import main as _main
+        team = _main.auction_state.teams[code]
+        team.penalties = 0.0
+        team._invalidate_cache()
+        team.penalties = round(SALARY_CAP - team.total_salary - headroom, 1)
+        team._invalidate_cache()
+
+    def _stock(self, client, code: str, salary: float) -> str:
+        """Assign the priciest available player to `code` at `salary`."""
+        import main as _main
+        name = max(_main.auction_state.available_players.values(),
+                   key=lambda p: p.projected_points).name
+        r = client.post("/assign", data={
+            "player": name, "team": code, "salary": str(salary)})
+        assert r.status_code == 200
+        return name
+
+    def _trade(self, client, a: str, b: str, from_a: str, from_b: str):
+        return client.post("/trade-between", data={
+            "team_a": a, "team_b": b,
+            "players_from_a": from_a, "players_from_b": from_b,
+        })
+
+    def test_over_cap_trade_still_executes(self, client):
+        """The owner decision, asserted first: warn, never refuse."""
+        expensive = self._stock(client, "BOT", 9.0)
+        cheap = self._stock(client, "SRL", 0.5)
+        self._squeeze("SRL", headroom=1.0)
+
+        r = self._trade(client, "BOT", "SRL", expensive, cheap)
+        assert r.status_code == 200
+
+        srl = _get_state(client)["teams"]["SRL"]
+        assert expensive in _roster_names(srl), (
+            "the trade was refused or rolled back — the decision was to warn"
+        )
+
+    def test_over_cap_trade_warns_and_names_the_team(self, client):
+        expensive = self._stock(client, "BOT", 9.0)
+        cheap = self._stock(client, "SRL", 0.5)
+        self._squeeze("SRL", headroom=1.0)
+
+        toast = _toast_of(self._trade(client, "BOT", "SRL", expensive, cheap))
+        assert toast.get("type") == "warning", toast
+        assert "SRL" in toast["message"] and "over cap" in toast["message"], toast
+        # SRL had $1.0M of room, gave up $0.5M and took on $9.0M -> $7.5M over.
+        assert "$7.5M over cap" in toast["message"], toast
+
+    def test_legal_trade_stays_a_plain_success(self, client):
+        """The control. If a legal trade also warns, the warning means nothing."""
+        a_player = self._stock(client, "BOT", 2.0)
+        b_player = self._stock(client, "SRL", 2.0)
+
+        toast = _toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
+        assert toast.get("type") == "success", toast
+        assert "over cap" not in toast["message"], toast
+
+    def test_both_sides_over_cap_are_both_named(self, client):
+        """Reporting one side would hide half the problem.
+
+        Note what the setup has to do. In a two-team trade the salary deltas
+        are equal and opposite, so a trade cannot push both sides over on its
+        own — one side's gain is exactly the other's relief. Both being over
+        therefore means both were already over (buyout penalties, typically)
+        and the swap left them there. That is the case this pins: the helper
+        reports post-trade truth for every team it was given, not just the one
+        whose salary went up.
+        """
+        a_player = self._stock(client, "BOT", 2.0)
+        b_player = self._stock(client, "SRL", 1.0)
+        self._squeeze("BOT", headroom=-3.0)   # already $3.0M over
+        self._squeeze("SRL", headroom=-3.0)
+
+        toast = _toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
+        assert toast.get("type") == "warning", toast
+        # BOT sheds $1.0M net (over by 2.0), SRL takes it on (over by 4.0).
+        assert "BOT $2.0M over cap" in toast["message"], toast
+        assert "SRL $4.0M over cap" in toast["message"], toast
+        # Worst first, so the most urgent number is the one you read.
+        assert toast["message"].index("SRL") < toast["message"].index("BOT $"), toast
+
+    def test_exactly_at_the_cap_is_not_over(self, client):
+        """Boundary: at SALARY_CAP a team is legal, not over.
+
+        This is what the rounding in _cap_overages is for — total_salary sums
+        many $0.1M values, and raw float noise reports "$0.0M over cap" on a
+        team that is exactly legal.
+        """
+        import main as _main
+        a_player = self._stock(client, "BOT", 2.0)
+        b_player = self._stock(client, "SRL", 2.0)
+        # Leave SRL landing exactly on the cap after an even-salary swap.
+        self._squeeze("SRL", headroom=0.0)
+
+        toast = _toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
+        srl = _main.auction_state.teams["SRL"]
+        assert round(srl.total_salary, 1) == SALARY_CAP, "fixture missed the boundary"
+        assert toast.get("type") == "success", toast
+        assert "over cap" not in toast["message"], toast
+
+    def test_trade_execute_warns_too(self, client):
+        """The BOT-side path has the same gap."""
+        import main as _main
+        state = _get_state(client)
+        source_code, source = next(
+            (c, t) for c, t in state["teams"].items()
+            if c != "BOT" and t.get("keeper_players")
+        )
+        receive = source["keeper_players"][0]
+        give = self._stock(client, "BOT", 0.5)
+        self._squeeze("BOT", headroom=0.0)
+
+        client.post("/trade-evaluate", data={
+            "give_player": [give],
+            "source_team": source_code,
+            "receive_player": [json.dumps({
+                "name": receive["name"], "position": receive["position"],
+                "salary": receive["salary"],
+                "projected_points": receive["projected_points"],
+            })],
+        })
+        r = client.post("/trade-execute", data={
+            "trade_id": _main.last_trade_eval.trade_id})
+        assert r.status_code == 200
+        toast = _toast_of(r)
+        assert toast.get("type") == "warning", toast
+        assert "BOT" in toast["message"] and "over cap" in toast["message"], toast
+

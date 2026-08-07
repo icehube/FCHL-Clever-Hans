@@ -404,11 +404,18 @@ def _recompute_buyout_indicators():
     team = auction_state.teams[MY_TEAM]
     current_pts = milp_solution.total_points if milp_solution and milp_solution.status == "Optimal" else 0
     buyout_indicators = {}
-    # Active roster only, and only what's eligible. Roster because the dots
-    # render into placeholders in the team table, which lists no minors — every
-    # solve for a minors player would be thrown away. Eligible because a dot
+    # Active roster only, and only what's eligible. Eligible because a dot
     # beside a player who can't be bought out is worse than no dot: it reads as
     # a verdict on a decision that isn't available.
+    #
+    # Roster-only is the part that is now just a GAP, not a reason. This used to
+    # say the team table lists no minors, so a solve for one would be thrown
+    # away — team_panel.html has rendered a Minors table since, and the Buyout
+    # Analyzer already offers those players (all_players, since location is
+    # irrelevant to eligibility). So the scan silently under-reports on the
+    # 4 eligible minors BOT holds at reset. Tracked in BACKLOG.md; the work is a
+    # dot column plus widening this to all_players, measured at ~+0.5s on a
+    # ~1.4s scan.
     for p in (q for q in team.roster_players if q.can_be_bought_out):
         try:
             clone = deepcopy(auction_state)

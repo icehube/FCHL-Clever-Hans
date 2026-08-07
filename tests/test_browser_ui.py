@@ -234,52 +234,69 @@ class TestBiddingSessionSurvives:
 class TestLayoutAndToasts:
     """The two things no assertion on HTML can reach: CSS and runtime JS."""
 
-    def test_narrow_viewport_stacks_the_columns(self, page, live_server):
-        """The 1-col breakpoint, shipped and never once looked at."""
-        page.set_viewport_size({"width": 420, "height": 900})
-        _open(page, live_server)
-
+    def _column_xs(self, page) -> set[int]:
         areas = [
             page.locator(f".{cls}").first.bounding_box()
             for cls in ("area-auction", "area-players", "area-team")
         ]
-        assert all(a is not None for a in areas)
-        xs = {round(a["x"]) for a in areas}
-        assert len(xs) == 1, f"columns did not stack at 420px wide: x positions {xs}"
+        assert all(a is not None for a in areas), "a grid area did not render"
+        return {round(a["x"]) for a in areas}
 
-    def test_an_over_cap_toast_renders_and_dismisses(self, page, live_server):
+    def test_the_layout_responds_to_width(self, page, live_server):
+        """The breakpoints, shipped and never once looked at.
+
+        BOTH ends are asserted on purpose. Checking only the narrow case passes
+        even with every `@media` rule deleted — verified by mutation: removing
+        both queries destroys the 3-column desktop layout the draft is actually
+        run in, and a stacked-only assertion notices nothing.
+        """
+        page.set_viewport_size({"width": 420, "height": 900})
+        _open(page, live_server)
+        narrow = self._column_xs(page)
+        assert len(narrow) == 1, f"columns did not stack at 420px: {narrow}"
+
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.wait_for_function(
+            "() => document.querySelector('.area-players').getBoundingClientRect().x > 0"
+        )
+        wide = self._column_xs(page)
+        assert len(wide) == 3, (
+            f"columns did not spread at 1280px: {wide} — the media queries are "
+            f"gone or the grid template changed, and the draft runs at this width"
+        )
+
+    def test_an_over_cap_adjust_salary_toast_renders_and_dismisses(
+        self, page, live_server
+    ):
         """Pins the class name shortcuts.js builds at RUNTIME.
 
         `'alert-' + type` is invisible to any source scanner, which is the
         specific hazard recorded against the Tailwind-build backlog item. It
         survives today only because DaisyUI's prebuilt CSS carries every
         alert-* variant; this is what would catch a build that dropped them.
+
+        Fired through `htmx.ajax` rather than a clicked control: the toast is
+        driven by the `HX-Trigger` response header, so the request has to come
+        from the page. An out-of-band `page.request.post` mutates state and
+        produces no toast at all — an earlier draft of this test did exactly
+        that, and the assertion below was passing on a *different* endpoint's
+        toast than the one it appeared to set up.
         """
         _open(page, live_server)
         team = main.auction_state.teams["BOT"]
-        minor = max(
-            (m for m in team.minor_players if not m.counts_on_cap),
-            key=lambda m: m.salary,
-        )
-        _squeeze("BOT", headroom=minor.salary - 0.5)
-
-        page.request.post(
-            f"{live_server}/move-to-roster",
-            form={"team_code": "BOT", "player_name": minor.name},
-        )
-        # Drive it through the UI so the HX-Trigger header reaches the JS
-        # listener; a bare request would not exercise the toast at all.
-        page.reload(wait_until="domcontentloaded")
+        subject = min(team.roster_players, key=lambda p: p.salary).name
         _squeeze("BOT", headroom=0.4)
+
         with page.expect_response(re.compile(r"/adjust-salary")):
             page.evaluate(
                 """([name]) => htmx.ajax('POST', '/adjust-salary', {
                        target: '#app', swap: 'innerHTML',
                        values: {team_code: 'BOT', player_name: name, new_salary: '9.9'}})""",
-                [team.roster_players[0].name],
+                [subject],
             )
 
         toast = page.locator("#toast-container .alert-warning")
         toast.wait_for(state="visible", timeout=5000)
-        assert "over cap" in toast.inner_text()
+        text = toast.inner_text()
+        assert "over cap" in text and "BOT" in text, text
         toast.wait_for(state="detached", timeout=8000)

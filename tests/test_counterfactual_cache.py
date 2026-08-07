@@ -318,16 +318,18 @@ class TestResponsesCannotOvertakeEachOther:
         )
         main._counterfactual_cache.pop(cold, None)
 
+        sent: dict[str, float] = {}
         finished: dict[str, float] = {}
+        origin = time.perf_counter()
 
         def fire(tag: str, name: str, delay: float) -> None:
             time.sleep(delay)
-            start = time.perf_counter()
+            sent[tag] = time.perf_counter() - origin
             httpx.get(
                 f"{live_server}/explain/{urllib.parse.quote(name)}?inline=1",
                 timeout=60,
             )
-            finished[tag] = time.perf_counter() - start + delay
+            finished[tag] = time.perf_counter() - origin
 
         threads = [
             threading.Thread(target=fire, args=("cold", cold, 0.0)),
@@ -338,6 +340,16 @@ class TestResponsesCannotOvertakeEachOther:
         for t in threads:
             t.join()
 
+        # Precondition, not the finding. If thread scheduling ever sends the
+        # warm request first, the ordering assertion below is meaningless and
+        # would fail with a message sending someone after a race that did not
+        # happen. Measured 0 inversions in 5 trials under 20-core load, so this
+        # is insurance rather than an observed problem.
+        assert sent["cold"] < sent["warm"], (
+            f"the cold request was not sent first (cold {sent['cold'] * 1000:.1f}ms, "
+            f"warm {sent['warm'] * 1000:.1f}ms) — scheduling noise, not a finding; "
+            f"re-run"
+        )
         assert finished["warm"] > finished["cold"], (
             f"a /explain request that started 20ms later finished FIRST "
             f"(warm {finished['warm'] * 1000:.0f}ms vs cold "

@@ -51,11 +51,23 @@ def _a_player(skip: set[str] | None = None):
 
 
 @pytest.fixture
-def count_solves(monkeypatch):
-    """Count MILP solves. The deterministic proxy for 'did we recompute?'.
+def count_marginal_solves(monkeypatch):
+    """Count the MILP solves the cache is meant to remove — and only those.
 
-    Asserting on wall-clock time would go flaky the moment the suite runs under
-    load; the solve count is the actual thing the cache removes.
+    Deliberately narrow. This patches the `optimizer` module attribute, which
+    `compute_marginal_value` resolves at call time, so it sees the ~10 solves of
+    the binary search. It does NOT see `_recompute()`'s own solve: main.py did
+    `from optimizer import solve_optimal_roster`, binding the name directly, so
+    that call never looks the attribute up again. `/assign` therefore reports
+    zero here while genuinely performing one solve.
+
+    That is the right thing to measure — marginal solves are exactly what the
+    cache eliminates — but the distinction is invisible at the call site, so it
+    is spelled out rather than left for someone to conclude that /assign solves
+    nothing.
+
+    Counting rather than timing: wall-clock assertions go flaky the moment the
+    suite runs under load, and the solve count is the actual cause.
     """
     calls = {"n": 0}
     real = optimizer.solve_optimal_roster
@@ -159,38 +171,38 @@ class TestCacheActuallySaves:
         data.update(over)
         return client.post("/bid-check", data=data)
 
-    def test_price_step_performs_no_solves(self, client, count_solves):
+    def test_price_step_performs_no_solves(self, client, count_marginal_solves):
         name = _a_player().name
         self._bid(client, name, price="3.0")
-        first = count_solves["n"]
+        first = count_marginal_solves["n"]
         assert first > 0, "the first check must actually compute something"
 
-        count_solves["n"] = 0
+        count_marginal_solves["n"] = 0
         for price in ("3.1", "3.2", "3.3", "3.4"):
             self._bid(client, name, price=price)
-        assert count_solves["n"] == 0, (
-            f"stepping the price re-solved {count_solves['n']} times; the "
+        assert count_marginal_solves["n"] == 0, (
+            f"stepping the price re-solved {count_marginal_solves['n']} times; the "
             f"marginal does not depend on price"
         )
 
-    def test_bidder_toggle_performs_no_solves(self, client, count_solves):
+    def test_bidder_toggle_performs_no_solves(self, client, count_marginal_solves):
         """Bidders move the ceiling, never the marginal."""
         name = _a_player().name
         self._bid(client, name)
-        count_solves["n"] = 0
+        count_marginal_solves["n"] = 0
         for bidders in ("BOT,SRL", "BOT,SRL,MAC,LPT", "BOT", "BOT,GVR"):
             self._bid(client, name, bidders=bidders)
-        assert count_solves["n"] == 0
+        assert count_marginal_solves["n"] == 0
 
-    def test_a_mutation_makes_it_recompute(self, client, count_solves):
+    def test_a_mutation_makes_it_recompute(self, client, count_marginal_solves):
         """Guards the counter itself: zero everywhere would also 'pass' above."""
         name = _a_player(skip={"Artemi Panarin"}).name
         self._bid(client, name)
         client.post("/assign", data={
             "player": "Artemi Panarin", "team": "BOT", "salary": "5.0"})
-        count_solves["n"] = 0
+        count_marginal_solves["n"] = 0
         self._bid(client, name)
-        assert count_solves["n"] > 0, (
+        assert count_marginal_solves["n"] > 0, (
             "after a roster change the marginal must be recomputed, not served"
         )
 

@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 import main
 import optimizer
-from config import MIN_SALARY, MY_TEAM
+from config import MY_TEAM
 from optimizer import generate_counterfactual
 
 
@@ -33,10 +33,16 @@ def client():
 
 
 def _fresh(player):
-    """Counterfactual computed from scratch against the CURRENT state."""
+    """Counterfactual computed from scratch against the CURRENT state.
+
+    Price comes from `main._cf_price`, deliberately not re-derived here. It
+    quantizes to the $0.1M increment, and a hand-rolled copy of the lookup
+    would compare the cache against a solve at a *different* price — the first
+    draft of this file did exactly that and reported a phantom cache bug.
+    """
     return generate_counterfactual(
         player,
-        main.market_prices.get(player.name, MIN_SALARY),
+        main._cf_price(player.name),
         main.auction_state.teams[MY_TEAM],
         main.auction_state.available_players,
         main.market_prices,
@@ -158,6 +164,46 @@ class TestCacheStaysTrue:
         main._counterfactual(first)
         main._counterfactual(second)
         assert set(main._counterfactual_cache) == {first.name, second.name}
+
+
+class TestSolvedAtALegalPrice:
+    """The counterfactual must be run at a price the auction can actually reach.
+
+    Market prices come off a log-normal, so essentially none of them land on the
+    $0.1M increment — 704 of 704 at reset. Forcing a player in at
+    $9.5476934838794 plans the roster around a price no bid can produce, while
+    the panel rounds it to "$9.5M" in the verdict sentence. Same class as the
+    typed-salary quantization `_legal_salary` exists to fix; it survived here
+    because the counterfactual used to sit behind a DROP-only link, and this is
+    now on screen for every player under the hammer.
+    """
+
+    def test_every_market_price_quantizes(self, client):
+        illegal = [
+            name for name in main.market_prices
+            if round(main._cf_price(name), 1) != main._cf_price(name)
+        ]
+        assert not illegal, f"{len(illegal)} counterfactual prices off the increment"
+
+    def test_the_raw_market_price_really_is_illegal(self, client):
+        """Guards the test above from passing vacuously.
+
+        If market prices ever became pre-quantized upstream, the assertion
+        would hold with `_cf_price` doing nothing — and someone could then
+        delete the round() without a failure.
+        """
+        raw = [p for p in main.market_prices.values() if round(p, 1) != p]
+        assert raw, (
+            "market prices are already on the increment, so _cf_price's "
+            "quantization is untested — re-check whether it is still needed"
+        )
+
+    def test_the_panel_quotes_the_price_it_solved_at(self, client):
+        name = _a_player().name
+        body = client.get(f"/explain/{name}?inline=1").text
+        quoted = re.search(r"(?:Skip him|Worth having|Toss-up) at \$([\d.]+)M", body)
+        assert quoted, body[:300]
+        assert float(quoted.group(1)) == main._cf_price(name)
 
 
 class TestCacheActuallySaves:

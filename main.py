@@ -177,11 +177,18 @@ _counterfactual_cache: dict[str, CounterfactualResult] = {}
 def _cf_price(player_name: str) -> float:
     """The price a counterfactual is conditioned on: the expected clearing price.
 
+    Quantized to the $0.1M auction increment, for the same reason
+    `_legal_salary` quantizes a typed one: market prices come off a log-normal
+    and are essentially never legal prices — all 704 of them at reset — so
+    forcing a player in at $9.5476934838794 plans the roster around a price the
+    auction cannot produce, while the panel quotes "$9.5M". Small in dollars,
+    but it is a number on screen that no bid can ever match.
+
     One definition, because the analysis and the sentence describing it are
     computed in different places and a drift between them would show a verdict
     ("Skip him at $9.5M") derived from a different number than the one quoted.
     """
-    return market_prices.get(player_name, MIN_SALARY)
+    return round(market_prices.get(player_name, MIN_SALARY), 1)
 
 
 def _counterfactual(player: Player) -> CounterfactualResult:
@@ -217,8 +224,9 @@ def _counterfactual_context(player_name: str) -> dict | None:
         "counterfactual": _counterfactual(p),
         "cf_player": p,
         # The whole verdict is conditioned on this price — without it the panel
-        # shows a points delta the reader can't judge.
-        "cf_price": round(_cf_price(player_name), 1),
+        # shows a points delta the reader can't judge. Already quantized, so
+        # what is quoted is exactly what was solved.
+        "cf_price": _cf_price(player_name),
     }
 
 

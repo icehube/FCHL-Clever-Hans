@@ -222,12 +222,19 @@ class TestCounterfactualVerdict:
     """
 
     def _delta(self, main, name: str) -> float:
-        """The engine's roster delta for this player at his market price."""
+        """The engine's roster delta for this player at his market price.
+
+        Takes the price from `main._cf_price` rather than re-deriving it: the
+        endpoint solves at the quantized price, and a hand-rolled copy here
+        would predict the verdict from a different number than the one the
+        panel was rendered with — which at a sign boundary is a test that
+        fails for no real reason.
+        """
         from optimizer import generate_counterfactual
 
         pool = main.auction_state.available_players
         cf = generate_counterfactual(
-            pool[name], main.market_prices.get(name, 0.5),
+            pool[name], main._cf_price(name),
             main.auction_state.teams[main.MY_TEAM], pool, main.market_prices,
         )
         return cf.points_difference

@@ -377,6 +377,15 @@ class TestPanelContextIsolation:
     team and render all_panels.html. But `team` defaults to BOT and feeds the
     Trade "I Give" dropdown and buyout controls, so editing an opponent loaded
     THEIR players into BOT's trade form — a wrong trade waiting to happen.
+
+    Each case OPENS the opponent's panel first, and that line is the whole test.
+    While the edited code travelled with the request, posting the edit was
+    enough to make `viewed_team` an opponent; now the view is held in
+    `main._viewed_team`, so a request that never opened SRL leaves it on BOT and
+    a leak of `viewed_team` into another panel would leak BOT into BOT — a guard
+    passing because there is nothing on the far side of it. Opening the panel is
+    also the only way the edit happens for real: every one of these controls
+    renders inside team_panel.html.
     """
 
     def _give_options(self, html: str) -> str:
@@ -387,6 +396,7 @@ class TestPanelContextIsolation:
     def test_toggle_bench_on_opponent_keeps_trade_panel_on_bot(self, client):
         import main
 
+        client.get("/team-view/SRL")
         opponent = main.auction_state.teams["SRL"]
         bot = main.auction_state.teams["BOT"]
         victim = opponent.roster_players[0].name
@@ -405,6 +415,7 @@ class TestPanelContextIsolation:
     def test_adjust_salary_on_opponent_keeps_trade_panel_on_bot(self, client):
         import main
 
+        client.get("/team-view/MAC")
         opponent = main.auction_state.teams["MAC"]
         bot = main.auction_state.teams["BOT"]
         target = opponent.roster_players[0]
@@ -428,10 +439,17 @@ class TestViewedTeamSurvivesEdits:
     is open, and returning the default context snapped it back to BOT, so
     auditing another team meant re-opening it after each edit.
 
-    The two are one decision, which is why they sit together. `viewed_team`
-    moves with the edit; `team` stays BOT so the Trade and Buyout panels keep
+    The two are one decision, which is why they sit together. `viewed_team` is
+    the panel on screen; `team` stays BOT so the Trade and Buyout panels keep
     acting on BOT's roster. A change that satisfies this class by moving `team`
     fails the class above.
+
+    Each case opens the team first, because that is the only way the edit can
+    happen: every one of these controls is rendered INSIDE team_panel.html, so
+    you cannot click Bench for a roster that is not on screen. The endpoints no
+    longer take the view along with them — `main._viewed_team` holds it, and
+    they simply do not disturb it — which is what also fixed their error
+    branches, covered by TestTheViewSticks.
     """
 
     @pytest.fixture
@@ -457,6 +475,7 @@ class TestViewedTeamSurvivesEdits:
         return main.auction_state.teams[code].roster_players[0]
 
     def test_toggle_bench_stays_on_the_edited_team(self, client):
+        client.get("/team-view/SRL")
         r = client.post("/toggle-bench", data={
             "team_code": "SRL", "player_name": self._victim("SRL").name,
         })
@@ -464,6 +483,7 @@ class TestViewedTeamSurvivesEdits:
         assert self._panel_team(r.text) == "SRL"
 
     def test_adjust_salary_stays_on_the_edited_team(self, client):
+        client.get("/team-view/SRL")
         p = self._victim("SRL")
         r = client.post("/adjust-salary", data={
             "team_code": "SRL", "player_name": p.name, "new_salary": str(p.salary),
@@ -472,6 +492,7 @@ class TestViewedTeamSurvivesEdits:
         assert self._panel_team(r.text) == "SRL"
 
     def test_move_to_minors_stays_on_the_edited_team(self, client):
+        client.get("/team-view/SRL")
         p = self._victim("SRL")
         # Benched is the precondition for the ↓ Minors control (team_panel.html)
         client.post("/toggle-bench", data={"team_code": "SRL", "player_name": p.name})
@@ -483,6 +504,7 @@ class TestViewedTeamSurvivesEdits:
 
     def test_move_to_roster_stays_on_the_edited_team(self, client):
         import main
+        client.get("/team-view/SRL")
         p = self._victim("SRL")
         client.post("/toggle-bench", data={"team_code": "SRL", "player_name": p.name})
         client.post("/move-to-minors", data={"team_code": "SRL", "player_name": p.name})
@@ -497,6 +519,7 @@ class TestViewedTeamSurvivesEdits:
     def test_trade_between_stays_on_the_initiating_team(self, client):
         """team_a is the panel the form was posted from, not a trade participant
         chosen at random — the hidden input is that panel's own code."""
+        client.get("/team-view/SRL")
         r = client.post("/trade-between", data={
             "team_a": "SRL", "team_b": "MAC",
             "players_from_a": self._victim("SRL").name,
@@ -1216,3 +1239,175 @@ class TestOverCapRosterEdits:
         assert toast.get("type") == "warning", toast
         assert "BOT $1.0M over cap" in toast.get("message", ""), toast
         assert f"{pool[1].name} → BOT at $2.0M" in toast.get("message", ""), toast
+
+
+class TestTheViewSticks:
+    """Which roster is on screen must survive anything that is not a pick.
+
+    Before the view moved server-side, each endpoint that rendered
+    all_panels.html had to pass the team code along, and the ones that forgot
+    threw you back to BOT: /team-done, /trade-execute, and — worst — the ERROR
+    branch of all five roster-edit endpoints, so a failed salary fix cost you
+    the roster you were auditing at the moment you most needed to look at it.
+
+    `_viewed_team` is now read in `_context`, so there is nothing left to
+    forget. These pin the behaviour rather than the mechanism: every case goes
+    through the HTTP surface and asserts on the rendered panel.
+    """
+
+    @pytest.fixture
+    def viewing_srl(self, client):
+        """Open an opponent's roster, the way clicking their row does."""
+        r = client.get("/team-view/SRL")
+        assert "(SRL)" in section_of(r.text, "team-panel")
+        yield "SRL"
+        client.get(f"/team-view/{'BOT'}")
+
+    def _panel_team(self, html: str) -> str:
+        panel = section_of(html, "team-panel")
+        m = re.search(r"\((\w{3})\)", panel)
+        assert m, "no team code in the team panel"
+        return m.group(1)
+
+    def test_team_done_keeps_the_view(self, client, viewing_srl):
+        """The backlog entry: a League State toggle is not a view change."""
+        r = client.post("/team-done", data={"team_code": "GVR"})
+        assert self._panel_team(r.text) == "SRL"
+        client.post("/team-done", data={"team_code": "GVR"})
+
+    def test_a_failed_roster_edit_keeps_the_view(self, client, viewing_srl):
+        """The unflagged one, and the reason this was worth doing.
+
+        A player traded away between render and click returns a warning — and
+        used to return you to BOT with it, right when you need to look again at
+        what you just tried to edit.
+        """
+        r = client.post("/adjust-salary", data={
+            "team_code": "SRL", "player_name": "Nobody At All", "new_salary": "2.0",
+        })
+        assert "no longer on SRL" in toast_of(r)["message"]
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_an_unknown_team_edit_keeps_the_view(self, client, viewing_srl):
+        """The other error branch — validation rejects before touching state."""
+        r = client.post("/toggle-bench", data={
+            "team_code": "FAKE", "player_name": "Nobody",
+        })
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_assign_returns_the_view_to_my_team(self, client, viewing_srl):
+        """Owner decision 2026-08-07, now pinned rather than assumed.
+
+        Reading an opponent's Cap Used as your own right after a pick lands is
+        worse than having to re-open their roster.
+        """
+        import main
+
+        player = next(iter(main.auction_state.available_players))
+        r = client.post("/assign", data={
+            "player": player, "team": "BOT", "salary": "1.0",
+        })
+        assert self._panel_team(r.text) == "BOT"
+        client.post("/undo")
+
+    def test_a_rejected_assign_does_not_move_the_view(self, client, viewing_srl):
+        """A pick that never happened is not a draft action."""
+        r = client.post("/assign", data={
+            "player": "Nobody At All", "team": "BOT", "salary": "1.0",
+        })
+        assert "not found" in toast_of(r)["message"].lower()
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_undo_returns_the_view_to_my_team(self, client, viewing_srl):
+        import main
+
+        player = next(iter(main.auction_state.available_players))
+        client.post("/assign", data={
+            "player": player, "team": "BOT", "salary": "1.0",
+        })
+        client.get("/team-view/SRL")
+        r = client.post("/undo")
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_reset_returns_the_view_to_my_team(self, client, viewing_srl):
+        r = client.post("/reset")
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_the_view_never_reaches_the_state_file(self, client, viewing_srl):
+        """It is UI state, so it must not serialize or ride the undo chain.
+
+        On AuctionState it would be saved to disk and /undo would restore a
+        *view*, which is not a draft action — and a state file written while
+        looking at SRL would reopen showing SRL after a crash.
+        """
+        import main
+
+        blob = main.auction_state.to_json()
+        assert "viewed" not in blob.lower()
+        assert not hasattr(main.auction_state, "viewed_team")
+
+
+class TestBuyoutScanIsOfferedOnlyWhereItWorks:
+    """The scan's OOB swaps land in `bo-` dots that exist for BOT only.
+
+    On an opponent's panel every swap missed and htmx logged
+    htmx:oobErrorNoTarget — a button whose only effect was console noise.
+    """
+
+    def test_the_scan_button_is_absent_on_an_opponent(self, client):
+        client.get("/team-view/SRL")
+        try:
+            panel = section_of(client.get("/").text, "buyout-panel")
+            assert "/buyout-indicators" not in panel
+        finally:
+            client.get("/team-view/BOT")
+
+    def test_the_scan_button_is_present_on_my_own_team(self, client):
+        panel = section_of(client.get("/").text, "buyout-panel")
+        assert "/buyout-indicators" in panel
+
+    def test_the_per_player_buttons_stay_on_an_opponent(self, client):
+        """They act on `team` (always BOT) and render into #buyout-panel, so
+        they work whoever is on screen — gating them too would remove a working
+        control along with the broken one."""
+        client.get("/team-view/SRL")
+        try:
+            panel = section_of(client.get("/").text, "buyout-panel")
+            assert "/buyout-check/" in panel
+        finally:
+            client.get("/team-view/BOT")
+
+    def _scan_fragment(self, html: str) -> str:
+        m = re.search(r'<div id="buyout-scan".*?</div>', html, re.S)
+        assert m, "no #buyout-scan fragment in the response"
+        return m.group(0)
+
+    def test_switching_teams_carries_the_button_out_of_band(self, client):
+        """The gap the endpoint tests missed and a browser found.
+
+        `/team-view` swaps `#team-panel` alone — it cannot return all_panels,
+        which would replace `#bid-panel` and destroy the bidding session. So a
+        button that lives in the Buyout Analyzer but depends on the team panel
+        went missing when you switched BACK to your own team, and stayed missing
+        until some unrelated full-page swap happened to restore it. Both
+        directions, because a one-way fix is what the original gating was.
+        """
+        away = self._scan_fragment(client.get("/team-view/SRL").text)
+        assert "hx-swap-oob" in away
+        assert "/buyout-indicators" not in away
+
+        home = self._scan_fragment(client.get("/team-view/BOT").text)
+        assert "hx-swap-oob" in home
+        assert "/buyout-indicators" in home, (
+            "coming home left the Scan button missing — the swap only ever "
+            "removed it"
+        )
+
+    def test_the_full_page_carries_no_out_of_band_swap(self, client):
+        """`GET /` builds the document; there is nothing to swap into yet.
+
+        htmx processes `hx-swap-oob` on anything it swaps in, and all_panels.html
+        goes into `#app` on every mutation — so an unguarded attribute here would
+        make the fragment swap itself over itself on every pick.
+        """
+        assert "hx-swap-oob" not in self._scan_fragment(client.get("/").text)

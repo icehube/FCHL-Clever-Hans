@@ -396,15 +396,30 @@ class TestAPIEdgeCases:
         r = client.post("/set-nominator", data={"team_code": "FAKE"})
         assert r.status_code == 200
 
-    def test_team_view_nonexistent(self, client):
-        """An unknown code falls back to BOT's panel.
+    def test_team_view_nonexistent_changes_nothing(self, client):
+        """An unknown code leaves the view exactly where it was.
 
-        This is the ONLY path that reaches `_context_viewing`'s fallback — the
-        five editing endpoints validate and return early, so their own
-        bad-code tests exercise a different branch entirely. Asserting the
-        rendered team, not just the status: a bare `== 200` passes even if the
-        fallback yields a panel for nobody.
+        Stronger than the "falls back to BOT" contract it replaces, and the
+        reason it changed: with the view held server-side, /team-view is the one
+        place it moves, so an unresolvable code must be a no-op rather than a
+        way to shove the panel back to BOT. Opening SRL first is what makes the
+        test able to fail — against a default view, "unchanged" and "reset to
+        BOT" are the same answer and the assertion proves nothing.
         """
+        import main
+
+        client.get("/team-view/SRL")
+        r = client.get("/team-view/FAKE")
+        assert r.status_code == 200
+        assert main._viewed_team == "SRL", "a bad code moved the view"
+        assert "(SRL)" in section_of(r.text, "team-panel"), (
+            "unknown code must re-render the team already on screen"
+        )
+
+    def test_team_view_nonexistent_from_the_default_still_renders_my_team(
+        self, client
+    ):
+        """The old contract, which the new one has to keep satisfying."""
         r = client.get("/team-view/FAKE")
         assert r.status_code == 200
         assert f"({MY_TEAM})" in section_of(r.text, "team-panel"), (

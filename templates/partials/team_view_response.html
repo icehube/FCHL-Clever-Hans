@@ -1,0 +1,10 @@
+{# GET /team-view: the panel you asked for, plus what else the view decides.
+
+   Deliberately not all_panels.html — that would replace #bid-panel and destroy
+   the bidding session, which lives only in the DOM (2026-08-06). So anything
+   outside the team panel that depends on WHICH team is on screen has to come
+   back out-of-band, one fragment at a time. Today that is the buyout Scan
+   button; a second one joins this list rather than widening the swap. #}
+{% include "partials/team_panel.html" %}
+{% set scan_oob = true %}
+{% include "partials/buyout_scan.html" %}

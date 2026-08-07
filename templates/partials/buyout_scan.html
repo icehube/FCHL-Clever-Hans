@@ -1,0 +1,24 @@
+{# The Scan button, in its own file because two responses have to render it.
+
+   It sits in the Buyout Analyzer but its presence is a fact about the TEAM
+   PANEL: the scan's out-of-band swaps target `bo-` dot placeholders that
+   team_panel.html renders for BOT only, so on an opponent every swap missed
+   and htmx logged htmx:oobErrorNoTarget — a button that did nothing but fill
+   the console. Since /team-view swaps only #team-panel, gating it inside the
+   buyout panel alone left the button missing after you switched BACK to your
+   own team, until some unrelated full-page swap happened to restore it. So
+   /team-view returns this fragment out-of-band as well (`scan_oob`).
+
+   The wrapper div is unconditional: it is the OOB swap's target, and a target
+   that disappears with its contents can only be swapped in one direction.
+
+   Gated on a boolean rather than on viewed_team, which only team_panel.html
+   may read: the question here is whether the swap targets are in the document,
+   not whose roster it is. #}
+<div id="buyout-scan"{% if scan_oob is defined and scan_oob %} hx-swap-oob="true"{% endif %}>
+    {% if buyout_dots_on_screen %}
+    <button hx-get="/buyout-indicators" hx-swap="none" class="btn btn-xs btn-warning mb-2">
+        Scan Roster for Buyout Opportunities
+    </button>
+    {% endif %}
+</div>

@@ -5,9 +5,11 @@
             <span class="collapse-chevron">▶</span> Buyout Analyzer
         </summary>
 
-        <button hx-get="/buyout-indicators" hx-swap="none" class="btn btn-xs btn-warning mb-2">
-            Scan Roster for Buyout Opportunities
-        </button>
+        {# Shared with /team-view, which re-renders it out-of-band — see the
+           partial for why. The per-player buttons below need no such treatment:
+           they act on `team` (always BOT) and render into #buyout-panel, so
+           they work whoever is on screen. #}
+        {% include "partials/buyout_scan.html" %}
 
         {# Only group 2/3 can be bought out (CBA 11.4), and location is
            irrelevant — so this lists all_players, not roster_players. That

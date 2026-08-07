@@ -457,3 +457,66 @@ class TestShortcutsModalOpens:
         page.wait_for_selector("#bid-panel")
 
         assert page.evaluate(self._OPEN), "a panel swap closed the shortcuts dialog"
+
+
+class TestTheViewSticksOnScreen:
+    """The view surviving a full-page swap, where it is actually visible.
+
+    The endpoint tests assert on the returned HTML. This asserts on what is on
+    screen after htmx has swapped #app — the claim the operator experiences,
+    and the one that reads as fixed only in a browser.
+    """
+
+    def _panel_team(self, page) -> str:
+        return page.locator("#team-panel h2").inner_text()
+
+    def test_marking_another_team_done_does_not_snap_the_panel_back(
+        self, page, live_server
+    ):
+        _open(page, live_server)
+        with page.expect_response(re.compile(r"/team-view/SRL")):
+            page.click("[hx-get='/team-view/SRL']")
+        page.wait_for_function(
+            "() => document.querySelector('#team-panel h2').textContent.includes('(SRL)')"
+        )
+
+        # A third team, so the toggle has nothing to do with the roster on show.
+        # It swaps all of #app, which is what used to take the view with it.
+        with page.expect_response(re.compile(r"/team-done")):
+            page.click("#league-state form:has(input[value='MAC']) button")
+        page.wait_for_selector("#team-panel")
+
+        assert "(SRL)" in self._panel_team(page), (
+            "a League State toggle threw the panel back to your own team"
+        )
+
+    def test_the_scan_button_follows_the_view_both_ways(self, page, live_server):
+        """A control that cannot work must not be offered — and must come back.
+
+        Its OOB swaps target `bo-` dots that exist for BOT only, so on an
+        opponent every swap missed and htmx logged htmx:oobErrorNoTarget. The
+        return trip is the half a `TestClient` will not show you: `/team-view`
+        swaps `#team-panel` only, so a button gated inside the *buyout* panel
+        vanished on the way out and never came back, and every endpoint test
+        read `GET /` afterwards — a fresh document, where it is always correct.
+        """
+        scan = "#buyout-panel [hx-get='/buyout-indicators']"
+        _open(page, live_server)
+        assert page.locator(scan).count() == 1
+
+        with page.expect_response(re.compile(r"/team-view/SRL")):
+            page.click("[hx-get='/team-view/SRL']")
+        page.wait_for_function(
+            "() => document.querySelector('#team-panel h2').textContent.includes('(SRL)')"
+        )
+        assert page.locator(scan).count() == 0, "the scan button survived on an opponent"
+
+        with page.expect_response(re.compile(r"/team-view/BOT")):
+            page.click("[hx-get='/team-view/BOT']")
+        page.wait_for_function(
+            "() => document.querySelector('#team-panel h2').textContent.includes('(BOT)')"
+        )
+        assert page.locator(scan).count() == 1, (
+            "coming home left the scan button missing until some unrelated "
+            "full-page swap restored it"
+        )

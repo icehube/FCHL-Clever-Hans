@@ -13,12 +13,31 @@ import time
 
 import pytest
 
+from config import MY_TEAM
+
 
 @pytest.fixture(scope="session", autouse=True)
 def isolated_state_dir(tmp_path_factory):
     import main
 
     main.STATE_DIR = str(tmp_path_factory.mktemp("state"))
+    yield
+
+
+@pytest.fixture(autouse=True)
+def default_viewed_team():
+    """Every test starts looking at BOT.
+
+    `main._viewed_team` is a module global, so a test that opens an opponent's
+    roster and does not put it back would silently change what every later test
+    in the same file renders — the same order-dependence already open against
+    `test_endpoints.py`'s module-scoped client. One assignment is cheaper than
+    remembering, and it cannot mask a real leak: it runs between tests, never
+    between requests inside one.
+    """
+    import main
+
+    main._viewed_team = MY_TEAM
     yield
 
 

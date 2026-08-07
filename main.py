@@ -63,6 +63,18 @@ last_trade_eval = None
 # claim is about THIS boot: a clean restart should not re-raise a fixed alarm.
 _startup_warning: str | None = None
 
+# Which team's roster is on screen. Held centrally so that no endpoint has to
+# remember to carry it: the previous design passed a team code through every
+# handler that rendered all_panels.html, and the ones that forgot — /team-done,
+# /trade-execute, and the ERROR branch of all five roster-edit endpoints — threw
+# you back to your own team mid-audit.
+#
+# A module global and NOT a field on AuctionState: on the state it would
+# serialize into the save file and /undo would restore a *view*, which is not a
+# draft action. Shared across browser tabs, which is fine for a tool one person
+# runs on localhost.
+_viewed_team: str = MY_TEAM
+
 
 # The backfills take the state explicitly rather than reading the global: a
 # candidate loaded off disk has to be validated BEFORE it is installed, or a
@@ -483,36 +495,16 @@ def _render(request: Request, template: str, extra: dict | None = None) -> HTMLR
     return templates.TemplateResponse(request, template, ctx)
 
 
-def _context_viewing(request: Request, team_code: str) -> dict:
-    """Standard context with the team panel pointed at `team_code`.
+def _view_my_team() -> None:
+    """Return the team panel to BOT.
 
-    Only `viewed_team` moves. `team` stays BOT deliberately: it also drives the
-    Trade "I Give" list and the Buyout Analyzer, and moving it is exactly what
-    leaked an opponent's players into BOT's trade form (fixed 2026-08-05,
-    pinned by TestPanelContextIsolation).
-
-    An unresolvable code leaves the default. That branch is reachable only
-    through `/team-view/{code}` — the five editing endpoints all validate and
-    return early — which is why the lookup lives here rather than being written
-    out at both call sites: one copy, and `test_team_view_nonexistent` covers it.
+    Owner decision 2026-08-07: draft actions reset the view, because reading an
+    opponent's Cap Used as your own right after a pick lands is worse than
+    having to re-open their roster. Called by /assign, /undo and /buyout, and by
+    the two endpoints that replace the world outright (/reset, /load-scenario).
     """
-    ctx = _context(request)
-    t = auction_state.teams.get(team_code)
-    if t is not None:
-        ctx["viewed_team"] = t
-    return ctx
-
-
-def _panels_viewing(request: Request, team_code: str) -> HTMLResponse:
-    """all_panels.html with the team panel left on `team_code`.
-
-    Roster edits are posted from whichever panel is open, so returning the
-    default context snapped the view back to BOT after every Bench, salary fix
-    or recall — auditing another team meant re-opening it each time.
-    """
-    return _render(
-        request, "partials/all_panels.html", _context_viewing(request, team_code)
-    )
+    global _viewed_team
+    _viewed_team = MY_TEAM
 
 
 def _context(request: Request) -> dict:
@@ -591,7 +583,18 @@ def _context(request: Request) -> dict:
         # "I Give" list and the Buyout Analyzer act on: pointing that at the
         # team being viewed put an opponent's players in BOT's trade form
         # (fixed 2026-08-05). Only team_panel.html reads this.
-        "viewed_team": team,
+        #
+        # Falls back to BOT rather than KeyError-ing, so a stored code that no
+        # longer resolves renders your own roster instead of a panel for nobody.
+        "viewed_team": auction_state.teams.get(_viewed_team, team),
+        # Whether the `bo-` dot placeholders the buyout scan swaps into are
+        # actually in the document — team_panel.html renders them for BOT only.
+        # A DOM fact, deliberately not `viewed_team` itself: CLAUDE.md allows no
+        # panel but team_panel.html to read that, and the rule exists to stop a
+        # panel acting on the wrong roster. A boolean carries no roster.
+        "buyout_dots_on_screen": auction_state.teams.get(
+            _viewed_team, team
+        ).is_my_team,
         "teams": auction_state.teams,
         "available_players": auction_state.available_players,
         "transaction_log": auction_state.transaction_log,
@@ -692,6 +695,10 @@ async def assign_player(
         auction_state.advance_nomination()
     _recompute()
     _save_state()
+    # Only on the success path. A rejected assign is not a draft action — the
+    # error branches above return without touching the view, so a typo'd team
+    # code no longer costs you the roster you were auditing.
+    _view_my_team()
     # Should essentially never fire: the league's commissioner software refuses
     # bids a team cannot afford. Kept because it costs one pass over a roster
     # next to a MILP solve, and leaving the busiest endpoint the silent one
@@ -951,6 +958,7 @@ async def buyout(request: Request, player: str = Form(...)):
 
     _recompute()
     _save_state()
+    _view_my_team()
     return _toast(
         _render(request, "partials/all_panels.html"),
         f"Bought out {player}", "success",
@@ -1006,6 +1014,7 @@ async def undo(request: Request):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
+    _view_my_team()
     return _toast(
         _render(request, "partials/all_panels.html"), message, "info",
     )
@@ -1032,6 +1041,7 @@ async def reset(request: Request):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
+    _view_my_team()  # new world; a view into the old one means nothing
     return _render(request, "partials/all_panels.html")
 
 
@@ -1057,6 +1067,7 @@ async def load_scenario(request: Request, name: str = Form(...)):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
+    _view_my_team()  # ditto — the unknown-scenario branch above leaves it alone
     return _toast(
         _render(request, "partials/all_panels.html"),
         f"Loaded scenario: {name}", "success",
@@ -1185,11 +1196,17 @@ async def set_nominator(request: Request, team_code: str = Form(...)):
 
 @app.get("/team-view/{team_code}", response_class=HTMLResponse)
 async def team_view(request: Request, team_code: str):
-    """Render the team panel for the given team. Falls back to default
-    (BOT) when the code is unknown so HTMX swaps still produce a valid panel."""
-    return _render(
-        request, "partials/team_panel.html", _context_viewing(request, team_code)
-    )
+    """Open a team's roster in the team panel — the ONE place the view moves.
+
+    An unknown code changes nothing and re-renders the team you were already
+    looking at, so a stale link cannot move your view out from under you. When
+    that is the default it renders BOT, which is what this used to do
+    unconditionally.
+    """
+    global _viewed_team
+    if team_code in auction_state.teams:
+        _viewed_team = team_code
+    return _render(request, "partials/team_view_response.html")
 
 
 @app.get("/team-players/{team_code}")
@@ -1239,7 +1256,7 @@ async def toggle_bench(
     )
     _recompute()
     _save_state()
-    return _panels_viewing(request, team_code)
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/adjust-salary", response_class=HTMLResponse)
@@ -1272,7 +1289,7 @@ async def adjust_salary(
     )
     _recompute()
     _save_state()
-    response = _panels_viewing(request, team_code)
+    response = _render(request, "partials/all_panels.html")
     # Two independent warnings can fire here, so collect rather than return on
     # the first: a fat-fingered figure is often both off-increment AND too big.
     notes: list[str] = []
@@ -1321,7 +1338,7 @@ async def move_to_minors(
     _log_change("move-to-minors", team_code, f"{player_name} → minors")
     _recompute()
     _save_state()
-    return _panels_viewing(request, team_code)
+    return _render(request, "partials/all_panels.html")
 
 
 @app.post("/move-to-roster", response_class=HTMLResponse)
@@ -1347,7 +1364,7 @@ async def move_to_roster(
     _log_change("move-to-roster", team_code, f"{player_name} → active")
     _recompute()
     _save_state()
-    response = _panels_viewing(request, team_code)
+    response = _render(request, "partials/all_panels.html")
     # A group A-E minor is cap-free while down and cap-counted the moment it is
     # recalled (PlayerOnRoster.counts_on_cap), and 145 of the 149 minors at reset
     # are group A-E — so this is the ordinary recall, not an edge case. It went
@@ -1430,7 +1447,7 @@ async def trade_between(
     return _toast(
         # team_a, because this form only ever posts from team_a's own panel —
         # its hidden team_a field is that panel's code.
-        _panels_viewing(request, team_a),
+        _render(request, "partials/all_panels.html"),
         f"Trade executed: {team_a} ↔ {team_b}{note}",
         # A demotion alone stays a success: that note is informational and
         # pre-dates this. Only going over the cap lifts the tier.

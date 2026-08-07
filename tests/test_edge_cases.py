@@ -400,10 +400,29 @@ class TestAPIEdgeCases:
         assert r.status_code == 200
 
     def test_team_players_nonexistent(self, client):
-        """Getting players for non-existent team should handle gracefully."""
+        """An unknown team is an empty list, not an error.
+
+        This accepted `status in (200, 404, 422, 500)` — so a regression to an
+        unhandled exception would have passed a test whose docstring said
+        "shouldn't crash". The endpoint is not ambiguous: it does
+        `teams.get(code)` and returns `[]` on a miss, and the trade dropdown
+        that consumes it needs a list, not a status code to branch on.
+        """
         r = client.get("/team-players/FAKE")
-        # May return 200 with empty list or 404/500 — just shouldn't crash the app
-        assert r.status_code in (200, 404, 422, 500)
+        assert r.status_code == 200, r.text
+        assert r.json() == []
+
+    def test_team_players_known_team(self, client):
+        """The other half of the contract — otherwise `[] == []` passes forever.
+
+        An endpoint that returned `[]` for every team would satisfy the test
+        above and break the trade panel completely.
+        """
+        r = client.get("/team-players/BOT")
+        assert r.status_code == 200
+        players = r.json()
+        assert players, "BOT has keepers; the dropdown cannot be empty"
+        assert set(players[0]) == {"name", "position", "salary", "projected_points"}
 
     def test_explain_nonexistent_player(self, client):
         """Counterfactual for non-existent player should not crash."""

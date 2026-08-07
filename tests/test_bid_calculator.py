@@ -571,7 +571,20 @@ class TestCounterfactual:
         assert cf.without_player.status == "Optimal"
 
     def test_counterfactual_shows_alternatives(self):
-        """Without-player roster should have alternatives not in with-player roster."""
+        """`alternative_players` is exactly who the WITHOUT-roster gains.
+
+        Was `assert len(cf.alternative_players) >= 0`, which is true of every
+        list ever constructed — and it sat behind an `if` that could skip it
+        entirely. The real contract is a set relation, and it is what the panel
+        renders under "who you'd draft instead", so a wrong answer here is wrong
+        advice on screen rather than an abstract violation.
+
+        The direction is the load-bearing half. Both differences are non-empty
+        here (with-minus-without is Vatrano + Matheson, the players you draft
+        *alongside* him), so subtracting the wrong way round still yields a
+        plausible list of real players — it would just name the roster you get
+        by signing him under a heading that promises the opposite.
+        """
         state, mp, _ = _setup_real_data()
         team = state.teams[MY_TEAM]
         player = next(
@@ -579,7 +592,32 @@ class TestCounterfactual:
             if p.projected_points > 60
         )
         cf = generate_counterfactual(player, 5.0, team, state.available_players, mp)
-        # If the player is in the optimal roster at that price, alternatives
-        # should show who gets displaced
-        if cf.points_difference > 0:
-            assert len(cf.alternative_players) >= 0  # May be empty if player just adds
+
+        with_names = {p.name for p in cf.with_player.roster}
+        without_names = {p.name for p in cf.without_player.roster}
+        alt_names = [p.name for p in cf.alternative_players]
+
+        # `roster` is the MILP's picks from the pool. A forced player is held
+        # out of the candidate set and folded back into total_points/
+        # total_cost/by_position instead, so he appears in NEITHER roster list.
+        # Pinned here because the asymmetry with by_position reads like a bug
+        # on first sight, and "fixing" it would change what `alternatives` means.
+        assert player.name not in with_names, "forced players stay out of .roster"
+        assert player.name not in without_names, "the excluded player must not be"
+        assert player.name in {
+            p.name for p in cf.with_player.by_position[player.position]
+        }, "by_position is where the forced player does show up"
+
+        assert alt_names, (
+            f"forcing {player.name} in at $5.0M must displace somebody — an "
+            f"empty list renders the panel with no 'instead' to offer"
+        )
+        assert len(alt_names) == len(set(alt_names)), f"duplicates: {alt_names}"
+        assert set(alt_names) == without_names - with_names, (
+            f"alternatives must be exactly what the without-roster gains; got "
+            f"{sorted(alt_names)}, expected {sorted(without_names - with_names)}"
+        )
+        assert all(n in state.available_players for n in alt_names), (
+            "every alternative must still be biddable — the panel offers them "
+            "as players you could go draft"
+        )

@@ -181,6 +181,18 @@ TDD. Key validations:
 - State serialization round-trips cleanly
 - Endpoints update state correctly
 
+Shared non-fixture test utilities live in `tests/helpers.py` (`squeeze`,
+`toast_of`), not in `conftest.py` — that file is for fixtures. Import from there
+rather than copy-pasting; `squeeze` reached three copies before it was folded in.
+
+**A test must be able to fail.** Before claiming one covers something, break the
+thing it claims to cover and watch it go red. Three tests in this suite asserted
+nothing for months (`len(...) >= 0`, a `pass`-body loop, `status_code in (200,
+404, 422, 500)`) and every one of them read as coverage. When the mutation
+doesn't fail the test, either the assertion is wrong or the test is aimed at the
+wrong operation — the stress ownership invariant could not fail under `/assign`
+at all, and only became real once it also ran after `/undo`.
+
 ## Code conventions
 
 - Python 3.12, type hints on signatures

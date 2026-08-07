@@ -26,6 +26,38 @@ def _get_state(client):
     return r.json()
 
 
+def _check_ownership(state, label):
+    """Every owned player is owned once, and is no longer biddable.
+
+    Module-level rather than a method because the property has nothing to do
+    with pick counters: it is true of any state at any time, and the undo
+    cycles need it as much as the draft does — more, in fact. `/assign` cannot
+    break it (it pops from the pool and appends to a roster in one step), while
+    `restore_snapshot` copies teams and the pool across as separate statements,
+    so a missing line there desyncs them.
+    """
+    all_roster_names = set()
+    for code, team in state["teams"].items():
+        # Minors included: a player routed to the minors is still owned, and
+        # leaving them out would let a 24-man team's overflow be re-drafted.
+        owned = (
+            team.get("keeper_players", [])
+            + team.get("acquired_players", [])
+            + team.get("minor_players", [])
+        )
+        for p in owned:
+            assert p["name"] not in all_roster_names, (
+                f"{label}: {p['name']} appears on multiple teams"
+            )
+            all_roster_names.add(p["name"])
+
+    double_listed = sorted(all_roster_names & set(state["available_players"]))
+    assert not double_listed, (
+        f"{label}: {double_listed} are on a roster AND still biddable — "
+        f"they can be drafted twice"
+    )
+
+
 def _team_salary(team_data):
     total = 0.0
     for p in team_data.get("keeper_players", []):
@@ -134,20 +166,14 @@ class TestStressAuction:
                 f"Pick {pick_num}: unexpected transaction type {txn['transaction_type']}"
             )
 
-        # 5. No player appears on multiple teams
-        all_roster_names = set()
-        for code, team in state["teams"].items():
-            for p in team.get("keeper_players", []) + team.get("acquired_players", []):
-                assert p["name"] not in all_roster_names, (
-                    f"Pick {pick_num}: {p['name']} appears on multiple teams"
-                )
-                all_roster_names.add(p["name"])
-
-        # 6. No roster player is also in available pool
-        for name in all_roster_names:
-            if name in state["available_players"]:
-                # Minor/keeper players might share names with available — check acquired only
-                pass
+        # 5 & 6. Ownership: one team each, and off the board.
+        #
+        # Invariant 6 was a `pass`-body loop until 2026-08-07 — the one check
+        # in here that asserted nothing, stubbed out on the theory that
+        # "minor/keeper players might share names with available". Measured at
+        # reset: zero names overlap between the pool and any of the three
+        # roster lists, so the premise was wrong and the property holds.
+        _check_ownership(state, f"Pick {pick_num}")
 
         # 7. MILP is still functioning
         import main
@@ -216,6 +242,11 @@ class TestStressUndoRedo:
                 f"Cycle {i+1}: available count should be {baseline_available}, "
                 f"got {len(state_after['available_players'])}"
             )
+            # The count alone cannot see a partial restore: `restore_snapshot`
+            # copies teams and the pool as separate assignments, so dropping
+            # either one leaves a player owned AND biddable while the count
+            # still reads correct.
+            _check_ownership(state_after, f"Undo cycle {i+1}")
 
     def test_max_snapshots(self, client):
         """Push past max snapshots (50) and verify undo still works."""

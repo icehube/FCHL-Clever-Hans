@@ -1,6 +1,5 @@
 """Tests for main.py: FastAPI endpoints."""
 
-import json
 import re
 import tempfile
 from contextlib import contextmanager
@@ -9,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
+from tests.helpers import squeeze, toast_of
 
 
 @pytest.fixture(scope="module")
@@ -851,12 +851,6 @@ class TestRoundThreeMutators:
         assert "team-done" in kinds
 
 
-def _toast_of(response) -> dict:
-    """The showToast payload an endpoint attached, or {} if it attached none."""
-    header = response.headers.get("HX-Trigger")
-    return json.loads(header)["showToast"] if header else {}
-
-
 class TestOverCapRosterEdits:
     """Roster edits that can push a team over the cap must say so.
 
@@ -881,15 +875,6 @@ class TestOverCapRosterEdits:
             yield c
             c.post("/reset")
 
-    def _squeeze(self, code: str, headroom: float) -> None:
-        """Set `code`'s penalties so exactly `headroom` of cap space remains."""
-        import main
-        team = main.auction_state.teams[code]
-        team.penalties = 0.0
-        team._invalidate_cache()
-        team.penalties = round(SALARY_CAP - team.total_salary - headroom, 1)
-        team._invalidate_cache()
-
     def _cap_free_minor(self, code: str):
         """The priciest minor whose salary is NOT already on `code`'s cap.
 
@@ -911,9 +896,9 @@ class TestOverCapRosterEdits:
 
     def test_recall_over_cap_warns_and_names_the_team(self, client):
         minor = self._cap_free_minor("BOT")
-        self._squeeze("BOT", headroom=minor.salary - 0.5)
+        squeeze("BOT", headroom=minor.salary - 0.5)
 
-        toast = _toast_of(self._recall(client, "BOT", minor.name))
+        toast = toast_of(self._recall(client, "BOT", minor.name))
 
         assert toast.get("type") == "warning", toast
         assert "BOT $0.5M over cap" in toast.get("message", ""), toast
@@ -922,7 +907,7 @@ class TestOverCapRosterEdits:
     def test_recall_over_cap_still_happens(self, client):
         """The owner decision, asserted on its own: warned, not refused."""
         minor = self._cap_free_minor("BOT")
-        self._squeeze("BOT", headroom=minor.salary - 0.5)
+        squeeze("BOT", headroom=minor.salary - 0.5)
 
         self._recall(client, "BOT", minor.name)
 
@@ -954,7 +939,7 @@ class TestOverCapRosterEdits:
         team = main.auction_state.teams["BOT"]
         already_counted = next(
             m for m in team.minor_players if m.group in MINOR_CAP_GROUPS)
-        self._squeeze("BOT", headroom=0.1)
+        squeeze("BOT", headroom=0.1)
 
         r = self._recall(client, "BOT", already_counted.name)
 
@@ -979,10 +964,10 @@ class TestOverCapRosterEdits:
     def test_adjust_salary_over_cap_warns(self, client):
         """`_legal_salary` clamps to MIN/MAX/increment but knows nothing of the cap."""
         p = self._cheapest_bot_player()
-        self._squeeze("BOT", headroom=1.0)
+        squeeze("BOT", headroom=1.0)
 
         new_salary = round(p.salary + 1.5, 1)
-        toast = _toast_of(self._adjust(client, p.name, new_salary))
+        toast = toast_of(self._adjust(client, p.name, new_salary))
 
         assert toast.get("type") == "warning", toast
         # Named subject, not a bare fact about the team: with no clamp note to
@@ -999,7 +984,7 @@ class TestOverCapRosterEdits:
         dropped the cap note on the floor — the more serious of the two.
         """
         p = self._cheapest_bot_player()
-        self._squeeze("BOT", headroom=1.0)
+        squeeze("BOT", headroom=1.0)
 
         from main import _legal_salary
         typed = round(p.salary + 1.55, 2)
@@ -1009,7 +994,7 @@ class TestOverCapRosterEdits:
         # test passing for the wrong reason.
         assert _legal_salary(typed) != typed, typed
 
-        message = _toast_of(self._adjust(client, p.name, typed)).get("message", "")
+        message = toast_of(self._adjust(client, p.name, typed)).get("message", "")
 
         assert "adjusted from" in message, message
         assert "over cap" in message, message
@@ -1018,10 +1003,10 @@ class TestOverCapRosterEdits:
         """The control: neither wording nor silence changed for legal input."""
         p = self._cheapest_bot_player()  # BOT has ~$26M of room at reset
 
-        legal = _toast_of(self._adjust(client, p.name, round(p.salary + 1.0, 1)))
+        legal = toast_of(self._adjust(client, p.name, round(p.salary + 1.0, 1)))
         assert legal == {}, legal
 
-        off_increment = _toast_of(self._adjust(client, p.name, 2.55))
+        off_increment = toast_of(self._adjust(client, p.name, 2.55))
         assert off_increment.get("type") == "warning", off_increment
         assert off_increment.get("message") == (
             f"{p.name} set to $2.5M (adjusted from $2.55M)"
@@ -1033,12 +1018,12 @@ class TestOverCapRosterEdits:
         pool = sorted(main.auction_state.available_players.values(),
                       key=lambda p: -p.projected_points)
 
-        legal = _toast_of(client.post("/assign", data={
+        legal = toast_of(client.post("/assign", data={
             "player": pool[0].name, "team": "BOT", "salary": "2.0"}))
         assert legal.get("type") == "success", legal
 
-        self._squeeze("BOT", headroom=1.0)
-        toast = _toast_of(client.post("/assign", data={
+        squeeze("BOT", headroom=1.0)
+        toast = toast_of(client.post("/assign", data={
             "player": pool[1].name, "team": "BOT", "salary": "2.0"}))
 
         assert toast.get("type") == "warning", toast

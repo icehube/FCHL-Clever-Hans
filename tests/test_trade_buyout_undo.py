@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config import BUYOUT_PENALTY_RATE, MIN_SALARY, SALARY_CAP
+from tests.helpers import squeeze, toast_of
 
 
 @pytest.fixture(scope="module")
@@ -519,7 +520,7 @@ class TestTwoTeamTradeFlow:
         assert sorted(by_team[source_code]) == ["trade_in", "trade_out"], by_team
 
 
-def _toast_of(response) -> dict:
+def toast_of(response) -> dict:
     """The showToast payload an endpoint attached, or {} if it attached none."""
     header = response.headers.get("HX-Trigger")
     return json.loads(header)["showToast"] if header else {}
@@ -549,15 +550,6 @@ class TestOverCapTradesWarn:
             yield c
             c.post("/reset")
 
-    def _squeeze(self, code: str, headroom: float) -> None:
-        """Set `code`'s penalties so exactly `headroom` of cap space remains."""
-        import main as _main
-        team = _main.auction_state.teams[code]
-        team.penalties = 0.0
-        team._invalidate_cache()
-        team.penalties = round(SALARY_CAP - team.total_salary - headroom, 1)
-        team._invalidate_cache()
-
     def _stock(self, client, code: str, salary: float) -> str:
         """Assign the priciest available player to `code` at `salary`."""
         import main as _main
@@ -578,7 +570,7 @@ class TestOverCapTradesWarn:
         """The owner decision, asserted first: warn, never refuse."""
         expensive = self._stock(client, "BOT", 9.0)
         cheap = self._stock(client, "SRL", 0.5)
-        self._squeeze("SRL", headroom=1.0)
+        squeeze("SRL", headroom=1.0)
 
         r = self._trade(client, "BOT", "SRL", expensive, cheap)
         assert r.status_code == 200
@@ -591,9 +583,9 @@ class TestOverCapTradesWarn:
     def test_over_cap_trade_warns_and_names_the_team(self, client):
         expensive = self._stock(client, "BOT", 9.0)
         cheap = self._stock(client, "SRL", 0.5)
-        self._squeeze("SRL", headroom=1.0)
+        squeeze("SRL", headroom=1.0)
 
-        toast = _toast_of(self._trade(client, "BOT", "SRL", expensive, cheap))
+        toast = toast_of(self._trade(client, "BOT", "SRL", expensive, cheap))
         assert toast.get("type") == "warning", toast
         assert "SRL" in toast["message"] and "over cap" in toast["message"], toast
         # SRL had $1.0M of room, gave up $0.5M and took on $9.0M -> $7.5M over.
@@ -604,7 +596,7 @@ class TestOverCapTradesWarn:
         a_player = self._stock(client, "BOT", 2.0)
         b_player = self._stock(client, "SRL", 2.0)
 
-        toast = _toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
+        toast = toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
         assert toast.get("type") == "success", toast
         assert "over cap" not in toast["message"], toast
 
@@ -621,10 +613,10 @@ class TestOverCapTradesWarn:
         """
         a_player = self._stock(client, "BOT", 2.0)
         b_player = self._stock(client, "SRL", 1.0)
-        self._squeeze("BOT", headroom=-3.0)   # already $3.0M over
-        self._squeeze("SRL", headroom=-3.0)
+        squeeze("BOT", headroom=-3.0)   # already $3.0M over
+        squeeze("SRL", headroom=-3.0)
 
-        toast = _toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
+        toast = toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
         assert toast.get("type") == "warning", toast
         # BOT sheds $1.0M net (over by 2.0), SRL takes it on (over by 4.0).
         assert "BOT $2.0M over cap" in toast["message"], toast
@@ -643,9 +635,9 @@ class TestOverCapTradesWarn:
         a_player = self._stock(client, "BOT", 2.0)
         b_player = self._stock(client, "SRL", 2.0)
         # Leave SRL landing exactly on the cap after an even-salary swap.
-        self._squeeze("SRL", headroom=0.0)
+        squeeze("SRL", headroom=0.0)
 
-        toast = _toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
+        toast = toast_of(self._trade(client, "BOT", "SRL", a_player, b_player))
         srl = _main.auction_state.teams["SRL"]
         assert round(srl.total_salary, 1) == SALARY_CAP, "fixture missed the boundary"
         assert toast.get("type") == "success", toast
@@ -664,7 +656,7 @@ class TestOverCapTradesWarn:
         assert _main._cap_overages("") == []
         assert _main._cap_overages("NOPE") == []
         # A real over-cap team is still found alongside the junk.
-        self._squeeze("SRL", headroom=-2.0)
+        squeeze("SRL", headroom=-2.0)
         assert _main._cap_overages(None, "SRL", "") == ["SRL $2.0M over cap"]
 
     def test_trade_execute_warns_too(self, client):
@@ -677,7 +669,7 @@ class TestOverCapTradesWarn:
         )
         receive = source["keeper_players"][0]
         give = self._stock(client, "BOT", 0.5)
-        self._squeeze("BOT", headroom=0.0)
+        squeeze("BOT", headroom=0.0)
 
         client.post("/trade-evaluate", data={
             "give_player": [give],
@@ -691,7 +683,7 @@ class TestOverCapTradesWarn:
         r = client.post("/trade-execute", data={
             "trade_id": _main.last_trade_eval.trade_id})
         assert r.status_code == 200
-        toast = _toast_of(r)
+        toast = toast_of(r)
         assert toast.get("type") == "warning", toast
         assert "BOT" in toast["message"] and "over cap" in toast["message"], toast
 

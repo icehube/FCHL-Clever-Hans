@@ -25,7 +25,7 @@ pytest.importorskip("playwright.sync_api", reason="pip install -r requirements-d
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 import main  # noqa: E402
-from config import SALARY_CAP  # noqa: E402
+from tests.helpers import squeeze  # noqa: E402
 
 pytestmark = pytest.mark.browser
 
@@ -83,15 +83,6 @@ def _start_bid(page, player: str, price: str = "3.0", bidders: str = "BOT"):
     with page.expect_response(re.compile(r"/bid-check")):
         page.click("#bid-panel button[type='submit']")
     page.wait_for_selector("#bid-counterfactual")
-
-
-def _squeeze(code: str, headroom: float) -> None:
-    """Set `code`'s penalties so exactly `headroom` of cap space remains."""
-    team = main.auction_state.teams[code]
-    team.penalties = 0.0
-    team._invalidate_cache()
-    team.penalties = round(SALARY_CAP - team.total_salary - headroom, 1)
-    team._invalidate_cache()
 
 
 # ---------------------------------------------------------------- phase 1
@@ -285,7 +276,7 @@ class TestLayoutAndToasts:
         _open(page, live_server)
         team = main.auction_state.teams["BOT"]
         subject = min(team.roster_players, key=lambda p: p.salary).name
-        _squeeze("BOT", headroom=0.4)
+        squeeze("BOT", headroom=0.4)
 
         with page.expect_response(re.compile(r"/adjust-salary")):
             page.evaluate(

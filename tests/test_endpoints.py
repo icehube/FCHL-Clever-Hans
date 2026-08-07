@@ -533,8 +533,14 @@ class TestViewedTeamSurvivesEdits:
         assert self._panel_team(r.text) == "BOT"
 
     def test_an_unknown_team_code_falls_back_to_my_team(self, client):
-        """The error paths keep the default context: an unresolvable code has no
-        view to preserve, and must not 500 reaching for one."""
+        """A bad code renders BOT's panel rather than 500ing.
+
+        Note what this does NOT test: /toggle-bench validates and returns early,
+        so `_context_viewing`'s own fallback is never reached from here. Deleting
+        that fallback leaves this test green — measured. The branch belongs to
+        /team-view, and test_edge_cases.test_team_view_nonexistent is what covers
+        it.
+        """
         r = client.post("/toggle-bench", data={
             "team_code": "FAKE", "player_name": "Nobody",
         })

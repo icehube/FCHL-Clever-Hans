@@ -388,23 +388,36 @@ def _render(request: Request, template: str, extra: dict | None = None) -> HTMLR
     return templates.TemplateResponse(request, template, ctx)
 
 
+def _context_viewing(request: Request, team_code: str) -> dict:
+    """Standard context with the team panel pointed at `team_code`.
+
+    Only `viewed_team` moves. `team` stays BOT deliberately: it also drives the
+    Trade "I Give" list and the Buyout Analyzer, and moving it is exactly what
+    leaked an opponent's players into BOT's trade form (fixed 2026-08-05,
+    pinned by TestPanelContextIsolation).
+
+    An unresolvable code leaves the default. That branch is reachable only
+    through `/team-view/{code}` — the five editing endpoints all validate and
+    return early — which is why the lookup lives here rather than being written
+    out at both call sites: one copy, and `test_team_view_nonexistent` covers it.
+    """
+    ctx = _context(request)
+    t = auction_state.teams.get(team_code)
+    if t is not None:
+        ctx["viewed_team"] = t
+    return ctx
+
+
 def _panels_viewing(request: Request, team_code: str) -> HTMLResponse:
     """all_panels.html with the team panel left on `team_code`.
 
     Roster edits are posted from whichever panel is open, so returning the
     default context snapped the view back to BOT after every Bench, salary fix
     or recall — auditing another team meant re-opening it each time.
-
-    Only `viewed_team` moves. `team` stays BOT deliberately: it also drives the
-    Trade "I Give" list and the Buyout Analyzer, and moving it is exactly what
-    leaked an opponent's players into BOT's trade form (fixed 2026-08-05,
-    pinned by TestPanelContextIsolation).
     """
-    ctx = _context(request)
-    t = auction_state.teams.get(team_code)
-    if t is not None:
-        ctx["viewed_team"] = t
-    return _render(request, "partials/all_panels.html", ctx)
+    return _render(
+        request, "partials/all_panels.html", _context_viewing(request, team_code)
+    )
 
 
 def _context(request: Request) -> dict:
@@ -1065,11 +1078,9 @@ async def set_nominator(request: Request, team_code: str = Form(...)):
 async def team_view(request: Request, team_code: str):
     """Render the team panel for the given team. Falls back to default
     (BOT) when the code is unknown so HTMX swaps still produce a valid panel."""
-    ctx = _context(request)
-    t = auction_state.teams.get(team_code)
-    if t is not None:
-        ctx["viewed_team"] = t
-    return _render(request, "partials/team_panel.html", ctx)
+    return _render(
+        request, "partials/team_panel.html", _context_viewing(request, team_code)
+    )
 
 
 @app.get("/team-players/{team_code}")

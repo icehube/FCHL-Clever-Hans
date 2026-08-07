@@ -16,9 +16,11 @@ from config import (
     MIN_FORWARDS,
     MIN_GOALIES,
     MIN_SALARY,
+    MY_TEAM,
     ROSTER_SIZE,
     SALARY_CAP,
 )
+from tests.helpers import section_of
 from market import compute_market_ceiling, compute_market_price, MarketInfo
 from optimizer import solve_optimal_roster
 from price_model import predict_price, load_model_params
@@ -395,9 +397,19 @@ class TestAPIEdgeCases:
         assert r.status_code == 200
 
     def test_team_view_nonexistent(self, client):
-        """Viewing non-existent team should not crash."""
+        """An unknown code falls back to BOT's panel.
+
+        This is the ONLY path that reaches `_context_viewing`'s fallback — the
+        five editing endpoints validate and return early, so their own
+        bad-code tests exercise a different branch entirely. Asserting the
+        rendered team, not just the status: a bare `== 200` passes even if the
+        fallback yields a panel for nobody.
+        """
         r = client.get("/team-view/FAKE")
         assert r.status_code == 200
+        assert f"({MY_TEAM})" in section_of(r.text, "team-panel"), (
+            "unknown code must render my own team, not an empty panel"
+        )
 
     def test_team_players_nonexistent(self, client):
         """An unknown team is an empty list, not an error.

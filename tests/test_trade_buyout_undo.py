@@ -687,3 +687,181 @@ class TestOverCapTradesWarn:
         assert toast.get("type") == "warning", toast
         assert "BOT" in toast["message"] and "over cap" in toast["message"], toast
 
+
+
+class TestUndoRevertsEveryRosterEdit:
+    """The six snapshot-taking endpoints that had no undo test.
+
+    Ten POST endpoints call `save_snapshot()`; four were covered above
+    (`test_00`–`test_04`). These six were not: /adjust-salary, /toggle-bench,
+    /move-to-minors, /move-to-roster, /set-nominator, /trade-between. All six
+    restore correctly today — this is insurance on the one operation that
+    cannot be worked around. Mid-draft there is no second Ctrl+Z, so an undo
+    that quietly restores less than it should is unrecoverable and invisible.
+
+    Every case is baseline -> act -> **assert it changed** -> undo -> assert
+    restored. The middle assertion is not decoration: without it an endpoint
+    that silently does nothing passes, which is how three tests in this suite
+    asserted nothing for months.
+    """
+
+    @pytest.fixture
+    def client(self):
+        """Function-scoped, shadowing the module fixture deliberately.
+
+        Each test needs an EMPTY snapshot chain. The mutation these tests exist
+        to catch is "the endpoint stopped calling save_snapshot", and with a
+        chain carried over from earlier tests `/undo` would pop somebody else's
+        snapshot and could restore the right answer for the wrong reason.
+        `POST /reset` builds a fresh AuctionState, so the chain starts empty.
+        """
+        from main import app
+        with TestClient(app) as c:
+            c.post("/reset")
+            yield c
+            c.post("/reset")
+
+    def _bot(self):
+        import main
+        return main.auction_state.teams["BOT"]
+
+    def _undo_cycle(self, client, act, read, label):
+        """baseline -> act -> assert changed -> undo -> assert restored."""
+        before = read()
+        r = act()
+        assert r.status_code == 200, f"{label} returned {r.status_code}"
+        during = read()
+        assert during != before, (
+            f"{label} changed nothing, so undoing it proves nothing "
+            f"(still {before!r})"
+        )
+        u = client.post("/undo")
+        assert u.status_code == 200
+        assert read() == before, (
+            f"undo did not revert {label}: {before!r} -> {during!r} -> {read()!r}"
+        )
+
+    def test_undo_reverts_adjust_salary(self, client):
+        name = self._bot().roster_players[0].name
+        self._undo_cycle(
+            client,
+            lambda: client.post("/adjust-salary", data={
+                "team_code": "BOT", "player_name": name, "new_salary": "9.9"}),
+            lambda: next(p.salary for p in self._bot().roster_players if p.name == name),
+            "/adjust-salary",
+        )
+
+    def test_undo_reverts_toggle_bench(self, client):
+        """Reads the SCORE, not just the flag.
+
+        Only the starting lineup scores, so benching a starter has to move
+        `current_roster_points`. Asserting on `is_bench` alone would pass
+        against a restore that flipped the flag back while leaving the lineup
+        computed from a stale roster.
+        """
+        starter = max(
+            (p for p in self._bot().roster_players if not p.is_bench),
+            key=lambda p: p.projected_points,
+        ).name
+        self._undo_cycle(
+            client,
+            lambda: client.post("/toggle-bench", data={
+                "team_code": "BOT", "player_name": starter}),
+            lambda: (
+                next(p.is_bench for p in self._bot().roster_players if p.name == starter),
+                self._bot().current_roster_points,
+            ),
+            "/toggle-bench",
+        )
+
+    def test_undo_reverts_move_to_minors(self, client):
+        """Benching first is a precondition, not part of what is being tested.
+
+        The demote button only renders for a benched player, so the bench
+        toggle happens before the baseline is read.
+
+        That precondition is also why the reading carries `is_bench`, and it is
+        the load-bearing part. /toggle-bench takes a snapshot of its own, so
+        with a counts-only reading this test PASSED against a build where
+        /move-to-minors had stopped snapshotting: `/undo` popped the bench
+        toggle's snapshot instead, and pre-bench has the same roster and minors
+        counts as post-bench. The endpoint under test was doing nothing and the
+        assertion could not tell. Reading the flag separates the two states.
+        """
+        name = self._bot().roster_players[0].name
+        client.post("/toggle-bench", data={"team_code": "BOT", "player_name": name})
+
+        def where_he_is():
+            p = self._bot().find_player(name)
+            return (
+                len(self._bot().roster_players),
+                len(self._bot().minor_players),
+                (p.is_minor, p.is_bench) if p else None,
+            )
+
+        self._undo_cycle(
+            client,
+            lambda: client.post("/move-to-minors", data={
+                "team_code": "BOT", "player_name": name}),
+            where_he_is,
+            "/move-to-minors",
+        )
+
+    def test_undo_reverts_move_to_roster(self, client):
+        name = self._bot().minor_players[0].name
+        self._undo_cycle(
+            client,
+            lambda: client.post("/move-to-roster", data={
+                "team_code": "BOT", "player_name": name}),
+            lambda: (
+                len(self._bot().roster_players),
+                len(self._bot().minor_players),
+                round(self._bot().total_salary, 2),
+            ),
+            "/move-to-roster",
+        )
+
+    def test_undo_reverts_set_nominator(self, client):
+        import main
+
+        target = next(
+            c for c in main.auction_state._effective_order()
+            if c != main.auction_state.current_nominator()
+        )
+        self._undo_cycle(
+            client,
+            lambda: client.post("/set-nominator", data={"team_code": target}),
+            lambda: (
+                main.auction_state.nomination_index,
+                main.auction_state.current_nominator(),
+            ),
+            "/set-nominator",
+        )
+
+    def test_undo_reverts_trade_between(self, client):
+        """Reads NAME SETS, not counts.
+
+        A 1-for-1 trade leaves both rosters the same size, so a count-based
+        reading cannot fail — the probe that first checked this endpoint used
+        counts and proved nothing. It also used `player_a`/`player_b`, which
+        the endpoint does not take (`players_from_a`/`players_from_b`), so it
+        hit the "no players named" early return and never traded at all.
+        """
+        import main
+
+        def names():
+            return (
+                sorted(p.name for p in main.auction_state.teams["BOT"].roster_players),
+                sorted(p.name for p in main.auction_state.teams["SRL"].roster_players),
+            )
+
+        gives = main.auction_state.teams["BOT"].roster_players[0].name
+        gets = main.auction_state.teams["SRL"].roster_players[0].name
+        self._undo_cycle(
+            client,
+            lambda: client.post("/trade-between", data={
+                "team_a": "BOT", "players_from_a": gives,
+                "team_b": "SRL", "players_from_b": gets}),
+            names,
+            "/trade-between",
+        )

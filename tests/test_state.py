@@ -1,9 +1,18 @@
 """Tests for state.py: TeamState properties, serialization, snapshots."""
 
+import json
+
 import pytest
 
 from config import MAX_SALARY, MIN_SALARY, ROSTER_SIZE, SALARY_CAP
-from state import AuctionState, Player, PlayerOnRoster, TeamState, TransactionRecord
+from state import (
+    AuctionState,
+    ChangeRecord,
+    Player,
+    PlayerOnRoster,
+    TeamState,
+    TransactionRecord,
+)
 
 
 def _make_player_on_roster(
@@ -358,6 +367,147 @@ class TestAuctionStateSerialization:
         assert isinstance(restored.transaction_log[0], TransactionRecord)
 
 
+class TestSnapshotFieldsCannotDrift:
+    """The same field set is maintained by hand in three places.
+
+    `AuctionState`'s dataclass fields, `to_json`'s literal keys, and — until
+    this class was written — eight assignments in `restore_snapshot`. They
+    agreed, and nothing checked that they kept agreeing. Add a field and undo
+    silently stops restoring it, in the one operation with nothing behind it:
+    mid-draft there is no second Ctrl+Z to reach for and the loss is invisible
+    until much later.
+
+    `restore_snapshot` now enumerates `fields(self)`, so the restore side
+    cannot drift at all. These two cover the serialization side, which the
+    enumeration does NOT help — a field `to_json` never writes comes back from
+    `from_json` as its DEFAULT, so undo would restore a zero rather than
+    restore nothing, which is the worse of the two failures.
+
+    Both are needed and they catch different things: dropping a key from
+    `to_json` fails `test_every_field_reaches_the_json`, while making
+    `from_json` ignore a key it still writes fails only
+    `test_every_field_survives_a_round_trip`.
+    """
+
+    def _fields(self) -> set[str]:
+        from dataclasses import fields
+
+        # _snapshots is the undo chain itself, deliberately outside the
+        # snapshot — see restore_snapshot.
+        return {f.name for f in fields(AuctionState)} - {"_snapshots"}
+
+    def _loaded(self) -> AuctionState:
+        """A state with a DISTINCTIVE NON-DEFAULT in every single field.
+
+        Its own builder rather than `TestAuctionStateSerialization._make_state`,
+        which is shared with `test_round_trip` and asserts specific values —
+        changing it in place would break a passing test to serve a new one. The
+        non-defaults are the whole point: a field left at its default round-trips
+        correctly even when nothing carries it.
+        """
+        return AuctionState(
+            teams={"BOT": _make_team(code="BOT", keepers=[_make_player_on_roster("K1")])},
+            available_players={
+                "A1": Player(
+                    name="A1", position="D", group="3", nhl_team="EDM", age=30,
+                    projected_points=44, is_rfa=True, salary=1.5,
+                    team_probability=0.09,
+                )
+            },
+            transaction_log=[
+                TransactionRecord(
+                    player_name="Drafted", position="G", team_code="SRL",
+                    salary=3.0, model_price=2.5, market_price=2.8,
+                    timestamp="2026-03-15T10:00:00", transaction_type="draft",
+                )
+            ],
+            change_log=[
+                ChangeRecord(
+                    timestamp="2026-03-15T10:05:00", kind="adjust-salary",
+                    team_code="BOT", description="K1 2.0 -> 4.0",
+                )
+            ],
+            nomination_order=["SRL", "BOT"],  # not alphabetical, not default
+            nomination_round=3,
+            nomination_index=1,
+            snake_draft=False,
+        )
+
+    def test_every_field_reaches_the_json(self):
+        """Structural: a field that was never serialized."""
+        payload = json.loads(self._loaded().to_json(include_snapshots=False))
+        assert self._fields() == set(payload), (
+            "AuctionState fields and to_json keys have drifted — a field on "
+            "one side and not the other is a field undo restores as a default"
+        )
+
+    def test_every_field_survives_a_round_trip(self):
+        """Behavioural: a field `to_json` writes and `from_json` ignores.
+
+        Structural equality cannot see that — the key is present, it is simply
+        never read back.
+        """
+        state = self._loaded()
+        restored = AuctionState.from_json(state.to_json(include_snapshots=False))
+        for name in sorted(self._fields()):
+            before, after = getattr(state, name), getattr(restored, name)
+            # Records deserialize into equal-valued objects, not identical
+            # ones; compare the serialized form so this works for every field
+            # without a per-field special case.
+            assert json.dumps(after, default=vars) == json.dumps(before, default=vars), (
+                f"{name} did not survive to_json -> from_json"
+            )
+
+    def test_undo_restores_every_field(self):
+        """The claim itself, end to end through save/restore.
+
+        `TestAuctionStateSnapshots.test_save_and_restore` checks `teams` alone.
+        This is the same question asked of all eight, which is what the
+        enumeration in `restore_snapshot` promises.
+        """
+        state = self._loaded()
+        state.save_snapshot()
+        before = {n: json.dumps(getattr(state, n), default=vars) for n in self._fields()}
+
+        state.teams = {}
+        state.available_players = {}
+        state.transaction_log = []
+        state.change_log = []
+        state.nomination_order = []
+        state.nomination_round = 99
+        state.nomination_index = 98
+        state.snake_draft = True
+        assert all(
+            json.dumps(getattr(state, n), default=vars) != before[n]
+            for n in self._fields()
+        ), "the mutation left a field untouched, so restoring it proves nothing"
+
+        assert state.restore_snapshot() is True
+        for name in sorted(self._fields()):
+            assert json.dumps(getattr(state, name), default=vars) == before[name], (
+                f"undo did not restore {name}"
+            )
+
+    def test_the_undo_chain_is_not_itself_restored(self):
+        """`_snapshots` is skipped, and that skip is load-bearing.
+
+        Snapshots are written with `include_snapshots=False`, so the restored
+        object's chain is always the empty default. Copy it and the first undo
+        wipes every earlier one — Ctrl+Z would work exactly once per session.
+        """
+        state = self._loaded()
+        state.save_snapshot()
+        state.nomination_round = 10
+        state.save_snapshot()
+        state.nomination_round = 20
+
+        assert state.restore_snapshot() is True
+        assert state.nomination_round == 10
+        assert state._snapshots, "the first undo emptied the chain"
+        assert state.restore_snapshot() is True
+        assert state.nomination_round == 3, "the second undo did not go back further"
+
+
 class TestAuctionStateSnapshots:
     def test_save_and_restore(self):
         state = AuctionState(
@@ -552,3 +702,95 @@ class TestMinorsMovement:
             team.send_to_minors("Locked-In")
         assert len(team.keeper_players) == 1
         assert team.minor_players == []
+
+
+class TestEveryMutatingPostTakesASnapshot:
+    """The third hand-maintained list, at the endpoint layer.
+
+    Ten POST endpoints call `save_snapshot()`. Nothing says the eleventh has
+    to. A new mutating endpoint that forgets is invisible until someone hits
+    Ctrl+Z mid-draft and the wrong thing comes back — the failure surfaces at
+    the worst possible moment, from a line of code written weeks earlier.
+
+    Same shape as `TestShortcutsModal`: a set-equality check over a list that
+    is otherwise maintained by memory. Adding an endpoint means either taking a
+    snapshot or naming it here with a reason, in the same commit.
+    """
+
+    # Every POST that legitimately takes no snapshot, and why. Not a
+    # suppression list — an entry is a claim that the endpoint does not change
+    # state that undo is responsible for.
+    NO_SNAPSHOT_NEEDED = {
+        "/bid-check": "POST but read-only — computes advice, changes nothing",
+        "/trade-evaluate": "POST but read-only — computes a verdict, changes nothing",
+        "/undo": "pops the chain; snapshotting here would fight itself",
+        "/reset": "replaces the world, so the old chain is meaningless",
+        "/load-scenario": "takes its own explicitly, to survive replacing the global",
+    }
+
+    def _post_routes(self) -> dict[str, bool]:
+        """Every `@app.post` route in main.py -> does its handler snapshot."""
+        import ast
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parent.parent / "main.py").read_text()
+        found: dict[str, bool] = {}
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if not isinstance(dec, ast.Call):
+                    continue
+                fn = dec.func
+                if not (isinstance(fn, ast.Attribute) and fn.attr == "post"):
+                    continue
+                if not (isinstance(fn.value, ast.Name) and fn.value.id == "app"):
+                    continue
+                route = dec.args[0].value
+                found[route] = any(
+                    isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "save_snapshot"
+                    for n in ast.walk(node)
+                )
+        return found
+
+    def test_the_walk_finds_the_routes(self):
+        """The guard below is vacuous if the ast walk matches nothing.
+
+        A decorator rename or a router refactor would empty `_post_routes` and
+        turn every assertion here green — the failure mode of every test that
+        derives its own subject.
+        """
+        routes = self._post_routes()
+        assert len(routes) >= 12, f"only found {len(routes)} POST routes: {sorted(routes)}"
+        assert "/assign" in routes and routes["/assign"], (
+            "/assign is the canonical snapshotting endpoint; if the walk says "
+            "otherwise the walk is broken, not /assign"
+        )
+
+    def test_every_mutating_post_snapshots(self):
+        routes = self._post_routes()
+        missing = sorted(
+            r for r, snaps in routes.items()
+            if not snaps and r not in self.NO_SNAPSHOT_NEEDED
+        )
+        assert not missing, (
+            f"these POST endpoints change state but take no undo snapshot: "
+            f"{missing}. Either call auction_state.save_snapshot(), or add the "
+            f"route to NO_SNAPSHOT_NEEDED with the reason it needs none."
+        )
+
+    def test_the_allow_list_has_no_stale_entries(self):
+        """A route that starts snapshotting must leave the list.
+
+        An exemption nobody removes reads as a decision that was made, and the
+        next person adding an endpoint copies it.
+        """
+        routes = self._post_routes()
+        gone = sorted(set(self.NO_SNAPSHOT_NEEDED) - set(routes))
+        assert not gone, f"NO_SNAPSHOT_NEEDED names routes that no longer exist: {gone}"
+        redundant = sorted(r for r in self.NO_SNAPSHOT_NEEDED if routes.get(r))
+        assert not redundant, (
+            f"these are exempted but do snapshot; drop them from the list: {redundant}"
+        )

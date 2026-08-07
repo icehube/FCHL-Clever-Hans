@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 from config import (
     BUYOUT_ELIGIBLE_GROUPS,
@@ -424,19 +424,29 @@ class AuctionState:
             self._snapshots.pop(0)
 
     def restore_snapshot(self) -> bool:
-        """Restore the most recent snapshot. Returns False if no snapshots."""
+        """Restore the most recent snapshot. Returns False if no snapshots.
+
+        Enumerates the dataclass fields rather than listing them, because a
+        hand-written list fails open: add a field to AuctionState and undo
+        silently stops restoring it, in the one operation with nothing behind
+        it. `tests/test_state.py::TestSnapshotFieldsCannotDrift` covers the
+        other half — a field that never reaches the JSON at all.
+        """
         if not self._snapshots:
             return False
         snapshot = self._snapshots.pop()
         restored = AuctionState.from_json(snapshot)
-        self.teams = restored.teams
-        self.available_players = restored.available_players
-        self.transaction_log = restored.transaction_log
-        self.change_log = restored.change_log
-        self.nomination_order = restored.nomination_order
-        self.nomination_round = restored.nomination_round
-        self.nomination_index = restored.nomination_index
-        self.snake_draft = restored.snake_draft
+        for f in fields(self):
+            # The undo CHAIN is not part of what undo restores. save_snapshot
+            # writes to_json(include_snapshots=False), so restored._snapshots is
+            # always the empty default — copying it would wipe the chain and
+            # make the second Ctrl+Z do nothing. Skipped by name and not by a
+            # leading-underscore rule, so a future private field is restored by
+            # default; the round-trip guards are what make that the safe way to
+            # be wrong.
+            if f.name == "_snapshots":
+                continue
+            setattr(self, f.name, getattr(restored, f.name))
         return True
 
     def to_json(self, include_snapshots: bool = True) -> str:

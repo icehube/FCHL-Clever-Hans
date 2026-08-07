@@ -441,6 +441,31 @@ class TestSnapshotFieldsCannotDrift:
             "one side and not the other is a field undo restores as a default"
         )
 
+    @staticmethod
+    def _value(obj) -> str:
+        """Serialized form of a field, ignoring PRIVATE attributes.
+
+        Records deserialize into equal-valued objects rather than identical
+        ones, so these compare serialized forms — that is what lets one
+        assertion serve every field with no per-field special case.
+
+        The `startswith("_")` filter is the load-bearing part. A plain `vars`
+        includes `TeamState._roster_cache`, which `roster_players` fills in
+        lazily, so whether two equal teams compare equal would depend on
+        whether anything happened to read that property first. These tests
+        passed only because nothing did; touching `roster_players` before the
+        comparison turns them red on a correct build. A caller-order-dependent
+        false FAILURE is worse than a false pass — it fires at random on
+        correct code and gets "fixed" by deleting the assertion. A cache is
+        derived, not state, so undo owes it nothing.
+        """
+        return json.dumps(
+            obj,
+            default=lambda o: {
+                k: v for k, v in vars(o).items() if not k.startswith("_")
+            },
+        )
+
     def test_every_field_survives_a_round_trip(self):
         """Behavioural: a field `to_json` writes and `from_json` ignores.
 
@@ -450,13 +475,24 @@ class TestSnapshotFieldsCannotDrift:
         state = self._loaded()
         restored = AuctionState.from_json(state.to_json(include_snapshots=False))
         for name in sorted(self._fields()):
-            before, after = getattr(state, name), getattr(restored, name)
-            # Records deserialize into equal-valued objects, not identical
-            # ones; compare the serialized form so this works for every field
-            # without a per-field special case.
-            assert json.dumps(after, default=vars) == json.dumps(before, default=vars), (
-                f"{name} did not survive to_json -> from_json"
-            )
+            assert self._value(getattr(restored, name)) == self._value(
+                getattr(state, name)
+            ), f"{name} did not survive to_json -> from_json"
+
+    def test_a_populated_cache_does_not_change_the_answer(self):
+        """Pins the filter above, which is invisible at every call site.
+
+        `_roster_cache` is populated by reading `roster_players` — something a
+        future assertion, or a property like `total_salary`, does incidentally.
+        Without the filter this test fails; with it, the comparison is about
+        state and nothing else.
+        """
+        state = self._loaded()
+        restored = AuctionState.from_json(state.to_json(include_snapshots=False))
+        assert state.teams["BOT"].roster_players  # populate on ONE side only
+        assert state.teams["BOT"]._roster_cache is not None, "precondition"
+        assert restored.teams["BOT"]._roster_cache is None, "precondition"
+        assert self._value(restored.teams) == self._value(state.teams)
 
     def test_undo_restores_every_field(self):
         """The claim itself, end to end through save/restore.
@@ -467,7 +503,7 @@ class TestSnapshotFieldsCannotDrift:
         """
         state = self._loaded()
         state.save_snapshot()
-        before = {n: json.dumps(getattr(state, n), default=vars) for n in self._fields()}
+        before = {n: self._value(getattr(state, n)) for n in self._fields()}
 
         state.teams = {}
         state.available_players = {}
@@ -478,13 +514,12 @@ class TestSnapshotFieldsCannotDrift:
         state.nomination_index = 98
         state.snake_draft = True
         assert all(
-            json.dumps(getattr(state, n), default=vars) != before[n]
-            for n in self._fields()
+            self._value(getattr(state, n)) != before[n] for n in self._fields()
         ), "the mutation left a field untouched, so restoring it proves nothing"
 
         assert state.restore_snapshot() is True
         for name in sorted(self._fields()):
-            assert json.dumps(getattr(state, name), default=vars) == before[name], (
+            assert self._value(getattr(state, name)) == before[name], (
                 f"undo did not restore {name}"
             )
 

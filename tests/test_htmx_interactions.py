@@ -448,3 +448,51 @@ class TestResetIdempotency:
         assert len(state1["available_players"]) == len(state2["available_players"])
         assert len(state1["transaction_log"]) == len(state2["transaction_log"]) == 0
         assert set(state1["teams"].keys()) == set(state2["teams"].keys())
+
+
+class TestShortcutsModal:
+    """The shortcuts list must describe the handler, not a memory of it.
+
+    A stale list is worse than none: it is read once, believed, and then acted
+    on mid-draft. So the modal's rows carry `data-shortcut-key` and this class
+    compares that set against the keys `shortcuts.js` actually binds, in both
+    directions — adding a shortcut without documenting it fails just as loudly
+    as documenting one that does not exist.
+    """
+
+    def _documented(self) -> set[str]:
+        with open(os.path.join(TEMPLATE_DIR, "base.html")) as fh:
+            return set(re.findall(r'data-shortcut-key="([^"]+)"', fh.read()))
+
+    def _bound(self) -> set[str]:
+        with open(SHORTCUTS_JS) as fh:
+            return set(re.findall(r"e\.key\.toLowerCase\(\) === '([a-z])'", fh.read()))
+
+    def test_the_button_and_the_dialog_render(self, client):
+        page = client.get("/").text
+        assert 'id="shortcuts-modal"' in page
+        assert "showModal()" in page, "nothing opens the dialog"
+
+    def test_every_bound_key_is_documented(self):
+        bound, documented = self._bound(), self._documented()
+        assert bound, "no key bindings found — the regex stopped matching"
+        assert bound <= documented, (
+            f"shortcuts.js binds {sorted(bound - documented)} but the modal "
+            f"does not list them — the list is now a lie by omission"
+        )
+
+    def test_every_documented_key_is_bound(self):
+        bound, documented = self._bound(), self._documented()
+        assert documented <= bound, (
+            f"the modal advertises {sorted(documented - bound)}, which "
+            f"shortcuts.js does not handle — pressing it does nothing"
+        )
+
+    def test_the_dialog_survives_a_panel_swap(self, client):
+        """Mounted outside #app, like the startup banner.
+
+        Every mutating endpoint returns all_panels.html into #app, so a dialog
+        inside it would be destroyed mid-read the moment a pick landed.
+        """
+        page = client.get("/").text
+        assert page.index('id="shortcuts-modal"') < page.index('id="app"')

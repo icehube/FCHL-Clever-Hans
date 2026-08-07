@@ -51,6 +51,10 @@
             <span class="text-base font-bold text-primary">FCHL Auction Manager</span>
         </div>
         <div class="flex-none gap-2">
+            <button type="button" class="btn btn-xs btn-outline" title="Keyboard shortcuts"
+                    onclick="document.getElementById('shortcuts-modal').showModal()">
+                ⌨ Shortcuts
+            </button>
             <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-xs btn-outline btn-info" title="Undo (Ctrl+Z)">
                 ↩ Undo
             </button>
@@ -82,6 +86,60 @@
                 onclick="document.getElementById('startup-warning').remove()">✕</button>
     </div>
     {% endif %}
+    {# Outside #app on purpose, like the startup banner above: every panel swap
+       replaces #app's innerHTML, so a modal mounted inside it would be torn out
+       mid-read the moment a pick landed or an htmx trigger fired.
+
+       Each row carries data-shortcut-key matching the key shortcuts.js binds.
+       `TestShortcutsModal` asserts the two sets are equal in both directions —
+       a shortcut list that quietly falls out of step with the handler is worse
+       than no list, because it is believed. #}
+    <dialog id="shortcuts-modal" class="modal">
+        <div class="modal-box bg-base-200">
+            <h3 class="text-base font-bold text-accent mb-3">Keyboard shortcuts</h3>
+            <table class="table table-sm">
+                <tbody>
+                    <tr data-shortcut-key="z">
+                        <td class="whitespace-nowrap">
+                            <kbd class="kbd kbd-sm">Ctrl</kbd> / <kbd class="kbd kbd-sm">⌘</kbd>
+                            + <kbd class="kbd kbd-sm">Z</kbd>
+                        </td>
+                        <td>
+                            <strong>Undo</strong> the last draft action — the same as the
+                            Undo button. Holding the keys does not unwind several picks.
+                        </td>
+                    </tr>
+                    <tr data-shortcut-key="n">
+                        <td class="whitespace-nowrap"><kbd class="kbd kbd-sm">N</kbd></td>
+                        <td>
+                            <strong>Nomination recommendations</strong> — refreshes the
+                            nomination panel only, so it is safe to press mid-bid: the
+                            player, price and bidder toggles survive it.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="text-xs opacity-60 mt-3">
+                Both are ignored while you are typing in a text box, a number box or a
+                dropdown — so a name containing "n" types normally, and Ctrl+Z in a field
+                undoes your typing rather than the last pick. Click a bidder logo and
+                focus lands on a button, not a field, where <kbd class="kbd kbd-xs">N</kbd>
+                is live again.
+            </p>
+            <p class="text-xs opacity-60 mt-2">
+                Everything else is a click. <kbd class="kbd kbd-xs">Esc</kbd> closes this.
+            </p>
+            <div class="modal-action">
+                {# btn-outline, not a bare btn: DaisyUI's default button
+                   background is base-200, the same as this modal-box, so a
+                   plain btn renders as unclickable-looking text. #}
+                <form method="dialog"><button class="btn btn-sm btn-outline">Close</button></form>
+            </div>
+        </div>
+        {# Click-outside-to-close, the DaisyUI way — a form, so no JS listener to
+           leak when the dialog is opened and closed repeatedly during a draft. #}
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
     <div id="toast-container" class="toast toast-top toast-end z-50"></div>
     <main id="app">
         {% block content %}{% endblock %}

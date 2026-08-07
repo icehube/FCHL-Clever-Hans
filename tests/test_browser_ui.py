@@ -404,3 +404,56 @@ class TestTheChartLandsWhereYouClicked:
             "closing the bid panel's chart also closed the table's, in the "
             "other column — × resolved to the wrong element"
         )
+
+
+class TestShortcutsModalOpens:
+    """`showModal()` and `<dialog>` are browser behaviour, not markup.
+
+    The endpoint tests can prove the button and the dialog are on the page and
+    that the documented keys match the handler. Whether clicking actually opens
+    a top-layer dialog, and whether it closes again, only a browser knows.
+    """
+
+    # `.open`, never is_visible(): DaisyUI's .modal leaves a CLOSED <dialog>
+    # laid out and merely transparent (opacity 0 + pointer-events none) rather
+    # than display:none, so Playwright reports a shut dialog as "visible" and an
+    # is_visible() assertion passes in both states. Found by writing it wrong.
+    _OPEN = "() => document.getElementById('shortcuts-modal').open"
+
+    def test_the_button_opens_and_closes_the_dialog(self, page, live_server):
+        _open(page, live_server)
+        assert not page.evaluate(self._OPEN), "the dialog starts open"
+
+        page.click("button[title='Keyboard shortcuts']")
+        page.wait_for_function(self._OPEN)
+
+        text = page.locator("#shortcuts-modal").inner_text()
+        assert "Ctrl" in text and "Z" in text and "N" in text
+
+        page.keyboard.press("Escape")
+        page.wait_for_function(f"() => !({self._OPEN})()")
+
+    def test_it_survives_a_panel_swap_while_open(self, page, live_server):
+        """The reason it is mounted outside #app.
+
+        Every mutating endpoint swaps all_panels.html into #app. A dialog
+        inside it would be torn out mid-read the moment a pick landed — and
+        during a draft, picks land while you are reading.
+
+        The swap is fired through htmx.ajax rather than by clicking Undo,
+        because a top-layer modal correctly blocks clicks on the page behind
+        it — an earlier draft of this test clicked Undo and timed out, which is
+        the browser being right. A background swap is the reachable case
+        anyway: an in-flight request landing while the list is open.
+        """
+        _open(page, live_server)
+        page.click("button[title='Keyboard shortcuts']")
+        page.wait_for_function(self._OPEN)
+
+        with page.expect_response(re.compile(r"/undo")):
+            page.evaluate(
+                "() => htmx.ajax('POST', '/undo', {target: '#app', swap: 'innerHTML'})"
+            )
+        page.wait_for_selector("#bid-panel")
+
+        assert page.evaluate(self._OPEN), "a panel swap closed the shortcuts dialog"

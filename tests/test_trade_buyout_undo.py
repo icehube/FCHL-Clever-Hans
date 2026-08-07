@@ -651,6 +651,22 @@ class TestOverCapTradesWarn:
         assert toast.get("type") == "success", toast
         assert "over cap" not in toast["message"], toast
 
+    def test_missing_team_codes_are_skipped(self, client):
+        """The documented no-op path, which the signature originally denied.
+
+        `TradeEvaluation.source_team_code` is `str | None` and /trade-execute
+        passes it straight through, so None and "" reach this helper on any
+        BOT-side trade with no counterparty. The first version annotated
+        `*team_codes: str`, which was simply false about its own caller.
+        """
+        import main as _main
+        assert _main._cap_overages(None) == []
+        assert _main._cap_overages("") == []
+        assert _main._cap_overages("NOPE") == []
+        # A real over-cap team is still found alongside the junk.
+        self._squeeze("SRL", headroom=-2.0)
+        assert _main._cap_overages(None, "SRL", "") == ["SRL $2.0M over cap"]
+
     def test_trade_execute_warns_too(self, client):
         """The BOT-side path has the same gap."""
         import main as _main

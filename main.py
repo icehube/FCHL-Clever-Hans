@@ -275,7 +275,7 @@ def _legal_salary(value: float) -> float:
     return round(max(MIN_SALARY, min(value, MAX_SALARY)), 1)
 
 
-def _cap_overages(*team_codes: str) -> list[str]:
+def _cap_overages(*team_codes: str | None) -> list[str]:
     """Teams currently over the cap, worst first, as '<CODE> $X.XM over cap'.
 
     Trades are allowed to leave a team over — the league resolves those with
@@ -283,8 +283,10 @@ def _cap_overages(*team_codes: str) -> list[str]:
     Without it an accidental over-cap trade returned the same green toast as a
     legal one, which is the whole gap being closed.
 
-    An unknown or empty code is skipped by design: /trade-execute may have no
-    source_team, and the alternative is a conditional at every call site.
+    An unknown, empty or None code is skipped by design: `TradeEvaluation.
+    source_team_code` is `str | None` and /trade-execute passes it straight
+    through, so the signature admits None rather than making every call site
+    guard.
     """
     over: list[tuple[float, str]] = []
     for code in team_codes:

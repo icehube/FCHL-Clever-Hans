@@ -374,6 +374,7 @@ def compute_bid_recommendation(
     market_info: MarketInfo,
     current_price: float = 0.0,
     bot_uncontested: bool = False,
+    marginal_value: float | None = None,
 ) -> BidRecommendation:
     """
     Compute max bid and recommend BID / CAUTION / DROP / WIN.
@@ -391,8 +392,20 @@ def compute_bid_recommendation(
 
     Pass bot_uncontested=True when BOT is the only bidder left — the auction is
     over, and the verdict is WIN or DROP against the value cap.
+
+    `marginal_value` lets a caller supply an already-computed marginal. It costs
+    ~10 MILP solves and depends on none of the arguments that move between two
+    bid checks on the same player — not `current_price`, not the bidder list
+    behind `market_info` — so a live auction spends most of its time recomputing
+    a number that cannot have changed. Callers that cache it are responsible for
+    invalidating on state change; see `main._marginal_value`. Omit it and this
+    computes the marginal itself, which is what every test does.
     """
-    marginal = compute_marginal_value(player, team, available_players, market_prices)
+    marginal = (
+        compute_marginal_value(player, team, available_players, market_prices)
+        if marginal_value is None
+        else marginal_value
+    )
     ceiling = market_info.market_ceiling
     value_cap = round(min(marginal, team.physical_max_bid), 1)
 

@@ -27,6 +27,7 @@ from market import (
 )
 from optimizer import (
     compute_bid_recommendation,
+    compute_marginal_value,
     generate_counterfactual,
     recommend_nomination,
     solve_optimal_roster,
@@ -37,7 +38,7 @@ from price_model import (
     load_model_params,
     predict_all_prices,
 )
-from state import AuctionState, ChangeRecord, PlayerOnRoster, TransactionRecord
+from state import AuctionState, ChangeRecord, Player, PlayerOnRoster, TransactionRecord
 from trade import (
     PlayerTrade,
     evaluate_buyout,
@@ -139,14 +140,43 @@ templates = Jinja2Templates(directory="templates")
 buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 
 
+# Marginal values for the current state epoch, keyed by player name. Cleared
+# wholesale by _recompute() rather than versioned: a version counter has the
+# same failure mode (forget to bump, serve a stale number as live bid advice)
+# plus unbounded growth. An empty dict cannot serve a stale entry.
+_marginal_cache: dict[str, float] = {}
+
+
+def _marginal_value(player: Player) -> float:
+    """Marginal value of `player` to BOT, cached for this state epoch.
+
+    compute_marginal_value costs ~10 MILP solves (~780ms on a 704-player pool)
+    and is pure in (roster, budget, pool, market prices). None of those move
+    when the price or the bidder list changes — which is all /bid-check varies
+    between calls — so a live auction otherwise spends a second per $0.1M
+    increment re-deriving an identical number.
+    """
+    if player.name not in _marginal_cache:
+        _marginal_cache[player.name] = compute_marginal_value(
+            player,
+            auction_state.teams[MY_TEAM],
+            auction_state.available_players,
+            market_prices,
+        )
+    return _marginal_cache[player.name]
+
+
 def _recompute():
     """After any state change: recompute market prices + re-solve MILP.
 
     Also invalidates any pending trade evaluation — a trade evaluated
-    against the old world must not be executable against the new one.
+    against the old world must not be executable against the new one. The
+    cached marginal values go for exactly the same reason: they are derived
+    from the roster, budget and market prices this function is replacing.
     """
     global market_prices, market_info, milp_solution, last_trade_eval
     last_trade_eval = None
+    _marginal_cache.clear()
     market_info = compute_market_ceiling(auction_state.teams)
     all_market = compute_all_market_prices(
         auction_state.available_players, model_prices, auction_state.teams,
@@ -482,6 +512,8 @@ async def bid_check(
     rec = compute_bid_recommendation(
         p, team, auction_state.available_players, market_prices, live_info, price,
         bot_uncontested=(winner == MY_TEAM),
+        # Cached across price steps and bidder toggles — neither can change it.
+        marginal_value=_marginal_value(p),
     )
 
     ctx = _context(request)

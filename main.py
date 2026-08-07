@@ -58,12 +58,16 @@ market_prices: dict[str, float] | None = None
 market_info: MarketInfo | None = None
 milp_solution = None
 last_trade_eval = None
+# Set by lifespan when startup degraded (backup used, fresh start despite a
+# saved file, a backfill skipped). In memory rather than on disk because the
+# claim is about THIS boot: a clean restart should not re-raise a fixed alarm.
+_startup_warning: str | None = None
 
 
 # The backfills take the state explicitly rather than reading the global: a
 # candidate loaded off disk has to be validated BEFORE it is installed, or a
 # half-backfilled corrupt state is already the live one by the time it raises.
-def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv"):
+def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv") -> None:
     """Fill in nhl_team for roster players loaded from old state files."""
     import csv
     nhl_lookup: dict[str, str] = {}
@@ -76,7 +80,9 @@ def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv")
                 p.nhl_team = nhl_lookup.get(p.name, "")
 
 
-def _backfill_team_metadata(state: AuctionState, teams_path: str = "data/fchl_teams.json"):
+def _backfill_team_metadata(
+    state: AuctionState, teams_path: str = "data/fchl_teams.json"
+) -> None:
     """Refresh team metadata (logos, colors) from fchl_teams.json for old state files."""
     with open(teams_path) as f:
         meta = json.load(f)
@@ -85,7 +91,7 @@ def _backfill_team_metadata(state: AuctionState, teams_path: str = "data/fchl_te
             team.logo = meta[code].get("logo", team.logo)
 
 
-def _backfill_model_inputs(state: AuctionState):
+def _backfill_model_inputs(state: AuctionState) -> None:
     """Fill model inputs missing from pre-round-2 state files.
 
     pos_rank is recomputed over the remaining pool (approximate for
@@ -119,27 +125,68 @@ def _load_saved_state(path: str) -> AuctionState | None:
     replaces (JSONDecodeError/KeyError/ValueError) let an AttributeError from a
     shape mismatch stop the app booting outright. A genuinely missing data file
     still fails loudly — build_initial_state() reads the same CSVs and raises.
+
+    Only the PARSE decides whether the file is usable. The backfills each get
+    their own net below, because folding them in here made a broken fixup
+    indistinguishable from a broken file: one raise from `_backfill_model_inputs`
+    on a legacy snapshot renamed a byte-perfect draft `.corrupt` and started
+    fresh, returning 200 with nothing on screen to say 150 picks had gone.
     """
     if not os.path.exists(path):
         return None  # absent is not an error worth logging
     try:
         with open(path) as f:
             state = AuctionState.from_json(f.read())
-        _backfill_nhl_teams(state)
-        _backfill_team_metadata(state)
-        _backfill_model_inputs(state)
-        return state
     except Exception as e:
         logging.warning("Cannot use %s: %s: %s", path, type(e).__name__, e)
         return None
+    # Labelled by what the operator loses, not by function name: the banner is
+    # read mid-auction by someone deciding whether to trust a number on screen,
+    # and "_backfill_model_inputs raised" does not answer that. The log keeps
+    # the identifier and the exception for whoever debugs it afterwards.
+    for label, backfill in (
+        ("NHL teams on rostered players", _backfill_nhl_teams),
+        ("team logos", _backfill_team_metadata),
+        ("price model inputs, so PRICES MAY BE WRONG", _backfill_model_inputs),
+    ):
+        try:
+            backfill(state)
+        except Exception as e:
+            # Never fatal: not one of the three is load-bearing for the draft
+            # record — they fill logos, nhl_team and legacy model inputs. A
+            # missing logo must not cost the auction. ERROR rather than WARNING
+            # because _backfill_model_inputs failing is not cosmetic: prices are
+            # then computed off legacy pos_rank / team_probability / proj_wins.
+            logging.error("Skipped %s on %s: %s: %s — the draft is intact, but "
+                          "anything it fills is stale",
+                          backfill.__name__, path, type(e).__name__, e)
+            _warn_at_startup(
+                f"Could not refresh {label} — those values are stale. "
+                f"The draft itself loaded normally."
+            )
+    return state
+
+
+def _warn_at_startup(message: str) -> None:
+    """Record something the operator must see about how this boot went.
+
+    Startup is not a request, so there is no toast to fire; `_context` hands
+    this to base.html, which renders it as a banner until dismissed or reloaded.
+    Accumulates rather than overwrites — a boot that both skipped a backfill and
+    fell back to the backup has two things worth saying, and the second is not
+    more important than the first.
+    """
+    global _startup_warning
+    _startup_warning = f"{_startup_warning} {message}" if _startup_warning else message
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
-    global auction_state, model_params, model_prices
+    global auction_state, model_params, model_prices, _startup_warning
     os.makedirs(STATE_DIR, exist_ok=True)
     model_params = load_model_params()
+    _startup_warning = None  # this boot's story, not the previous one's
     # Recovery ladder: current -> backup -> fresh. A fresh state is 150 picks
     # thrown away, so it is the last resort rather than the first fallback.
     saved_path = os.path.join(STATE_DIR, "auction_state.json")
@@ -157,8 +204,22 @@ async def lifespan(app: FastAPI):
     if auction_state is None:
         auction_state = _load_saved_state(saved_path + ".backup")
         if auction_state is not None:
-            logging.warning("Recovered the draft from the backup file")
+            logging.error("Recovered the draft from the backup file")
+            _warn_at_startup(
+                "Could not read the saved draft, so this is the backup copy — "
+                "one save behind. Check the last pick is here and re-enter it "
+                "if it is not."
+            )
     if auction_state is None:
+        if os.path.exists(saved_path + ".corrupt"):
+            # The loud case: a state file existed and nothing could be salvaged.
+            # Without this the app comes up looking like a normal fresh start.
+            logging.error("No usable saved draft; starting fresh")
+            _warn_at_startup(
+                "Could not read the saved draft or its backup, so this is a "
+                f"NEW auction. The unreadable file is at {saved_path}.corrupt — "
+                "nothing has overwritten it."
+            )
         auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
@@ -545,6 +606,10 @@ def _context(request: Request) -> dict:
         "market_prices": market_prices,
         "projections": projections,
         "default_bidders": default_bidders,
+        # Read by base.html only, so it reaches the screen on a full page load
+        # and not on htmx partial swaps — which is what keeps it on screen: a
+        # panel swap replaces panels, never the banner above them.
+        "startup_warning": _startup_warning,
     }
 
 
@@ -957,7 +1022,12 @@ async def buyout_indicators_endpoint(request: Request):
 @app.post("/reset", response_class=HTMLResponse)
 async def reset(request: Request):
     """Reset to fresh state from CSV data."""
-    global auction_state, model_prices
+    global auction_state, model_prices, _startup_warning
+    # A deliberate fresh start answers whatever the banner was warning about —
+    # leaving it up would have it read as a live alarm against a state the
+    # operator just chose. Nothing here can re-degrade: build_initial_state
+    # raises rather than half-loading.
+    _startup_warning = None
     auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()

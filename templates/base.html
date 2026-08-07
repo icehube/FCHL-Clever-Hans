@@ -68,6 +68,20 @@
             </button>
         </div>
     </div>
+    {% if startup_warning %}
+    {# Startup is not a request, so there is no toast to fire — a degraded boot
+       (backup copy used, fresh start despite a saved file, backfill skipped)
+       would otherwise show up only in the terminal, and the app would look
+       exactly like a normal fresh draft. Sits OUTSIDE #app deliberately: every
+       panel swap replaces #app's innerHTML, so putting it inside would mean
+       drafting one player silently clears the notice that your draft is gone. #}
+    <div id="startup-warning" role="alert"
+         class="alert alert-warning rounded-none py-2 px-4 flex items-start gap-3">
+        <span class="text-sm flex-1">{{ startup_warning }}</span>
+        <button type="button" class="btn btn-xs btn-ghost" title="Dismiss"
+                onclick="document.getElementById('startup-warning').remove()">✕</button>
+    </div>
+    {% endif %}
     <div id="toast-container" class="toast toast-top toast-end z-50"></div>
     <main id="app">
         {% block content %}{% endblock %}

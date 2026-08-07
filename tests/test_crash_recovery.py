@@ -21,20 +21,34 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+# Everything lifespan and _recompute own. Restoring `auction_state` alone is
+# WORSE than restoring nothing: it pairs a restored roster with a MILP solution
+# and market prices solved against a different one, which is the stale-derived-
+# value hazard _recompute()'s own docstring is about. Unreachable today only
+# because every other test file context-manages TestClient (re-running
+# lifespan) — order-dependence that is invisible at the call site.
+_APP_GLOBALS = (
+    "STATE_DIR", "auction_state", "model_prices",
+    "market_prices", "market_info", "milp_solution", "last_trade_eval",
+)
+
+
 @pytest.fixture
 def state_dir(tmp_path):
-    """Point the app at an empty temp STATE_DIR, restoring the globals after.
-
-    Both `STATE_DIR` and `auction_state` are module globals that `lifespan`
-    writes, so without the restore the first recovery test here would leave a
-    hand-built state installed for every test that runs afterwards.
-    """
+    """Point the app at an empty temp STATE_DIR, restoring the globals after."""
     import main
 
-    saved_dir, saved_state = main.STATE_DIR, main.auction_state
+    saved = {name: getattr(main, name) for name in _APP_GLOBALS}
     main.STATE_DIR = str(tmp_path)
     yield tmp_path
-    main.STATE_DIR, main.auction_state = saved_dir, saved_state
+    for name, value in saved.items():
+        setattr(main, name, value)
+    # Cleared rather than snapshotted, for the reason _recompute gives: an empty
+    # cache cannot serve a stale entry, and these are keyed by player name only.
+    main._marginal_cache.clear()
+    main._counterfactual_cache.clear()
+    main.buyout_indicators.clear()
+    main._startup_warning = None
 
 
 def _draft(client, player: str, team: str, salary: float):
@@ -49,7 +63,14 @@ def _draft(client, player: str, team: str, salary: float):
     r = client.post("/assign", data={
         "player": player, "team": team, "salary": salary})
     assert r.status_code == 200, r.text
-    assert player in _acquired(team), r.headers.get("HX-Trigger", "no toast")
+    # acquired OR minors: a team at 24 auto-routes the pick to the minors
+    # (owner decision 2026-08-06), so acquired-only would fail on a full roster
+    # for a pick that landed correctly. No team here is near 24 — this keeps the
+    # helper reusable rather than fixing a reachable bug.
+    import main
+    t = main.auction_state.teams[team]
+    landed = {p.name for p in t.acquired_players + t.minor_players}
+    assert player in landed, r.headers.get("HX-Trigger", "no toast")
     return r
 
 
@@ -159,6 +180,119 @@ class TestRecoveryLadder:
             assert player in _acquired(team)
         assert backup.read_text() == before
         assert not (state_dir / "auction_state.json.corrupt").exists()
+
+
+class TestABrokenBackfillDoesNotCostTheDraft:
+    """A file that PARSES is usable, whatever the fixups afterwards do.
+
+    Found by grilling the first version of this file, which wrapped the parse
+    and all three backfills in one `except`. One raise from
+    `_backfill_model_inputs` — plausible on exactly the legacy snapshots it
+    exists to serve — renamed a byte-perfect draft `.corrupt`, fell through to a
+    backup that failed identically, and started fresh returning 200. The draft
+    was gone and the app looked normal.
+    """
+
+    @pytest.fixture
+    def broken_backfill(self, monkeypatch):
+        """Make the riskiest backfill raise, leaving the state file pristine."""
+        import main
+
+        def boom(state):
+            raise TypeError("'<' not supported between 'NoneType' and 'float'")
+
+        monkeypatch.setattr(main, "_backfill_model_inputs", boom)
+        return boom
+
+    def test_the_draft_survives(self, state_dir, broken_backfill):
+        import main
+
+        player, team = _good_state_with_pick(state_dir)
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            assert player in _acquired(team), "a good draft was thrown away"
+
+    def test_the_good_file_is_not_renamed(self, state_dir, broken_backfill):
+        """The rename must mean "unparseable", or the name is a lie."""
+        import main
+
+        _good_state_with_pick(state_dir)
+        before = (state_dir / "auction_state.json").read_text()
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+        assert (state_dir / "auction_state.json").read_text() == before
+        assert not (state_dir / "auction_state.json.corrupt").exists()
+
+    def test_it_says_so_on_screen(self, state_dir, broken_backfill):
+        """Stale model inputs are not cosmetic — prices come off them.
+
+        Asserts the operator-facing consequence, not the function name: the
+        banner is read mid-auction by someone deciding whether to trust a price.
+        """
+        import main
+
+        _good_state_with_pick(state_dir)
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert "PRICES MAY BE WRONG" in page, "the banner does not say what broke"
+        assert "stale" in page
+
+
+class TestDegradedStartupIsVisible:
+    """A lost or downgraded draft must not look like a normal start.
+
+    The whole failure mode being guarded is silence: every one of these paths
+    used to answer 200 with a clean-looking page, so the only evidence was a
+    line in a terminal nobody watches mid-auction.
+    """
+
+    def test_recovering_from_the_backup_says_so(self, state_dir):
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("{ truncated")
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert "backup copy" in page
+        assert "one save behind" in page, "the operator is not told what it costs"
+
+    def test_a_forced_fresh_start_says_so_and_names_the_file(self, state_dir):
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("not json at all")
+        (state_dir / "auction_state.json.backup").write_text("{")
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert "NEW auction" in page
+        assert "auction_state.json.corrupt" in page, "cannot find the salvage"
+
+    def test_the_happy_path_shows_no_banner(self, state_dir):
+        """Without this the banner becomes wallpaper and stops being read."""
+        import main
+
+        _good_state_with_pick(state_dir)
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert 'id="startup-warning"' not in page
+
+    def test_reset_clears_it(self, state_dir):
+        """A deliberate fresh start answers the warning; leaving it up lies."""
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("{ truncated")
+
+        with TestClient(main.app) as c:
+            assert 'id="startup-warning"' in c.get("/").text
+            c.post("/reset")
+            assert 'id="startup-warning"' not in c.get("/").text
 
 
 class TestBackupSurvivesTheRestart:

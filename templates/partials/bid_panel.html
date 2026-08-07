@@ -71,10 +71,6 @@
         {% if bid_advice.action != "BID" %}
         <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>
         {% endif %}
-        {% if bid_advice.action == "DROP" %}
-        <a hx-get="/explain/{{ bid_advice.player_name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML"
-           class="link link-info text-xs">Why not bid?</a>
-        {% endif %}
     </div>
 
     {# Single bid form: visible player + price; hidden bidders synced from grid.
@@ -142,6 +138,29 @@
         </button>
     </form>
     {% endif %}
+
+    {# Counterfactual for the player under the hammer: "what do I lose if I let
+       him go?" — the question you actually ask mid-auction, and one that used
+       to cost a click that only existed on a DROP verdict.
+
+       Loaded lazily rather than computed in /bid-check. Two MILP solves
+       (~200ms) folded into an endpoint that fires on every price change and
+       every bidder toggle would undo the 9ms that keeps a response from
+       landing between mousedown and mouseup on Assign. Repeat loads hit
+       main._counterfactual's per-epoch cache, so a bidder toggle costs ~10ms.
+
+       PLACEMENT IS LOAD-BEARING, twice over:
+       - Outside #bid-advice, because the price input carries
+         hx-select="#bid-advice" — anything inside that block is recreated on
+         every price change and would re-fire `load` on each one.
+       - Last in the panel, AFTER the Assign form, so a fragment arriving
+         200ms late cannot reflow the price input or Assign out from under the
+         pointer. Same class of bug as the blur race; this is the mitigation. #}
+    <div id="bid-counterfactual" class="mt-2"
+         hx-get="/explain/{{ bid_advice.player_name|urlencode }}?inline=1"
+         hx-trigger="load" hx-target="#bid-counterfactual" hx-swap="innerHTML">
+        <span class="text-xs opacity-50">Analyzing alternatives…</span>
+    </div>
 
     {% else %}
     <!-- No auction active: bid advisor form. Bidder grid is intentionally

@@ -1,0 +1,72 @@
+{# Body of the counterfactual, with no wrapper of its own — mounted twice: by
+   explanation.html as the standalone #explanation panel (the "?" links in the
+   players table), and directly into #bid-counterfactual by the bid panel's
+   lazy load. Kept id-free so the two mounts can coexist in one document.
+
+   The guard renders NOTHING when there is no counterfactual, rather than an
+   empty-state message: the two mounts want different words there (the panel
+   prompts you to click "?", which the bid panel has none of), so each owns its
+   own. Reachable inline only if the player leaves the pool between the bid
+   panel rendering and this loading. #}
+{% if counterfactual is defined and counterfactual %}
+<div>
+    <h3 class="font-bold text-sm">{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
+
+    <div class="grid grid-cols-2 gap-2 mt-2">
+        <div class="card bg-base-300 p-3">
+            <h4 class="text-xs font-semibold opacity-70 mb-1">With {{ cf_player.name }}</h4>
+            <div class="text-sm">Points: {{ "%.0f"|format(counterfactual.with_player.total_points) }}</div>
+            <div class="text-sm">Cost: ${{ "%.1f"|format(counterfactual.with_player.total_cost) }}M</div>
+        </div>
+        <div class="card bg-base-300 p-3">
+            <h4 class="text-xs font-semibold opacity-70 mb-1">Without {{ cf_player.name }}</h4>
+            <div class="text-sm">Points: {{ "%.0f"|format(counterfactual.without_player.total_points) }}</div>
+            <div class="text-sm">Cost: ${{ "%.1f"|format(counterfactual.without_player.total_cost) }}M</div>
+        </div>
+    </div>
+
+    {# Lead with the verdict, not the delta. The numbers alone don't answer
+       "so do I bid?", and they're meaningless without the price they were
+       computed at. #}
+    {% set gain = counterfactual.points_difference %}
+    {% set alt = counterfactual.alternative_players[0].name if counterfactual.alternative_players else None %}
+    {# Three cases, not two: a zero delta is a genuine toss-up, and folding
+       it into "skip" produced "costs you 0 lineup points". Common in an
+       endgame where the remaining players are interchangeable. #}
+    {% set tone = 'alert-success' if gain > 0 else ('alert-info' if gain == 0 else 'alert-warning') %}
+    <div class="alert alert-sm py-2 mt-2 text-xs {{ tone }}">
+        {% if gain > 0 %}
+        <span>
+            <strong>Worth having at ${{ cf_price }}M</strong> — he adds
+            {{ "%.0f"|format(gain) }} lineup points over your best roster without him{% if alt %},
+            where you'd draft {{ alt }} instead{% endif %}.
+            Cap effect: {{ "%+.1f"|format(counterfactual.budget_difference) }}M.
+        </span>
+        {% elif gain == 0 %}
+        <span>
+            <strong>Toss-up at ${{ cf_price }}M</strong> — your best roster scores the
+            same with or without him{% if alt %}; {{ alt }} does the same job for the
+            money{% endif %}. Worth taking only below ${{ cf_price }}M.
+        </span>
+        {% else %}
+        <span>
+            <strong>Skip him at ${{ cf_price }}M</strong> — locking him in at that price
+            costs you {{ "%.0f"|format(-gain) }} lineup points versus spending the money
+            elsewhere{% if alt %}, starting with {{ alt }}{% endif %}.
+            Worth revisiting only at a lower price.
+        </span>
+        {% endif %}
+    </div>
+
+    {% if counterfactual.alternative_players %}
+    <div class="mt-2">
+        <h4 class="text-xs font-semibold opacity-70 mb-1">Alternatives (who you'd draft instead):</h4>
+        <ul class="text-xs list-disc list-inside">
+        {% for alt in counterfactual.alternative_players[:5] %}
+            <li>{{ alt.name }} ({{ alt.position }}, {{ alt.projected_points }}pts)</li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endif %}

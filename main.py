@@ -26,6 +26,7 @@ from market import (
     live_opponents,
 )
 from optimizer import (
+    CounterfactualResult,
     compute_bid_recommendation,
     compute_marginal_value,
     generate_counterfactual,
@@ -166,17 +167,76 @@ def _marginal_value(player: Player) -> float:
     return _marginal_cache[player.name]
 
 
+# Counterfactuals for the current state epoch, on the same terms as
+# _marginal_cache. Holds objects rather than floats, but an epoch ends at every
+# assign, so in practice this is the one or two players bid on since the last
+# sale — not worth a bound.
+_counterfactual_cache: dict[str, CounterfactualResult] = {}
+
+
+def _cf_price(player_name: str) -> float:
+    """The price a counterfactual is conditioned on: the expected clearing price.
+
+    One definition, because the analysis and the sentence describing it are
+    computed in different places and a drift between them would show a verdict
+    ("Skip him at $9.5M") derived from a different number than the one quoted.
+    """
+    return market_prices.get(player_name, MIN_SALARY)
+
+
+def _counterfactual(player: Player) -> CounterfactualResult:
+    """Roster with vs without `player` at the market price, cached this epoch.
+
+    Two MILP solves (~200ms), pure in (roster, budget, pool, market prices) —
+    the same inputs _recompute() replaces. Keyed on the MARKET price and not
+    the live bid on purpose: that is what makes it epoch-stable, and re-solving
+    per $0.1M increment would put a 200ms response back inside the window where
+    it can land between mousedown and mouseup on Assign.
+    """
+    if player.name not in _counterfactual_cache:
+        _counterfactual_cache[player.name] = generate_counterfactual(
+            player,
+            _cf_price(player.name),
+            auction_state.teams[MY_TEAM],
+            auction_state.available_players,
+            market_prices,
+        )
+    return _counterfactual_cache[player.name]
+
+
+def _counterfactual_context(player_name: str) -> dict | None:
+    """Template variables needed by counterfactual.html.
+
+    Returns None if the player isn't in the pool. Used by both /explain and the
+    bid panel's lazy mount, mirroring _chart_context.
+    """
+    p = auction_state.available_players.get(player_name)
+    if p is None:
+        return None
+    return {
+        "counterfactual": _counterfactual(p),
+        "cf_player": p,
+        # The whole verdict is conditioned on this price — without it the panel
+        # shows a points delta the reader can't judge.
+        "cf_price": round(_cf_price(player_name), 1),
+    }
+
+
 def _recompute():
     """After any state change: recompute market prices + re-solve MILP.
 
     Also invalidates any pending trade evaluation — a trade evaluated
     against the old world must not be executable against the new one. The
-    cached marginal values go for exactly the same reason: they are derived
-    from the roster, budget and market prices this function is replacing.
+    cached marginal values and counterfactuals go for exactly the same reason:
+    they are derived from the roster, budget and market prices this function is
+    replacing. A stale counterfactual is the worse of the two, because it names
+    specific alternative players — it would recommend drafting someone who has
+    already been sold.
     """
     global market_prices, market_info, milp_solution, last_trade_eval
     last_trade_eval = None
     _marginal_cache.clear()
+    _counterfactual_cache.clear()
     market_info = compute_market_ceiling(auction_state.teams)
     all_market = compute_all_market_prices(
         auction_state.available_players, model_prices, auction_state.teams,
@@ -579,25 +639,23 @@ async def nominate(request: Request):
 
 
 @app.get("/explain/{player_name}", response_class=HTMLResponse)
-async def explain(request: Request, player_name: str):
-    """Why not bid: counterfactual explanation."""
-    p = auction_state.available_players.get(player_name)
-    if p is None:
-        ctx = _context(request)
-        ctx["counterfactual"] = None
-        return _render(request, "partials/explanation.html", ctx)
+async def explain(request: Request, player_name: str, inline: bool = False):
+    """Why not bid: counterfactual explanation.
 
-    team = auction_state.teams[MY_TEAM]
-    price = market_prices.get(player_name, MIN_SALARY)
-    cf = generate_counterfactual(p, price, team, auction_state.available_players, market_prices)
-
+    `inline=1` returns the body alone, for the bid panel's lazy mount; the
+    default returns the standalone `#explanation` section the Available Players
+    table's "?" links swap. Same analysis, two mount points — a query param
+    rather than a second route, since only the wrapper differs.
+    """
+    template = (
+        "partials/counterfactual.html" if inline else "partials/explanation.html"
+    )
     ctx = _context(request)
-    ctx["counterfactual"] = cf
-    ctx["cf_player"] = p
-    # The whole verdict is conditioned on this price — without it the panel
-    # shows a points delta the reader can't judge.
-    ctx["cf_price"] = round(price, 1)
-    return _render(request, "partials/explanation.html", ctx)
+    ctx["counterfactual"] = None
+    cf = _counterfactual_context(player_name)
+    if cf is not None:
+        ctx.update(cf)
+    return _render(request, template, ctx)
 
 
 @app.post("/trade-evaluate", response_class=HTMLResponse)

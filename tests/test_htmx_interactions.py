@@ -307,6 +307,69 @@ class TestSwapTargetsResolve:
         )
 
 
+class TestCounterfactualAutoLoads:
+    """The counterfactual arrives by itself, and lands where it can't do harm.
+
+    Both placement rules below are invisible at the call site — the mount looks
+    like a div that could sit anywhere in the panel — and a tidy-up that moved
+    it next to the verdict, where it visually belongs, would silently reopen a
+    bug. So they are asserted on position, with the reason in the message.
+    """
+
+    def _live_panel(self, client) -> str:
+        """A bid panel with a single bidder, so the Assign form renders too."""
+        r = client.post("/bid-check", data={
+            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT",
+        })
+        assert r.status_code == 200
+        assert 'hx-post="/assign"' in r.text, "fixture needs the Assign form"
+        return r.text
+
+    def test_the_mount_requests_the_current_player(self, client):
+        panel = self._live_panel(client)
+        mount = re.search(
+            r'<div id="bid-counterfactual".*?hx-get="([^"]+)".*?hx-trigger="([^"]+)"',
+            panel, re.S,
+        )
+        assert mount, "the bid panel no longer auto-loads a counterfactual"
+        assert "Connor%20McDavid" in mount.group(1), mount.group(1)
+        assert "inline=1" in mount.group(1), (
+            "must request the body-only fragment; the full panel would put a "
+            "second id=\"explanation\" on the page"
+        )
+        assert mount.group(2) == "load"
+
+    def test_the_mount_is_outside_the_price_swap_region(self, client):
+        """#bid-advice is what a price change replaces (hx-select).
+
+        Inside it, `load` would re-fire on every keystroke in the price box.
+        """
+        panel = self._live_panel(client)
+        advice_open = panel.index('id="bid-advice"')
+        advice_close = panel.index('id="bid-form"')  # first element after it
+        mount = panel.index('id="bid-counterfactual"')
+        assert not advice_open < mount < advice_close, (
+            "the counterfactual mount is inside #bid-advice, so every price "
+            "change would re-trigger its load"
+        )
+
+    def test_the_mount_is_after_the_assign_button(self, client):
+        """A fragment arriving ~200ms late must not reflow the controls.
+
+        Above the Assign form, the analysis inserting itself would push the
+        button down under a pointer already travelling towards it — the same
+        class of bug as the blur race that swallowed Assign clicks.
+        """
+        panel = self._live_panel(client)
+        assert panel.index('id="bid-counterfactual"') > panel.rindex('hx-post="/assign"'), (
+            "the counterfactual mount sits above the Assign form; a late "
+            "response would move the button mid-click"
+        )
+        assert panel.index('id="bid-counterfactual"') > panel.index('id="bid-price"'), (
+            "the counterfactual mount sits above the price input"
+        )
+
+
 class TestPositionFilterAttributes:
     """Available players table rows must have data-position for JS filtering."""
 

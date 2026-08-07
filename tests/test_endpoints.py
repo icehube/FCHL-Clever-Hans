@@ -1,5 +1,6 @@
 """Tests for main.py: FastAPI endpoints."""
 
+import re
 from contextlib import contextmanager
 
 import pytest
@@ -628,6 +629,59 @@ class TestBidSessionSurvives:
         for marker in ('id="auction-control"', 'id="nomination-panel"',
                        'id="bid-panel"', 'id="player-list"'):
             assert marker in r.text, f"{marker} missing from the full page"
+
+
+class TestAssignSurvivesAPriceChange:
+    """The price input must not be able to delete the Assign button.
+
+    `change` on a number input fires on BLUR, and clicking Assign is what
+    blurs it — so that request is triggered by the very click it can destroy.
+    If the response replaces the region Assign lives in before mouseup, the
+    browser never fires `click` (mousedown and mouseup landed on different
+    elements) and the pick is silently not recorded.
+
+    This was dormant while /bid-check took ~1000ms: the swap landed ~900ms
+    after the click finished. Caching the marginal value took it to ~9ms,
+    squarely inside a 70-150ms click, so the swap is now scoped to the advice
+    block. Structural again — the request cannot remove what it does not
+    return into.
+    """
+
+    def _bid(self, client):
+        return client.post("/bid-check", data={
+            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN,SRL",
+        })
+
+    def test_price_input_swaps_only_the_advice_block(self, client):
+        html = self._bid(client).text
+        price_input = re.search(r'<input[^>]*id="bid-price"[^>]*>', html, re.S)
+        assert price_input, "the price input is gone"
+        attrs = price_input.group(0)
+        assert 'hx-target="#bid-advice"' in attrs, (
+            f"price input must not swap a region containing Assign: {attrs}"
+        )
+        assert 'hx-select="#bid-advice"' in attrs, (
+            "without hx-select the full bid panel would be swapped in anyway"
+        )
+
+    def test_the_advice_block_excludes_the_assign_button(self, client):
+        """The whole point: the swapped region must not contain Assign."""
+        html = self._bid(client).text
+        start = html.find('id="bid-advice"')
+        assert start != -1, "#bid-advice is missing — the price input has no target"
+        # The advice block is a leaf-ish div; take everything up to the bid form
+        # that follows it, which is the outer bound of what the swap can replace.
+        block = html[start:html.find('id="bid-form"', start)]
+        assert "/assign" not in block, "Assign is inside the region a price change replaces"
+        assert 'id="bid-price"' not in block, "the price input replaces itself"
+        assert 'id="bidder-logos"' not in block, "bidder toggles are inside the swapped region"
+
+    def test_assign_and_the_price_input_are_still_both_present(self, client):
+        """Narrowing the swap must not have dropped anything from the panel."""
+        html = self._bid(client).text
+        for marker in ('id="bid-advice"', 'id="bid-price"', 'id="bid-form"',
+                       'id="bidder-logos"'):
+            assert marker in html, f"{marker} missing after the swap was narrowed"
 
 
 class TestBuyout:

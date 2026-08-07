@@ -253,16 +253,33 @@ class TestSwapTargetsResolve:
                 found.setdefault(m.group(1), []).append(SHORTCUTS_JS)
         return found
 
-    def test_every_target_exists_in_the_rendered_page(self, client):
+    def _rendered_states(self, client) -> str:
+        """Every DOM the auction panel can be in, concatenated.
+
+        A single `GET /` is not enough: some regions are conditional, and a
+        target inside one is unreachable until that branch renders. #bid-advice
+        is the case — it exists only while a bid is live, and so does the price
+        input that targets it, so the pair is always consistent even though
+        neither is on a fresh page. Checking the union keeps the guard honest
+        about "does this id ever exist" without failing on that pairing.
+        """
         page = client.get("/").text
+        active_bid = client.post("/bid-check", data={
+            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN,SRL",
+        }).text
+        return page + active_bid
+
+    def test_every_target_exists_in_the_rendered_page(self, client):
+        dom = self._rendered_states(client)
         broken = {
             target: sources
             for target, sources in self._targets().items()
-            if f'id="{target}"' not in page
+            if f'id="{target}"' not in dom
         }
         assert not broken, (
-            "hx-target names an element that does not exist — htmx will swap "
-            f"nothing and log only to the console: {broken}"
+            "hx-target names an element that does not exist in any rendered "
+            "state — htmx will swap nothing and log only to the console: "
+            f"{broken}"
         )
 
     def test_the_split_panels_are_both_targeted_and_present(self, client):

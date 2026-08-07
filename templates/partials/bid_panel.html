@@ -28,7 +28,13 @@
         <span class="loading loading-spinner loading-xs"></span>
         <span>Bidding on <strong>{{ bid_advice.player_name }}</strong></span>
     </div>
-    <div class="bid-result bid-{{ bid_advice.action|lower }}">
+    {# Everything a price change can alter, and nothing else. The price input
+       swaps THIS, not #bid-panel, so a /bid-check landing between mousedown and
+       mouseup on Assign can no longer delete the button out from under the
+       click. Safe because the Assign button's presence comes from bid_winner,
+       which reads the bidder list and never the price; its label is kept in
+       step by syncAssignPrice() on `input`. #}
+    <div id="bid-advice" class="bid-result bid-{{ bid_advice.action|lower }}">
         <div class="bid-action">{{ bid_advice.action }}</div>
         <div class="bid-details">
             {# Two numbers, not one. They mean different things, and blending
@@ -77,8 +83,15 @@
         <div class="flex flex-wrap gap-2 items-center">
             <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" readonly class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
+            {# `change` on a number input fires on BLUR, and clicking Assign is
+               what blurs it — so this request is triggered BY the click it can
+               destroy. hx-select narrows the swap to the advice block, leaving
+               the form, the bidder grid and Assign in place. Before the
+               marginal-value cache this was masked: the response took ~1000ms
+               and landed ~900ms after mouseup. At ~9ms it lands mid-click. #}
             <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" id="bid-price"
-                   hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML"
+                   hx-post="/bid-check" hx-target="#bid-advice"
+                   hx-select="#bid-advice" hx-swap="outerHTML"
                    hx-trigger="change" hx-include="closest form"
                    class="input input-xs input-bordered bg-base-300 w-16">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>

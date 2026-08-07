@@ -12,6 +12,7 @@ import threading
 import time
 
 import pytest
+from fastapi.testclient import TestClient
 
 from config import MY_TEAM
 
@@ -22,6 +23,55 @@ def isolated_state_dir(tmp_path_factory):
 
     main.STATE_DIR = str(tmp_path_factory.mktemp("state"))
     yield
+
+
+@pytest.fixture(scope="session")
+def _app_client():
+    """The HTTP transport, opened once for the run.
+
+    Session-scoped because it holds no auction state of its own — entering the
+    context manager runs the app's lifespan, and that is the expensive part
+    (221ms with a fresh client per test against 107ms for a reset alone). The
+    per-test isolation lives in `client` below.
+
+    `isolated_state_dir` is session-scoped AND autouse, so pytest orders it
+    ahead of this. That ordering is load-bearing: the lifespan writes state,
+    and without it the first thing this fixture does is write into the real
+    `data/state/`.
+    """
+    from main import app
+
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def client(_app_client):
+    """A fresh auction per test.
+
+    This used to be `scope="module"` in each file that needed it, so `/reset`
+    ran ONCE for 98 tests and any test that mutated global state without
+    putting it back changed what every later test in the file saw. Nothing
+    depended on that when it was fixed — every test passed in isolation — but
+    the coupling is invisible at the call site and it hides failures in the
+    tests whose job is to catch failures. It did, twice:
+
+    - `TestPanelContextIsolation` passed against a reproduction of the
+      2026-08-05 trade-panel leak, because the view had moved server-side and
+      its cases no longer set up the state they assumed.
+    - `test_undo_reverts_move_to_minors` passed against a `/move-to-minors`
+      that had stopped snapshotting, because a shared SNAPSHOT CHAIN let
+      `/undo` pop a snapshot taken by the test's own setup.
+
+    Both were caught by mutation testing rather than by the suite.
+
+    Files whose tests form a deliberate sequence — `test_dry_run.py`'s 40-pick
+    auction and the numbered flows in `test_auction_draft.py` and
+    `test_trade_buyout_undo.py` — shadow this with their own module-scoped
+    fixture. `tests/test_fixture_scopes.py` holds the list of who may.
+    """
+    _app_client.post("/reset")
+    return _app_client
 
 
 @pytest.fixture(autouse=True)

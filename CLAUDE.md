@@ -201,6 +201,21 @@ Shared non-fixture test utilities live in `tests/helpers.py` (`squeeze`,
 `toast_of`), not in `conftest.py` — that file is for fixtures. Import from there
 rather than copy-pasting; `squeeze` reached three copies before it was folded in.
 
+**Take `client` from `conftest.py`; don't declare your own.** It is
+function-scoped and resets the auction before each test, over a session-scoped
+`_app_client` transport that pays the lifespan once (a naive per-test
+`TestClient` costs 221ms against 107ms for a reset alone). Files whose tests are
+a deliberate *sequence* — `test_dry_run.py`'s 40-pick auction,
+`test_auction_draft.py`, the numbered flow in `test_trade_buyout_undo.py` —
+shadow it with a module-scoped one and must be listed in
+`tests/test_fixture_scopes.py::SEQUENTIAL_BY_DESIGN` with the reason, plus "ON
+PURPOSE" in the fixture docstring. Anything else declaring a module-scoped
+`client` fails that guard. The coupling it removes is not theoretical: it let
+`TestPanelContextIsolation` keep passing against a reproduction of the
+2026-08-05 leak, and let an undo test keep passing against an endpoint that had
+stopped snapshotting, because a shared **snapshot chain** let `/undo` pop
+somebody else's. Both were caught by mutation testing, not by the suite.
+
 **A test must be able to fail.** Before claiming one covers something, break the
 thing it claims to cover and watch it go red. Three tests in this suite asserted
 nothing for months (`len(...) >= 0`, a `pass`-body loop, `status_code in (200,

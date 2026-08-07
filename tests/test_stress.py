@@ -12,14 +12,6 @@ from fastapi.testclient import TestClient
 from config import MAX_SALARY, MIN_SALARY, SALARY_CAP
 
 
-@pytest.fixture(scope="module")
-def client():
-    from main import app
-    with TestClient(app) as c:
-        c.post("/reset")
-        yield c
-
-
 def _get_state(client):
     r = client.get("/state")
     assert r.status_code == 200

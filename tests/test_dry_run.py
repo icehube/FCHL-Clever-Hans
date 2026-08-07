@@ -68,6 +68,15 @@ PICKS = [
 
 @pytest.fixture(scope="module")
 def client():
+    """Module-scoped ON PURPOSE — do not convert to conftest's `client`.
+
+    This file is one continuous 40-pick auction: early picks, mid-auction
+    trades and buyouts, teams finishing, final verification. The shared state
+    IS the test — resetting between the numbered phases would leave each one
+    asserting against a fresh draft it never played.
+
+    Listed in tests/test_fixture_scopes.py.
+    """
     from main import app
     with TestClient(app) as c:
         c.post("/reset")

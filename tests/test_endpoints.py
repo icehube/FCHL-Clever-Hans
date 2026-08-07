@@ -1,23 +1,12 @@
 """Tests for main.py: FastAPI endpoints."""
 
 import re
-import tempfile
 from contextlib import contextmanager
 
 import pytest
-from fastapi.testclient import TestClient
 
 from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
 from tests.helpers import section_of, squeeze, toast_of
-
-
-@pytest.fixture(scope="module")
-def client():
-    from main import app
-    with TestClient(app) as c:
-        # Reset to fresh state in case other test modules modified globals
-        c.post("/reset")
-        yield c
 
 
 @contextmanager
@@ -451,17 +440,6 @@ class TestViewedTeamSurvivesEdits:
     they simply do not disturb it — which is what also fixed their error
     branches, covered by TestTheViewSticks.
     """
-
-    @pytest.fixture
-    def client(self):
-        """Function-scoped: these leave the panel on an opponent, and the module
-        fixture resets once for the whole file."""
-        import main
-        main.STATE_DIR = tempfile.mkdtemp()
-        with TestClient(main.app) as c:
-            c.post("/reset")
-            yield c
-            c.post("/reset")
 
     def _panel_team(self, html: str) -> str:
         """The team code the rendered team panel is showing."""
@@ -1069,21 +1047,6 @@ class TestOverCapRosterEdits:
     them with buyouts, so blocking would stop a legal manoeuvre. The bug is that
     an accidental over-cap edit looks exactly like a deliberate one.
     """
-
-    @pytest.fixture
-    def client(self):
-        """Function-scoped, shadowing the module fixture on purpose.
-
-        These tests mangle a team's `penalties` to manufacture a near-cap state.
-        The module fixture resets once for the whole file, so a leaked cap would
-        follow every later test in it.
-        """
-        import main
-        main.STATE_DIR = tempfile.mkdtemp()
-        with TestClient(main.app) as c:
-            c.post("/reset")
-            yield c
-            c.post("/reset")
 
     def _cap_free_minor(self, code: str):
         """The priciest minor whose salary is NOT already on `code`'s cap.

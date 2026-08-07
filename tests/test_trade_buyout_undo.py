@@ -17,6 +17,20 @@ from tests.helpers import squeeze, toast_of
 
 @pytest.fixture(scope="module")
 def client():
+    """Module-scoped ON PURPOSE — do not convert to conftest's `client`.
+
+    The numbered tests (test_00 onward) are a sequence: trade evaluated, then
+    executed, then undone. The classes that are NOT sequential shadow this with
+    their own function-scoped fixture — `TestOverCapTradesWarn` because it
+    mangles a team's cap, `TestUndoRevertsEveryRosterEdit` because each of its
+    cases needs an EMPTY snapshot chain or `/undo` pops somebody else's.
+
+    That second one is the argument for the whole split: with a shared chain
+    the test passed against a `/move-to-minors` that had stopped snapshotting
+    entirely.
+
+    Listed in tests/test_fixture_scopes.py.
+    """
     from main import app
     with TestClient(app) as c:
         c.post("/reset")

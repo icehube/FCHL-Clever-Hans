@@ -27,14 +27,6 @@ from price_model import predict_price, load_model_params
 from state import AuctionState, Player, PlayerOnRoster, TeamState
 
 
-@pytest.fixture(scope="module")
-def client():
-    from main import app
-    with TestClient(app) as c:
-        c.post("/reset")
-        yield c
-
-
 def _get_state(client):
     r = client.get("/state")
     assert r.status_code == 200

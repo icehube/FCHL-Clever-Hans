@@ -20,14 +20,6 @@ TEMPLATE_DIR = os.path.join(_REPO_ROOT, "templates")
 SHORTCUTS_JS = os.path.join(_REPO_ROOT, "static", "shortcuts.js")
 
 
-@pytest.fixture(scope="module")
-def client():
-    from main import app
-    with TestClient(app) as c:
-        c.post("/reset")
-        yield c
-
-
 class TestToastHeaders:
     """Every mutation endpoint should return HX-Trigger with showToast."""
 

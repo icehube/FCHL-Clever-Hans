@@ -35,6 +35,18 @@ BID_CHECK_PRICE = 2.0
 
 @pytest.fixture(scope="module")
 def client():
+    """Module-scoped ON PURPOSE — do not convert to conftest's `client`.
+
+    Every test here is numbered and builds on the one before it: this file is a
+    draft played forward, not a set of independent checks. A per-test reset
+    would not make it isolated, it would make it meaningless.
+
+    Note it does NOT reset on entry either, which is deliberate in the same
+    way: the file starts from whatever `lifespan` built.
+
+    Listed in tests/test_fixture_scopes.py, which is what stops a future
+    "why is this module-scoped?" from quietly breaking the sequence.
+    """
     from main import app
     with TestClient(app) as c:
         yield c

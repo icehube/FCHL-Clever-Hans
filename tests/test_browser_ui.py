@@ -330,3 +330,77 @@ class TestLayoutAndToasts:
         text = toast.inner_text()
         assert "over cap" in text and "BOT" in text, text
         toast.wait_for(state="detached", timeout=8000)
+
+
+class TestTheChartLandsWhereYouClicked:
+    """The duplicate id, at the only altitude where it is visible.
+
+    `player_chart.html` used to carry `id="player-chart-container"` itself
+    while `bid_limits.html` rendered an empty div with the same id as the
+    table's swap target. No single server response contained both copies — the
+    chart body reaches the page by a swap — so the whole suite passed while a
+    chart link in the players table rendered its chart into the bid panel in
+    the other column, `area-auction` being first in document order.
+    """
+
+    def _open_with_a_live_bid(self, page, live_server):
+        """A DOM holding both mounts: the bid panel embeds its own chart."""
+        _open(page, live_server)
+        bid_player, other = _pool_top(2)
+        _start_bid(page, bid_player)
+        page.wait_for_selector("#bid-panel .price-chart-card")
+        return bid_player, other
+
+    def _click_chart_link(self, page, player: str):
+        link = page.locator(
+            f'#bid-limits a[hx-get^="/player-chart/"]:text-is("{player}")'
+        )
+        with page.expect_response(re.compile(r"/player-chart/")):
+            link.click()
+        page.wait_for_selector("#player-chart-container .price-chart-card")
+
+    def test_the_chart_opens_above_the_table_not_in_the_bid_panel(
+        self, page, live_server
+    ):
+        bid_player, other = self._open_with_a_live_bid(page, live_server)
+        self._click_chart_link(page, other)
+
+        mounted = page.locator("#player-chart-container .price-chart-card")
+        assert other in mounted.inner_text()
+
+        # The screen-position claim, which is the whole user-visible bug and
+        # the one thing TestClient cannot answer: the chart must appear in the
+        # players column the click came from, not the auction column.
+        chart_box = mounted.bounding_box()
+        panel_box = page.locator("#bid-panel").bounding_box()
+        assert chart_box["x"] >= panel_box["x"] + panel_box["width"], (
+            f"chart opened at x={chart_box['x']:.0f}, inside/left of the bid "
+            f"panel ending at x={panel_box['x'] + panel_box['width']:.0f} — it "
+            f"rendered into the wrong column"
+        )
+
+        # And the bid panel's own chart is untouched, still showing its player.
+        assert bid_player in page.locator("#bid-panel .price-chart-card").inner_text()
+
+    def test_closing_the_bid_panel_chart_leaves_the_table_chart_open(
+        self, page, live_server
+    ):
+        """× must close the chart it sits in, not the first one in the page.
+
+        **This direction is the load-bearing one.** Closing the *table's* chart
+        works under either implementation — with an id-free body,
+        `getElementById('player-chart-container')` finds the table's mount,
+        which is the chart being closed anyway — so a test aimed that way
+        passes against the bug and proves nothing. Only the bid panel's ×
+        exposes it: `getElementById` reaches across the screen and clears the
+        table's chart while leaving the one you actually clicked on.
+        """
+        bid_player, other = self._open_with_a_live_bid(page, live_server)
+        self._click_chart_link(page, other)
+
+        page.click("#bid-panel .price-chart-card button")
+        page.wait_for_selector("#bid-panel .price-chart-card", state="detached")
+        assert page.locator("#player-chart-container .price-chart-card").count() == 1, (
+            "closing the bid panel's chart also closed the table's, in the "
+            "other column — × resolved to the wrong element"
+        )

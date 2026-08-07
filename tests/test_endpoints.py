@@ -678,6 +678,15 @@ class TestLognormalPdfPath:
 
 
 class TestPlayerChart:
+    """The chart is mounted in two places, so the body must own no id.
+
+    It used to carry `id="player-chart-container"` itself while
+    `bid_limits.html` rendered an empty div with the same id as the table's
+    swap target. htmx resolves a target by id and takes the first match, and
+    `area-auction` precedes `area-players`, so during a live bid a chart link
+    in the table rendered the chart into the bid panel in the other column.
+    """
+
     def test_player_chart_valid(self, client):
         """Player chart should return SVG visualization."""
         r = client.get("/player-chart/Steven Stamkos")
@@ -686,10 +695,38 @@ class TestPlayerChart:
         assert "<svg" in r.text
         assert "<path" in r.text
 
-    def test_player_chart_invalid(self, client):
-        """Invalid player should return fallback without crashing."""
+    def test_the_chart_body_carries_no_mount_id(self, client):
+        """The property that makes two mounts legal."""
+        r = client.get("/player-chart/Steven Stamkos")
+        assert 'id="player-chart-container"' not in r.text, (
+            "the chart body owns the mount id again — an innerHTML swap nests "
+            "it inside the mount and duplicates the id"
+        )
+
+    def test_the_mount_appears_exactly_once_on_the_page(self, client):
+        page = client.get("/").text
+        assert page.count('id="player-chart-container"') == 1
+
+    def test_unknown_player_does_not_leak_the_counterfactual_panel(self, client):
+        """The failure path rendered explanation.html — a whole other panel.
+
+        Both tests that covered this asserted `status_code == 200` and nothing
+        else, so they passed on any response at all. That is why it survived.
+        """
         r = client.get("/player-chart/Nobody")
         assert r.status_code == 200
+        assert "Nobody" in r.text, "the empty state does not name the player"
+        assert 'id="explanation"' not in r.text
+        assert "<svg" not in r.text
+
+    def test_unknown_player_response_is_small(self, client):
+        """Size is the check that catches a whole-panel render generically.
+
+        The counterfactual panel this used to return is ~2KB even when empty;
+        an anchored id assertion only catches the one template that was wrong.
+        """
+        r = client.get("/player-chart/Nobody")
+        assert len(r.text) < 300, f"expected an empty state, got {len(r.text)} bytes"
 
 
 class TestTeamView:

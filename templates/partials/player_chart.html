@@ -1,7 +1,19 @@
-<div id="player-chart-container" class="card bg-base-300 p-2 mb-2">
+{# Body of the price chart, with no id of its own — mounted twice: into
+   #player-chart-container by the players table's chart links, and inline by
+   bid_panel.html during a live auction. It used to BE the mount, carrying
+   id="player-chart-container" itself, which put two elements with that id in
+   the document: htmx resolves a target by id and takes the first, so clicking
+   a chart link in the table rendered the chart into the bid panel in the other
+   column. The innerHTML swap also nested the response's copy of the id inside
+   the mount, so one click duplicated it even with no bid running.
+
+   The close button uses closest() rather than getElementById for the same
+   reason: it must clear the chart it sits in, not the first one in the page. #}
+{% if chart_player is defined and chart_player %}
+<div class="price-chart-card card bg-base-300 p-2 mb-2">
     <div class="flex items-center justify-between mb-1">
         <h3 class="font-semibold text-sm">Price Model: {{ chart_player.name }}</h3>
-        <button onclick="document.getElementById('player-chart-container').innerHTML=''" class="btn btn-xs btn-ghost">&times;</button>
+        <button onclick="this.closest('.price-chart-card').remove()" class="btn btn-xs btn-ghost">&times;</button>
     </div>
     <div class="chart-meta">
         {{ chart_player.position }} · <img src="/nhl_logos/{{ chart_player.nhl_team }}.svg" alt="{{ chart_player.nhl_team }}" class="h-5 inline object-contain" title="{{ chart_player.nhl_team }}"> · {{ chart_player.projected_points }}pts
@@ -99,3 +111,9 @@
         <span class="chart-leg"><span style="color:var(--red)">&#9482;</span> Market</span>
     </div>
 </div>
+{% else %}
+{# /player-chart used to render explanation.html here, which injected the whole
+   Counterfactual panel — and a second id="explanation" — into the chart slot.
+   One template for both paths so that cannot drift apart again. #}
+<p class="text-sm opacity-50">No price model for {{ chart_missing_name }}.</p>
+{% endif %}

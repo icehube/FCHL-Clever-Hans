@@ -282,6 +282,34 @@ class TestSwapTargetsResolve:
             f"{broken}"
         )
 
+    def test_no_id_appears_twice_in_the_page(self, client):
+        """Existing is not enough — a target must resolve to ONE element.
+
+        htmx and getElementById both take the first match and neither
+        complains, so a duplicated id sends a swap to whichever copy happens to
+        come first in document order.
+
+        Scoped to `GET /` rather than the union of rendered states: fragments
+        legitimately repeat the ids of the regions they replace, so
+        concatenating responses would report every swap target as a duplicate.
+
+        **This would NOT have caught the player-chart duplicate**, and the
+        limit is worth stating rather than discovering later: that duplicate
+        only existed in the ASSEMBLED DOM — the chart body is absent from
+        `GET /` and arrives via a swap — so no single response contained both
+        copies. What covers that is `TestPlayerChart` on the structural
+        property (the body owns no mount id) plus the browser test that clicks
+        a chart link with a bid live. This guard covers the simpler case: one
+        template rendering the same id twice on one page.
+        """
+        page = client.get("/").text
+        ids = re.findall(r'\sid="([\w-]+)"', page)
+        dupes = {i: ids.count(i) for i in set(ids) if ids.count(i) > 1}
+        assert not dupes, (
+            "duplicate id in one document — htmx resolves a target to the "
+            f"first match and swaps into the wrong element: {dupes}"
+        )
+
     def test_the_split_panels_are_both_targeted_and_present(self, client):
         """The two ids the panel split introduced, specifically."""
         targets = self._targets()

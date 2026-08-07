@@ -1156,11 +1156,16 @@ def _chart_context(player_name: str) -> dict | None:
 @app.get("/player-chart/{player_name}", response_class=HTMLResponse)
 async def player_chart(request: Request, player_name: str):
     """Show price model visualization for a player."""
+    ctx = _context(request)
     chart = _chart_context(player_name)
     if chart is None:
-        return _render(request, "partials/explanation.html")
-    ctx = _context(request)
-    ctx.update(chart)
+        # The chart partial's own empty state, NOT explanation.html — that
+        # rendered the entire Counterfactual panel, second id="explanation" and
+        # all, into the chart slot. Reachable when a player leaves the pool
+        # between the table rendering and the click (second tab, stale panel).
+        ctx["chart_missing_name"] = player_name
+    else:
+        ctx.update(chart)
     return _render(request, "partials/player_chart.html", ctx)
 
 

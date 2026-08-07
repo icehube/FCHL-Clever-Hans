@@ -441,10 +441,11 @@ class TestAPIEdgeCases:
         r = client.get("/explain/Nobody")
         assert r.status_code == 200
 
-    def test_player_chart_nonexistent(self, client):
-        """Player chart for non-existent player should not crash."""
-        r = client.get("/player-chart/Nobody")
-        assert r.status_code == 200
+    # The unknown-player chart case lives in
+    # test_endpoints.py::TestPlayerChart. It was here too, asserting the same
+    # `status_code == 200` on the same request — which is what let the failure
+    # path render the whole Counterfactual panel unnoticed. One copy, with
+    # assertions that can fail.
 
     def test_trade_evaluate_empty(self, client):
         """Trade evaluation with no players should not crash."""

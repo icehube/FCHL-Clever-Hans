@@ -388,6 +388,25 @@ def _render(request: Request, template: str, extra: dict | None = None) -> HTMLR
     return templates.TemplateResponse(request, template, ctx)
 
 
+def _panels_viewing(request: Request, team_code: str) -> HTMLResponse:
+    """all_panels.html with the team panel left on `team_code`.
+
+    Roster edits are posted from whichever panel is open, so returning the
+    default context snapped the view back to BOT after every Bench, salary fix
+    or recall — auditing another team meant re-opening it each time.
+
+    Only `viewed_team` moves. `team` stays BOT deliberately: it also drives the
+    Trade "I Give" list and the Buyout Analyzer, and moving it is exactly what
+    leaked an opponent's players into BOT's trade form (fixed 2026-08-05,
+    pinned by TestPanelContextIsolation).
+    """
+    ctx = _context(request)
+    t = auction_state.teams.get(team_code)
+    if t is not None:
+        ctx["viewed_team"] = t
+    return _render(request, "partials/all_panels.html", ctx)
+
+
 def _context(request: Request) -> dict:
     """Build template context with all current state."""
     team = auction_state.teams[MY_TEAM]
@@ -459,6 +478,12 @@ def _context(request: Request) -> dict:
     return {
         "request": request,
         "team": team,
+        # The team whose roster is ON SCREEN, which is BOT until someone opens
+        # another one. Split from `team` because `team` is also what the Trade
+        # "I Give" list and the Buyout Analyzer act on: pointing that at the
+        # team being viewed put an opponent's players in BOT's trade form
+        # (fixed 2026-08-05). Only team_panel.html reads this.
+        "viewed_team": team,
         "teams": auction_state.teams,
         "available_players": auction_state.available_players,
         "transaction_log": auction_state.transaction_log,
@@ -1043,7 +1068,7 @@ async def team_view(request: Request, team_code: str):
     ctx = _context(request)
     t = auction_state.teams.get(team_code)
     if t is not None:
-        ctx["team"] = t
+        ctx["viewed_team"] = t
     return _render(request, "partials/team_panel.html", ctx)
 
 
@@ -1094,12 +1119,7 @@ async def toggle_bench(
     )
     _recompute()
     _save_state()
-    # Render with the default context. Overriding ctx["team"] to the edited
-    # team leaked that team into every panel — `team` also drives the Trade
-    # "I Give" dropdown and the buyout controls, so editing an opponent put
-    # THEIR players in BOT's trade form. Consistent with /assign,
-    # /move-to-minors and every other mutation, which already render as BOT.
-    return _render(request, "partials/all_panels.html")
+    return _panels_viewing(request, team_code)
 
 
 @app.post("/adjust-salary", response_class=HTMLResponse)
@@ -1132,8 +1152,7 @@ async def adjust_salary(
     )
     _recompute()
     _save_state()
-    # Default context — see the note in /toggle-bench on the ctx["team"] leak.
-    response = _render(request, "partials/all_panels.html")
+    response = _panels_viewing(request, team_code)
     # Two independent warnings can fire here, so collect rather than return on
     # the first: a fat-fingered figure is often both off-increment AND too big.
     notes: list[str] = []
@@ -1182,7 +1201,7 @@ async def move_to_minors(
     _log_change("move-to-minors", team_code, f"{player_name} → minors")
     _recompute()
     _save_state()
-    return _render(request, "partials/all_panels.html")
+    return _panels_viewing(request, team_code)
 
 
 @app.post("/move-to-roster", response_class=HTMLResponse)
@@ -1208,7 +1227,7 @@ async def move_to_roster(
     _log_change("move-to-roster", team_code, f"{player_name} → active")
     _recompute()
     _save_state()
-    response = _render(request, "partials/all_panels.html")
+    response = _panels_viewing(request, team_code)
     # A group A-E minor is cap-free while down and cap-counted the moment it is
     # recalled (PlayerOnRoster.counts_on_cap), and 145 of the 149 minors at reset
     # are group A-E — so this is the ordinary recall, not an edge case. It went
@@ -1289,7 +1308,9 @@ async def trade_between(
     if over:
         note += f" — {'; '.join(over)}"
     return _toast(
-        _render(request, "partials/all_panels.html"),
+        # team_a, because this form only ever posts from team_a's own panel —
+        # its hidden team_a field is that panel's code.
+        _panels_viewing(request, team_a),
         f"Trade executed: {team_a} ↔ {team_b}{note}",
         # A demotion alone stays a success: that note is informational and
         # pre-dates this. Only going over the cap lifts the tier.

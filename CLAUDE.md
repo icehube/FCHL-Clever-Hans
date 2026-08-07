@@ -101,6 +101,12 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 - **Going over the cap warns, it does not refuse.** The league permits temporary over-cap states that get resolved by buyouts, so every endpoint that can raise a team's cap load executes and returns a warning toast naming the team and the overage — `/trade-between`, `/trade-execute`, `/assign`, `/adjust-salary`, `/move-to-roster`. Use the shared `_cap_overages()` helper; any new cap-raising endpoint joins the list.
 - Drafting past 24 **auto-routes to the minors** rather than being blocked, so a live sale never gets stopped by the tool.
 
+### Owner decisions (2026-08-07)
+
+- **Two team keys in the template context, and they mean different things.** `viewed_team` is the roster on screen and is read by `team_panel.html` alone; `team` is always BOT and is what the Trade "I Give" list and Buyout Analyzer act on. Roster edits carry the view via `_panels_viewing()` — `/toggle-bench`, `/adjust-salary`, `/move-to-minors`, `/move-to-roster`, `/trade-between`. **Never point a panel other than `team_panel.html` at `viewed_team`**: that is the 2026-08-05 leak that put an opponent's players in BOT's trade form, and `TestPanelContextIsolation` exists to catch it.
+- **Draft actions reset the view to BOT.** `/assign`, `/undo`, `/buyout` and a page load return the panel to your own team by omission — deliberate, because reading an opponent's Cap Used as yours right after a pick lands is worse than re-opening their roster.
+- **Buyout dots are BOT-only.** `_recompute_buyout_indicators` scores every hypothetical against BOT's MILP total, so the scan cannot answer anything about an opponent; their panel renders no dot placeholders rather than ones that stay grey forever.
+
 ## Key design decisions
 
 | Decision | Why |

@@ -1,11 +1,11 @@
 """Helpers shared across test modules.
 
-Both of these were copy-pasted rather than imported — `squeeze` in three files
-and `toast_of` in two — which is how a fix lands in one copy and silently misses
-the others. `squeeze` in particular encodes a non-obvious sequence (zero the
-penalties, invalidate, recompute against the *clean* total, invalidate again);
-getting that wrong in one copy would produce a team that is near the cap by a
-different amount than the test says, and the assertion would still pass.
+`squeeze` and `toast_of` were copy-pasted rather than imported — three files and
+two — which is how a fix lands in one copy and silently misses the others.
+`squeeze` in particular encodes a non-obvious sequence (zero the penalties,
+invalidate, recompute against the *clean* total, invalidate again); getting that
+wrong in one copy would produce a team that is near the cap by a different
+amount than the test says, and the assertion would still pass.
 
 Kept out of `conftest.py` on purpose: these are plain functions, not fixtures,
 and the browser tests need `squeeze` from a module scope where no fixture is in
@@ -13,9 +13,30 @@ play.
 """
 
 import json
+import re
 from typing import Any
 
 from config import SALARY_CAP
+
+
+def section_of(html: str, element_id: str) -> str:
+    """The `<section id="...">…</section>` block with that id.
+
+    Mutation endpoints return the whole page, and most panels list every team —
+    League State has all eleven codes in a table, the Trade panel has ten in a
+    dropdown. So `"SRL" in response.text` is true no matter which team the team
+    panel is showing, and an assertion written that way passes on the bug it is
+    meant to catch. Slice the panel out first.
+
+    Deliberately naive: no nested `<section>` exists inside a panel today, and a
+    real parser would be a dependency the offline requirement.txt cannot carry.
+    Raises rather than returning "" so a renamed id fails loudly.
+    """
+    m = re.search(rf'<section[^>]*\bid="{re.escape(element_id)}"', html)
+    if m is None:
+        raise AssertionError(f'no <section id="{element_id}"> in the response')
+    end = html.index("</section>", m.start())
+    return html[m.start():end]
 
 
 def toast_of(response: Any) -> dict:

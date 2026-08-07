@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
-from tests.helpers import squeeze, toast_of
+from tests.helpers import section_of, squeeze, toast_of
 
 
 @pytest.fixture(scope="module")
@@ -419,6 +419,150 @@ class TestPanelContextIsolation:
         options = self._give_options(r.text)
         leaked = [n for n in opponent_players - bot_players if n in options]
         assert not leaked, f"opponent players leaked into Trade 'I Give': {leaked}"
+
+
+class TestViewedTeamSurvivesEdits:
+    """The other half of the 2026-08-05 fix above, finally built.
+
+    Closing the leak cost the view: every roster edit posts from whichever panel
+    is open, and returning the default context snapped it back to BOT, so
+    auditing another team meant re-opening it after each edit.
+
+    The two are one decision, which is why they sit together. `viewed_team`
+    moves with the edit; `team` stays BOT so the Trade and Buyout panels keep
+    acting on BOT's roster. A change that satisfies this class by moving `team`
+    fails the class above.
+    """
+
+    @pytest.fixture
+    def client(self):
+        """Function-scoped: these leave the panel on an opponent, and the module
+        fixture resets once for the whole file."""
+        import main
+        main.STATE_DIR = tempfile.mkdtemp()
+        with TestClient(main.app) as c:
+            c.post("/reset")
+            yield c
+            c.post("/reset")
+
+    def _panel_team(self, html: str) -> str:
+        """The team code the rendered team panel is showing."""
+        panel = section_of(html, "team-panel")
+        m = re.search(r"<h2[^>]*>[^(]*\(([A-Z]+)\)</h2>", panel)
+        assert m, f"team panel has no identifiable header: {panel[:300]}"
+        return m.group(1)
+
+    def _victim(self, code: str):
+        import main
+        return main.auction_state.teams[code].roster_players[0]
+
+    def test_toggle_bench_stays_on_the_edited_team(self, client):
+        r = client.post("/toggle-bench", data={
+            "team_code": "SRL", "player_name": self._victim("SRL").name,
+        })
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_adjust_salary_stays_on_the_edited_team(self, client):
+        p = self._victim("SRL")
+        r = client.post("/adjust-salary", data={
+            "team_code": "SRL", "player_name": p.name, "new_salary": str(p.salary),
+        })
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_move_to_minors_stays_on_the_edited_team(self, client):
+        p = self._victim("SRL")
+        # Benched is the precondition for the ↓ Minors control (team_panel.html)
+        client.post("/toggle-bench", data={"team_code": "SRL", "player_name": p.name})
+        r = client.post("/move-to-minors", data={
+            "team_code": "SRL", "player_name": p.name,
+        })
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_move_to_roster_stays_on_the_edited_team(self, client):
+        import main
+        p = self._victim("SRL")
+        client.post("/toggle-bench", data={"team_code": "SRL", "player_name": p.name})
+        client.post("/move-to-minors", data={"team_code": "SRL", "player_name": p.name})
+        assert any(m.name == p.name for m in main.auction_state.teams["SRL"].minor_players)
+
+        r = client.post("/move-to-roster", data={
+            "team_code": "SRL", "player_name": p.name,
+        })
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_trade_between_stays_on_the_initiating_team(self, client):
+        """team_a is the panel the form was posted from, not a trade participant
+        chosen at random — the hidden input is that panel's own code."""
+        r = client.post("/trade-between", data={
+            "team_a": "SRL", "team_b": "MAC",
+            "players_from_a": self._victim("SRL").name,
+            "players_from_b": "",
+        })
+        assert r.status_code == 200
+        assert toast_of(r).get("type") in ("success", "warning"), toast_of(r)
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_assign_returns_to_my_team(self, client):
+        """Owner decision 2026-08-07: a draft action resets the view.
+
+        Not a shortcoming of the fix — reading SRL's Cap Used as your own right
+        after a pick lands is the failure mode a sticky view invites.
+        """
+        import main
+        client.post("/toggle-bench", data={
+            "team_code": "SRL", "player_name": self._victim("SRL").name,
+        })
+        name = max(main.auction_state.available_players.values(),
+                   key=lambda p: p.projected_points).name
+        r = client.post("/assign", data={
+            "player": name, "team": "MAC", "salary": "1.0",
+        })
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_undo_returns_to_my_team(self, client):
+        client.post("/toggle-bench", data={
+            "team_code": "SRL", "player_name": self._victim("SRL").name,
+        })
+        r = client.post("/undo")
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_an_unknown_team_code_falls_back_to_my_team(self, client):
+        """The error paths keep the default context: an unresolvable code has no
+        view to preserve, and must not 500 reaching for one."""
+        r = client.post("/toggle-bench", data={
+            "team_code": "FAKE", "player_name": "Nobody",
+        })
+        assert r.status_code == 200
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_the_edited_panel_posts_back_its_own_team(self, client):
+        """The hidden team_code inputs must follow the view.
+
+        If the panel renders SRL's roster while its forms still carry BOT, the
+        next Bench click edits a player BOT doesn't have — a wrong write, not
+        just a wrong-looking panel.
+        """
+        panel = section_of(client.get("/team-view/SRL").text, "team-panel")
+        codes = set(re.findall(r'name="team_code" value="([A-Z]+)"', panel))
+        assert codes == {"SRL"}, f"forms post to {codes}, panel shows SRL"
+        assert re.search(r'name="team_a" value="SRL"', panel), "trade form too"
+
+    def test_buyout_dots_render_for_bot_only(self, client):
+        """The scan is BOT-only by construction — _recompute_buyout_indicators
+        scores every hypothetical against BOT's MILP total — so a placeholder on
+        SRL's roster could only ever sit grey, reading as "not analyzed" when
+        the answer is "this analysis isn't about you"."""
+        mine = section_of(client.get("/team-view/BOT").text, "team-panel")
+        assert 'id="bo-' in mine, "BOT's eligible players must keep their dots"
+
+        theirs = section_of(client.get("/team-view/SRL").text, "team-panel")
+        assert 'id="bo-' not in theirs, "an opponent's dots can never be filled"
 
 
 class TestNominate:

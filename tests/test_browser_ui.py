@@ -222,6 +222,45 @@ class TestBiddingSessionSurvives:
         )
 
 
+class TestViewingAnotherTeam:
+    """The reported symptom, at the level it was reported.
+
+    The endpoint tests prove the returned HTML names SRL. They cannot see
+    whether the swap lands: `/adjust-salary` targets `#app` with the whole page
+    while `/team-view` targets `#team-panel` with `outerHTML`, so the panel is
+    reached two different ways and only one of them is a full-page replace.
+    """
+
+    def test_editing_an_opponents_salary_keeps_the_panel_on_them(
+        self, page, live_server
+    ):
+        _open(page, live_server)
+        page.click("#league-state a[hx-get='/team-view/SRL']")
+        page.wait_for_selector("#team-panel h2:has-text('(SRL)')")
+
+        # The panel's own salary input, auto-submitting on change exactly as a
+        # typed correction does — no Assign, no Tab.
+        box = page.locator("#team-panel input[name='new_salary']").first
+        with page.expect_response(re.compile(r"/adjust-salary")):
+            box.fill("3.3")
+            box.blur()
+
+        page.wait_for_timeout(300)
+        header = page.locator("#team-panel h2").inner_text()
+        assert "(SRL)" in header, (
+            f"panel snapped to {header!r} after editing SRL — the whole-page "
+            f"swap discarded the view"
+        )
+        # And the forms in the panel that landed post back to SRL. Rendering
+        # SRL's roster over BOT's hidden inputs would make the next Bench click
+        # edit a player BOT doesn't have.
+        posts_to = page.eval_on_selector_all(
+            "#team-panel input[name='team_code']",
+            "els => [...new Set(els.map(e => e.value))]",
+        )
+        assert posts_to == ["SRL"], f"panel shows SRL but posts to {posts_to}"
+
+
 class TestLayoutAndToasts:
     """The two things no assertion on HTML can reach: CSS and runtime JS."""
 

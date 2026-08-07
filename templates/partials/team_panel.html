@@ -1,9 +1,9 @@
 {% from "macros/player.html" import player_label %}
 <section class="card bg-base-200 shadow-md p-4" id="team-panel">
     <div class="flex items-center gap-2 mb-2">
-        <img src="/fchl_logos/{{ team.logo }}" alt="{{ team.code }}" class="w-6 h-6">
-        <h2 class="card-title text-accent text-base m-0">{{ team.name }} ({{ team.code }})</h2>
-        {% if not team.is_my_team %}
+        <img src="/fchl_logos/{{ viewed_team.logo }}" alt="{{ viewed_team.code }}" class="w-6 h-6">
+        <h2 class="card-title text-accent text-base m-0">{{ viewed_team.name }} ({{ viewed_team.code }})</h2>
+        {% if not viewed_team.is_my_team %}
         <a hx-get="/team-view/{{ my_team }}" hx-target="#team-panel" hx-swap="outerHTML"
            class="link link-info text-xs ml-auto">← My Team</a>
         {% endif %}
@@ -14,21 +14,21 @@
     <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-1 bg-base-300 rounded-md p-2 mb-2">
         <div class="tooltip tooltip-bottom" data-tip="Total salary committed: keeper + acquired actives + minors that count on cap, plus buyout penalties">
             <div class="text-xs opacity-60">Cap Used</div>
-            <div class="text-sm font-semibold">${{ "%.1f"|format(team.total_salary) }}M</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.total_salary) }}M</div>
         </div>
-        {% if team.penalties > 0 %}
+        {% if viewed_team.penalties > 0 %}
         <div class="tooltip tooltip-bottom" data-tip="Buyout penalty: 50% of bought-out player's salary stays on the cap">
             <div class="text-xs opacity-60">Penalties</div>
-            <div class="text-sm font-semibold text-warning">${{ "%.1f"|format(team.penalties) }}M</div>
+            <div class="text-sm font-semibold text-warning">${{ "%.1f"|format(viewed_team.penalties) }}M</div>
         </div>
         {% endif %}
         <div class="tooltip tooltip-bottom" data-tip="Cap available to spend: salary cap minus cap used">
             <div class="text-xs opacity-60">Remaining</div>
-            <div class="text-sm font-semibold">${{ "%.1f"|format(team.remaining_budget) }}M</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.remaining_budget) }}M</div>
         </div>
         <div class="tooltip tooltip-bottom" data-tip="Remaining minus minimum reserve for unfilled spots ($0.5M × spots remaining)">
             <div class="text-xs opacity-60">Spendable</div>
-            <div class="text-sm font-semibold">${{ "%.1f"|format(team.spendable_budget) }}M</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.spendable_budget) }}M</div>
         </div>
         <div class="tooltip tooltip-bottom" data-tip="Roster spots remaining (out of 24 active + bench)">
             <div class="text-xs opacity-60">Spots</div>
@@ -36,23 +36,23 @@
                state file or fchl_teams.json written before that guard can still
                hold one, and "-1" reads as a bug with no action it implies. The
                property stays signed — solve_optimal_roster uses the negative. #}
-            <div class="text-sm font-semibold">{{ [team.total_spots_remaining, 0]|max }}</div>
+            <div class="text-sm font-semibold">{{ [viewed_team.total_spots_remaining, 0]|max }}</div>
         </div>
         <div class="tooltip tooltip-bottom" data-tip="Highest single bid this team can physically afford right now (capped at $11.4M)">
             <div class="text-xs opacity-60">Max Bid</div>
-            <div class="text-sm font-semibold">${{ "%.1f"|format(team.physical_max_bid) }}M</div>
+            <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.physical_max_bid) }}M</div>
         </div>
         <div class="tooltip tooltip-bottom" data-tip="Sum of projected fantasy points across the active roster">
             <div class="text-xs opacity-60">Proj PTS</div>
-            <div class="text-sm font-semibold text-accent">{{ team.roster_players|sum(attribute='projected_points') }}</div>
+            <div class="text-sm font-semibold text-accent">{{ viewed_team.roster_players|sum(attribute='projected_points') }}</div>
         </div>
     </div>
 
     <div class="text-xs opacity-70 mb-2">
-        Needs: {{ team.roster_needs.get("F", 0) }}F · {{ team.roster_needs.get("D", 0) }}D · {{ team.roster_needs.get("G", 0) }}G
+        Needs: {{ viewed_team.roster_needs.get("F", 0) }}F · {{ viewed_team.roster_needs.get("D", 0) }}D · {{ viewed_team.roster_needs.get("G", 0) }}G
     </div>
 
-    {% if team.is_my_team and milp and milp.status == "Optimal" %}
+    {% if viewed_team.is_my_team and milp and milp.status == "Optimal" %}
     <div class="alert alert-success py-2 text-sm mb-2">
         <strong>Optimal Projected Points: {{ "%.0f"|format(milp.total_points) }}</strong>
         (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
@@ -60,13 +60,13 @@
     {% endif %}
 
     {# Combined roster: keeper + acquired (+ MILP targets only when BOT). #}
-    {% set acquired_names = team.acquired_players|map(attribute='name')|list %}
-    {% set roster_names = (team.keeper_players + team.acquired_players)|map(attribute='name')|list %}
+    {% set acquired_names = viewed_team.acquired_players|map(attribute='name')|list %}
+    {% set roster_names = (viewed_team.keeper_players + viewed_team.acquired_players)|map(attribute='name')|list %}
     {% set pos_order = {'F': 0, 'D': 1, 'G': 2} %}
-    {% set show_milp = team.is_my_team and milp and milp.status == "Optimal" and milp.roster %}
+    {% set show_milp = viewed_team.is_my_team and milp and milp.status == "Optimal" and milp.roster %}
     {% set milp_targets = milp.roster|rejectattr('name', 'in', roster_names)|list if show_milp else [] %}
     {% set combined = [] %}
-    {% for p in team.keeper_players + team.acquired_players %}
+    {% for p in viewed_team.keeper_players + viewed_team.acquired_players %}
     {% set _ = combined.append({'name': p.name, 'position': p.position, 'group': p.group, 'nhl_team': p.nhl_team, 'salary': p.salary, 'projected_points': p.projected_points, 'is_bench': p.is_bench, 'is_target': false, 'is_acquired': p.name in acquired_names, 'can_be_bought_out': p.can_be_bought_out, 'pos_rank': pos_order.get(p.position, 9)}) %}
     {% endfor %}
     {% for p in milp_targets %}
@@ -91,8 +91,13 @@
         <tr class="{{ 'text-info opacity-50 italic' if p.is_target else ('text-success' if p.is_acquired else '') }} {% if p.is_bench %}opacity-50{% endif %}">
             {# No dot for an ineligible player: the scan never fills it, so it
                would sit grey forever reading as "not analyzed" when the real
-               answer is "can't be bought out at all". #}
-            <td>{% if not p.is_target and p.can_be_bought_out %}<span id="bo-{{ p.name|replace(' ', '-')|replace("'", '')|replace('.', '') }}" class="buyout-light light-grey" title="Not analyzed — click 'Scan Roster for Buyout Opportunities' in the Buyout Analyzer"></span>{% endif %}</td>
+               answer is "can't be bought out at all".
+
+               Same reason no dots on an opponent's panel. The scan is BOT-only
+               by construction — _recompute_buyout_indicators scores every
+               hypothetical against BOT's MILP total — so on SRL's roster the
+               real answer is "this analysis isn't about you". #}
+            <td>{% if viewed_team.is_my_team and not p.is_target and p.can_be_bought_out %}<span id="bo-{{ p.name|replace(' ', '-')|replace("'", '')|replace('.', '') }}" class="buyout-light light-grey" title="Not analyzed — click 'Scan Roster for Buyout Opportunities' in the Buyout Analyzer"></span>{% endif %}</td>
             <td>{{ p.position }}</td>
             <td class="font-mono text-xs opacity-70">{{ p.group }}</td>
             <td>{{ p.name }}</td>
@@ -102,14 +107,14 @@
             <td class="flex gap-1 items-center">
                 {% if not p.is_target %}
                 <form hx-post="/toggle-bench" hx-target="#app" hx-swap="innerHTML" style="display:inline">
-                    <input type="hidden" name="team_code" value="{{ team.code }}">
+                    <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <button type="submit" class="btn btn-xs btn-ghost" title="{{ 'Activate' if p.is_bench else 'Bench' }}">{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
                 {# Auto-submits on change/blur so the user doesn't have to
                    click the $ button. Button stays as a fallback. #}
                 <form hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML" class="flex items-center gap-1">
-                    <input type="hidden" name="team_code" value="{{ team.code }}">
+                    <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}"
                            hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML"
@@ -125,7 +130,7 @@
                    went away. #}
                 {% if p.is_bench %}
                 <form hx-post="/move-to-minors" hx-target="#app" hx-swap="innerHTML" style="display:inline">
-                    <input type="hidden" name="team_code" value="{{ team.code }}">
+                    <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <button type="submit" class="btn btn-xs btn-ghost" title="Send to minors">↓ Minors</button>
                 </form>
@@ -137,12 +142,12 @@
         </tbody>
     </table>
 
-    {% if team.minor_players %}
-    <h3 class="font-semibold text-sm mt-3 mb-1 opacity-70">Minors ({{ team.minor_players|length }})</h3>
+    {% if viewed_team.minor_players %}
+    <h3 class="font-semibold text-sm mt-3 mb-1 opacity-70">Minors ({{ viewed_team.minor_players|length }})</h3>
     <table class="table table-xs table-zebra">
         <thead><tr><th>Pos</th><th>Grp</th><th>Player</th><th>NHL</th><th>Salary</th><th>PTS</th><th>On Cap</th><th>Actions</th></tr></thead>
         <tbody>
-        {% for p in team.minor_players|sort(attribute='projected_points', reverse=True) %}
+        {% for p in viewed_team.minor_players|sort(attribute='projected_points', reverse=True) %}
         <tr class="opacity-70">
             <td>{{ p.position }}</td>
             <td class="font-mono text-xs opacity-70">{{ p.group }}</td>
@@ -153,7 +158,7 @@
             <td>{{ "Yes" if p.counts_on_cap else "No" }}</td>
             <td>
                 <form hx-post="/move-to-roster" hx-target="#app" hx-swap="innerHTML" style="display:inline">
-                    <input type="hidden" name="team_code" value="{{ team.code }}">
+                    <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <button type="submit" class="btn btn-xs btn-ghost" title="Recall to active roster">↑ Roster</button>
                 </form>
@@ -167,15 +172,15 @@
     <div class="divider my-1"></div>
     <h4 class="font-semibold text-xs mb-1">Trade Between Teams</h4>
     <form hx-post="/trade-between" hx-target="#app" hx-swap="innerHTML">
-        <input type="hidden" name="team_a" value="{{ team.code }}">
-        <input type="hidden" name="players_from_a" id="trade-from-a-{{ team.code }}" value="">
-        <input type="hidden" name="players_from_b" id="trade-from-b-{{ team.code }}" value="">
+        <input type="hidden" name="team_a" value="{{ viewed_team.code }}">
+        <input type="hidden" name="players_from_a" id="trade-from-a-{{ viewed_team.code }}" value="">
+        <input type="hidden" name="players_from_b" id="trade-from-b-{{ viewed_team.code }}" value="">
         <div class="grid grid-cols-3 gap-2">
             <div>
-                <label class="text-xs opacity-70">{{ team.code }} sends:</label>
+                <label class="text-xs opacity-70">{{ viewed_team.code }} sends:</label>
                 <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto"
-                        onchange="updateTradeHidden(this, 'trade-from-a-{{ team.code }}')">
-                    {% for p in team.roster_players|sort(attribute='projected_points', reverse=True) %}
+                        onchange="updateTradeHidden(this, 'trade-from-a-{{ viewed_team.code }}')">
+                    {% for p in viewed_team.roster_players|sort(attribute='projected_points', reverse=True) %}
                     <option value="{{ p.name }}">{{ player_label(p, with_points=false) }}</option>
                     {% endfor %}
                 </select>
@@ -183,10 +188,10 @@
             <div>
                 <label class="text-xs opacity-70">To team:</label>
                 <select name="team_b" required class="select select-bordered select-xs bg-base-200 w-full"
-                        onchange="loadTradePartner(this.value, '{{ team.code }}')">
+                        onchange="loadTradePartner(this.value, '{{ viewed_team.code }}')">
                     <option value="">Select...</option>
                     {% for code in nomination_order %}
-                    {% if code != team.code %}
+                    {% if code != viewed_team.code %}
                     <option value="{{ code }}">{{ code }} — {{ teams[code].name }}</option>
                     {% endif %}
                     {% endfor %}
@@ -194,8 +199,8 @@
             </div>
             <div>
                 <label class="text-xs opacity-70">Receives:</label>
-                <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto" id="trade-partner-players-{{ team.code }}"
-                        onchange="updateTradeHidden(this, 'trade-from-b-{{ team.code }}')">
+                <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto" id="trade-partner-players-{{ viewed_team.code }}"
+                        onchange="updateTradeHidden(this, 'trade-from-b-{{ viewed_team.code }}')">
                     <option disabled>Select a team first</option>
                 </select>
             </div>

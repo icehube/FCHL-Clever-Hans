@@ -564,7 +564,70 @@ class TestSetNominator:
         """Setting an invalid team code should not crash."""
         r = client.post("/set-nominator", data={"team_code": "FAKE"})
         assert r.status_code == 200
-        assert "Nomination" in r.text
+        # Was `"Nomination" in r.text`, which matched only the HTML comment
+        # "Nomination recommendations" — moving a comment broke it, and it
+        # would have passed on any fragment that happened to carry the word.
+        assert 'id="nomination-panel"' in r.text
+
+
+class TestBidSessionSurvives:
+    """The live bidding session exists only in #bid-panel's DOM.
+
+    Player, price and bidder toggles are never persisted server-side, so any
+    response that replaces that region loses them. Before the panel was split,
+    /nominate and /set-nominator both returned the whole #auction-control from
+    base context and wiped the session — and /nominate fires on a bare `n`
+    keypress, whose guard only covers INPUT/TEXTAREA/SELECT, so focus on a
+    bidder-logo button left it live.
+
+    These assert the STRUCTURAL property rather than any rendered value: an
+    endpoint cannot clobber a region it does not return.
+    """
+
+    def test_nominate_cannot_touch_the_bid_region(self, client):
+        r = client.get("/nominate")
+        assert r.status_code == 200
+        assert 'id="nomination-panel"' in r.text
+        assert 'id="bid-form"' not in r.text
+        assert 'id="bidder-logos"' not in r.text
+
+    @pytest.mark.parametrize("team_code", ["LGN", "FAKE"])
+    def test_set_nominator_cannot_touch_the_bid_region(self, client, team_code):
+        """Both paths — the valid one and the rejected team code."""
+        r = client.post("/set-nominator", data={"team_code": team_code})
+        assert r.status_code == 200
+        assert 'id="nomination-panel"' in r.text
+        assert 'id="bid-form"' not in r.text
+        assert 'id="bidder-logos"' not in r.text
+
+    def test_bid_check_cannot_touch_the_nomination_region(self, client):
+        """The converse: a price change must not drop a nomination pick."""
+        r = client.post("/bid-check", data={
+            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN,SRL",
+        })
+        assert r.status_code == 200
+        assert 'id="bid-panel"' in r.text
+        assert 'id="nomination-panel"' not in r.text
+
+    def test_bid_check_does_not_resend_the_player_datalist(self, client):
+        """~700 options on the hottest endpoint in the app.
+
+        The datalist lives in the shell and resolves by document id, so the
+        bid form still finds it without it riding along on every keystroke.
+        """
+        bid = client.post("/bid-check", data={
+            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN",
+        })
+        assert 'id="player-list"' not in bid.text
+        assert 'list="player-list"' in bid.text, "the input must still reference it"
+        assert 'id="player-list"' in client.get("/").text
+
+    def test_full_render_still_contains_both_panels(self, client):
+        """An include dropped in the split would only show up here."""
+        r = client.get("/")
+        for marker in ('id="auction-control"', 'id="nomination-panel"',
+                       'id="bid-panel"', 'id="player-list"'):
+            assert marker in r.text, f"{marker} missing from the full page"
 
 
 class TestBuyout:

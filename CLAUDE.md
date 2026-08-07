@@ -95,6 +95,12 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 - 14F/7D/3G roster shape is a **soft preference** (good backups: 2F/1D/1G), not a constraint -- encoded as `BACKUP_TARGETS`/`BACKUP_BONUS`/`BENCH_WEIGHT` in config.py. The MILP maximizes starting-lineup points.
 - RFA sealed bids are NOT separately modeled: run them like a regular auction and bid the advisor's current optimal bid. No ROFR logic in the tool.
 
+### Owner decisions (2026-08-06)
+
+- The league **commissioner software refuses any bid that would leave a team unable to fill a full roster**. So `remaining_budget < spots_remaining * MIN_SALARY` is unreachable through legal bidding, and the MILP's `== spots` constraint is correct rather than over-strict — don't "fix" it.
+- **An over-cap trade warns, it does not refuse.** `/trade-between` should execute and return a warning toast naming the team and the overage; the league permits temporary over-cap states that get resolved by buyouts.
+- Drafting past 24 **auto-routes to the minors** rather than being blocked, so a live sale never gets stopped by the tool.
+
 ## Key design decisions
 
 | Decision | Why |

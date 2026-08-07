@@ -451,7 +451,7 @@ async def bid_check(
     if p is None:
         ctx = _context(request)
         ctx["bid_advice"] = None
-        return _render(request, "partials/auction_control.html", ctx)
+        return _render(request, "partials/bid_panel.html", ctx)
 
     # Use live ceiling from active bidders if provided
     bidder_list = [b.strip() for b in bidders.split(",") if b.strip()]
@@ -494,7 +494,9 @@ async def bid_check(
     chart = _chart_context(player)
     if chart is not None:
         ctx.update(chart)
-    return _render(request, "partials/auction_control.html", ctx)
+    # Bid half only — returning the whole panel would replace the nomination
+    # recommendations on every price change and bidder toggle.
+    return _render(request, "partials/bid_panel.html", ctx)
 
 
 @app.get("/nominate", response_class=HTMLResponse)
@@ -507,7 +509,9 @@ async def nominate(request: Request):
     ctx = _context(request)
     ctx["rfa_pick"] = rfa_pick
     ctx["ufa_pick"] = ufa_pick
-    return _render(request, "partials/auction_control.html", ctx)
+    # Nomination half only: this fires on a bare `n` keypress, and returning
+    # the whole panel destroyed any in-flight bidding session.
+    return _render(request, "partials/nomination_panel.html", ctx)
 
 
 @app.get("/explain/{player_name}", response_class=HTMLResponse)
@@ -890,12 +894,14 @@ async def player_chart(request: Request, player_name: str):
 async def set_nominator(request: Request, team_code: str = Form(...)):
     """Override which team nominates next."""
     order = auction_state._effective_order()
+    # Nomination half only, both paths — the nominator badge lives there, and
+    # returning the whole panel wiped any in-flight bidding session.
     if team_code not in order:
-        return _render(request, "partials/auction_control.html")
+        return _render(request, "partials/nomination_panel.html")
     auction_state.save_snapshot()
     auction_state.nomination_index = order.index(team_code)
     _save_state()
-    return _render(request, "partials/auction_control.html")
+    return _render(request, "partials/nomination_panel.html")
 
 
 @app.get("/team-view/{team_code}", response_class=HTMLResponse)

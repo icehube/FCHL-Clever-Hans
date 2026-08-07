@@ -1,0 +1,148 @@
+{# Bidding half of the auction panel — swapped on its own by /bid-check. This
+   fragment IS the bidding session: the player, the price, and the bidder
+   toggles live nowhere else, so anything that replaces it loses them. Keeping
+   it out of /nominate's and /set-nominator's responses is what makes those two
+   safe to fire mid-bid.
+
+   The player datalist stays in the shell (auction_control.html), not here: it
+   is ~700 options, the inputs below reference it by id from anywhere in the
+   document, and /bid-check fires on every price change and bidder toggle. #}
+<div id="bid-panel">
+    {# Degraded-advice warning: when the roster MILP can't solve, every
+       bid recommendation falls back to floor values — the operator must
+       know the numbers are fallbacks, not analysis. Lives with the advice
+       it qualifies, so it refreshes when the advice does. #}
+    {% if milp and milp.status != "Optimal" %}
+    <div class="alert alert-warning py-2 text-xs mb-2">
+        ⚠ Optimizer {{ milp.status }} — bid advice degraded to floor values.
+        Check budget/roster (pool too small, cap too tight, or roster overfull).
+    </div>
+    {% endif %}
+
+    <!-- Bid advisor -->
+    {% if bid_advice is defined and bid_advice %}
+    {% if chart_player is defined and chart_player %}
+    {% include "partials/player_chart.html" %}
+    {% endif %}
+    <div class="alert alert-info py-2 text-sm mb-2">
+        <span class="loading loading-spinner loading-xs"></span>
+        <span>Bidding on <strong>{{ bid_advice.player_name }}</strong></span>
+    </div>
+    <div class="bid-result bid-{{ bid_advice.action|lower }}">
+        <div class="bid-action">{{ bid_advice.action }}</div>
+        <div class="bid-details">
+            {# Two numbers, not one. They mean different things, and blending
+               them made the display double ($4.1M -> $8.5M) when the price rose
+               one increment past the forecast — see the Max-bid entry resolved
+               2026-08-06. The verdict ladder has run on the value cap alone
+               since a3de737; this makes the panel agree with it. #}
+            <span class="tooltip tooltip-bottom" data-tip="HARD LIMIT — past this the player costs more than he's worth to your roster. Doesn't move as the price climbs.">Worth up to: <strong>${{ bid_advice.value_cap }}M</strong></span>
+            {% if bid_advice.expected_stop is not none %}
+            <span class="tooltip tooltip-bottom" data-tip="FORECAST — where bidding should run out (second-highest opponent max, plus one increment). Bid this and you should win without overpaying.">Should win it: <strong>${{ bid_advice.expected_stop }}M</strong></span>
+            {% elif bid_advice.stop_status == "uncontested" %}
+            <span class="tooltip tooltip-bottom" data-tip="No opponent left in the bidding, so there is nothing to forecast — only value binds now">Should win it: &mdash; <span class="opacity-60">(no rivals left)</span></span>
+            {% elif bid_advice.stop_status == "unaffordable" %}
+            <span class="tooltip tooltip-bottom" data-tip="No roster spot or budget for any bid — a target price would only invite one the engine has already refused">Should win it: &mdash; <span class="opacity-60">(can't bid)</span></span>
+            {% elif bid_advice.stop_status == "passed" %}
+            <span class="tooltip tooltip-bottom" data-tip="Bidding went past the forecast, so it's been falsified — a real price on the table beats a prediction. Only value binds now.">Should win it: &mdash; <span class="opacity-60">(bidding passed it)</span></span>
+            {% else %}
+            {# Every known status is named above, so this is an unrecognized one:
+               a status added to the engine without a branch here, or a default-
+               constructed BidRecommendation ("live" with no figure — impossible
+               from compute_bid_recommendation, but reachable by construction).
+               Say nothing rather than guess. This used to be the "passed" arm,
+               which meant an unknown status rendered as a confident claim that
+               a real price had falsified the forecast. #}
+            <span class="tooltip tooltip-bottom" data-tip="No forecast available for this bid">Should win it: &mdash;</span>
+            {% endif %}
+            <span class="tooltip tooltip-bottom" data-tip="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
+            {% if bid_advice.uncontested %}
+            <span class="tooltip tooltip-bottom" data-tip="No opponents left in the bidding — nobody can push the price higher, so the ceiling no longer constrains you">Ceiling: &mdash;</span>
+            {% else %}
+            <span class="tooltip tooltip-bottom" data-tip="Highest realistic price the auction can reach: second-highest physical max bid among active opponents (auction ends when 2nd-to-last bidder drops out)">Ceiling: ${{ bid_advice.market_ceiling }}M</span>
+            {% endif %}
+        </div>
+        {% if bid_advice.action != "BID" %}
+        <div class="bid-reasoning">{{ bid_advice.reasoning }}</div>
+        {% endif %}
+        {% if bid_advice.action == "DROP" %}
+        <a hx-get="/explain/{{ bid_advice.player_name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML"
+           class="link link-info text-xs">Why not bid?</a>
+        {% endif %}
+    </div>
+
+    {# Single bid form: visible player + price; hidden bidders synced from grid.
+       Bidder clicks and price changes auto-resubmit /bid-check. #}
+    <form id="bid-form" hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" hx-sync="this:replace" class="mt-2">
+        <div class="flex flex-wrap gap-2 items-center">
+            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" readonly class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
+            <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" id="bid-price"
+                   hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML"
+                   hx-trigger="change" hx-include="closest form"
+                   class="input input-xs input-bordered bg-base-300 w-16">
+            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
+        </div>
+        <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else default_bidders }}">
+        <input type="hidden" name="highest_bidder" id="highest-bidder-hidden" value="{{ highest_bidder if highest_bidder is defined else '' }}">
+    </form>
+
+    {# Bidder grid: every non-done team (including BOT). Click toggles active. #}
+    <div class="bidder-logos" id="bidder-logos">
+        {% for code in nomination_order %}
+        {% if not teams[code].is_done %}
+        <button type="button" class="bidder-logo-btn {% if active_bidders is defined and code in active_bidders %}active{% endif %}"
+                data-team="{{ code }}" onclick="auctionTeamClick(this)" title="{{ teams[code].name }} ({{ code }})">
+            <img src="/fchl_logos/{{ teams[code].logo }}" alt="{{ code }}" class="team-logo-xs">
+            <span class="bidder-code">{{ code }}</span>
+        </button>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    {# Assign appears only when one team is left bidding — the auction winner.
+       bid_winner comes from market.bid_winner(), the same predicate behind the
+       advisor's WIN verdict. Don't count active_bidders here: a cap-full or
+       done team is still toggled on but cannot raise the price, which used to
+       render WIN with no Assign button. #}
+    {% if bid_winner is defined and bid_winner %}
+    {% set winner_code = bid_winner %}
+    {# Salary is read out of #bid-price when the request is built, NOT captured
+       here at render time. The price input re-renders this whole panel on
+       `change`, and `change` on a number input fires on BLUR — so clicking
+       Assign right after typing a price blurs the input, starts a /bid-check
+       re-render, and a snapshot taken at the last render would post the
+       PREVIOUS price. There is deliberately no hidden salary field to fall
+       back to: one source only, and a failed read 422s loudly instead of
+       silently recording the wrong salary for the rest of the draft.
+
+       #bid-price and this form must stay in the SAME fragment: the lookup is
+       by document id at request time, so a split that left one of them behind
+       in a stale region would read the wrong input without erroring. #}
+    <form hx-post="/assign" hx-target="#app" hx-swap="innerHTML" class="mt-2"
+          hx-vals='js:{salary: document.getElementById("bid-price").value}'>
+        <input type="hidden" name="player" value="{{ bid_advice.player_name }}">
+        <input type="hidden" name="team" value="{{ winner_code }}">
+        <button type="submit" class="btn btn-primary btn-sm w-full">
+            Assign to {{ winner_code }}
+            (<span id="assign-price">${{ "%.1f"|format(bid_price if bid_price is defined else 0.5) }}M</span>)
+        </button>
+    </form>
+    {% endif %}
+
+    {% else %}
+    <!-- No auction active: bid advisor form. Bidder grid is intentionally
+         omitted until a player is introduced -- pre-toggling teams without a
+         player has no actionable meaning. -->
+    <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="bid-form">
+        <div class="flex flex-wrap gap-2 items-center">
+            <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
+            <input type="number" name="price" step="0.1" min="0.5" value="0.5" id="bid-price" class="input input-xs input-bordered bg-base-300 w-16">
+            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
+            <button type="submit" class="btn btn-xs btn-secondary">Start Auction</button>
+        </div>
+        <input type="hidden" name="bidders" value="{{ default_bidders }}">
+    </form>
+    {% endif %}
+</div>

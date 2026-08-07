@@ -28,9 +28,14 @@ document.addEventListener('keydown', function(e) {
 
     // N: nomination recommendations. (Ctrl+N is reserved by Chrome/Firefox
     // and cannot be intercepted — plain letter keys outside inputs work.)
+    //
+    // Targets #nomination-panel, NOT the whole #auction-control: `typing` is
+    // false whenever focus is on a button, which is where it lands after
+    // clicking a bidder logo, so a stray `n` mid-auction used to replace the
+    // bid panel and take the player, price and every bidder toggle with it.
     if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        htmx.ajax('GET', '/nominate', {target: '#auction-control', swap: 'outerHTML'});
+        htmx.ajax('GET', '/nominate', {target: '#nomination-panel', swap: 'outerHTML'});
     }
 });
 

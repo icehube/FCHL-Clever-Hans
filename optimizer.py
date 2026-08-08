@@ -334,7 +334,17 @@ def compute_marginal_value(
     # Binary search for the break-even salary
     # Search in discrete increments of SALARY_INCREMENT
     lo = MIN_SALARY
-    hi = min(team.spendable_budget + MIN_SALARY, MAX_SALARY)
+    # The same ceiling the bid panel caps on, not a second copy of its formula.
+    # This used to spell out `min(spendable_budget + MIN_SALARY, MAX_SALARY)`,
+    # which is physical_max_bid's with-spots branch minus its clamp at zero —
+    # and the no-spots branch cannot apply here, because `total_spots_remaining
+    # <= 0` returned above. The two agreed on every reachable state (they part
+    # company only when a team is over-committed, which the `with_at_min`
+    # Infeasible guard above already caught: a legal roster with him forced at
+    # the floor requires spendable_budget >= 0), so this is drift-proofing
+    # rather than a bug fix. Change physical_max_bid again and the binary
+    # search now follows instead of silently not.
+    hi = team.physical_max_bid
 
     # Check the top first: a player still worth it at our absolute max is
     # valued at hi exactly (the loop below can only ever reach hi - 0.1).

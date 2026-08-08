@@ -673,3 +673,46 @@ class TestTheScanSurvivesAnAwkwardName:
             f"{unresolved} of {len(placeholders)} dots never resolved — one "
             f"un-escapable id ({victim!r}) aborts every OOB swap after it"
         )
+
+
+class TestATypoDoesNotVanish:
+    """The Start Auction field is free text, and a name it can't find used to
+    empty the box with nothing said.
+
+    `/bid-check` answered the unknown-player case with the bare empty form, so
+    the whole-panel swap replaced what you typed with a blank input: no toast,
+    no message, no clue whether the app had crashed or simply not heard you.
+    `TestClient` can see that the response now carries the text and the note; it
+    cannot see whether either survives htmx replacing the panel, which is the
+    entire failure — the old behaviour also answered 200 with a valid panel.
+    """
+
+    def test_an_unrecognized_name_leaves_a_message_and_the_text(
+        self, page, live_server
+    ):
+        _open(page, live_server)
+        errors: list[str] = []
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+
+        # Derived from the pool, so a data refresh cannot turn this into a
+        # successful bid check that silently tests nothing.
+        typo = f"{_pool_top(1)[0]} Jr."
+        assert typo not in main.auction_state.available_players
+
+        page.fill("#bid-panel input[name='player']", typo)
+        with page.expect_response(re.compile(r"/bid-check")):
+            page.click("#bid-panel button[type='submit']")
+
+        page.wait_for_selector("#bid-advice")
+        assert page.locator("#bid-advice").is_visible(), (
+            "the unknown-player note is in the DOM but not on screen"
+        )
+        assert typo in page.locator("#bid-advice").inner_text(), (
+            "the message does not name the player, so it reads as a generic "
+            "failure rather than a spelling correction"
+        )
+        assert page.input_value("#bid-panel input[name='player']") == typo, (
+            "the typed name was wiped by the swap, so correcting a one-letter "
+            "typo means retyping the whole thing mid-auction"
+        )
+        assert not errors, f"the console threw: {errors[:3]}"

@@ -441,7 +441,11 @@ class TestAPIEdgeCases:
         assert r.status_code == 200
         players = r.json()
         assert players, "BOT has keepers; the dropdown cannot be empty"
-        assert set(players[0]) == {"name", "position", "salary", "projected_points"}
+        # `is_minor` is part of the contract, not incidental: the JS that builds
+        # the "I Receive" labels reads it to mark minor-league players, and a
+        # dropdown that mixed them in silently would misdescribe the trade.
+        assert set(players[0]) == {
+            "name", "position", "salary", "projected_points", "is_minor"}
 
     def test_explain_nonexistent_player(self, client):
         """Counterfactual for non-existent player should not crash."""

@@ -1,6 +1,7 @@
 """Tests for main.py: FastAPI endpoints."""
 
 import html
+import json
 import re
 from contextlib import contextmanager
 
@@ -1682,3 +1683,97 @@ class TestARecalledKeeperIsNotColouredAsAPurchase:
             f"{top.name} was bought at auction and must stay green through a "
             f"trip to the minors"
         )
+
+
+class TestTheTradeFormCanSeeTheMinors:
+    """A minor-league player is tradeable, and both dropdowns hid him.
+
+    The engine never restricted this — `remove_player` walks all three lists and
+    `evaluate_trade` resolves the incoming player with `find_player`, which
+    searches the minors — so `/trade-between` has always accepted one. The
+    restriction lived entirely in the two lists that feed the form, which means
+    a legal trade could not be *proposed*. For a group 2/3 player his salary is
+    fully on cap, so it is a trade with real cap consequences: the same fact
+    that made the buyout dots wrong on 2026-08-07.
+    """
+
+    @staticmethod
+    def _a_minor(code: str):
+        """Someone in `code`'s minors, by role rather than by name."""
+        import main
+        minors = main.auction_state.teams[code].minor_players
+        assert minors, f"{code} has no minor-league players — nothing to exercise"
+        return minors[0]
+
+    def test_team_players_returns_them_flagged(self, client):
+        """The "I Receive" side is built in JS from this JSON."""
+        import main
+        code = next(c for c, t in main.auction_state.teams.items() if t.minor_players)
+        expected = {p.name for p in main.auction_state.teams[code].minor_players}
+
+        rows = client.get(f"/team-players/{code}").json()
+        assert {r["name"] for r in rows if r["is_minor"]} == expected
+        assert {r["name"] for r in rows} >= expected, "the minors are missing entirely"
+
+    def test_the_give_list_offers_them_marked(self, client):
+        """The "I Give" side, rendered by Jinja — same list, different half."""
+        minor = self._a_minor("BOT")
+        panel = section_of(client.get("/").text, "trade-panel")
+
+        def option_for(name: str) -> str | None:
+            m = re.search(
+                rf'<option value="{re.escape(html.escape(name))}">(.*?)</option>',
+                panel, re.S)
+            return m.group(1) if m else None
+
+        offered = option_for(minor.name)
+        assert offered is not None, (
+            f"{minor.name} is in BOT's minors and cannot be offered in a trade"
+        )
+        assert "(M)" in offered, f"nothing marks {minor.name} as a minor: {offered!r}"
+
+        # The marker has to mean something, or it is noise on every row.
+        import main
+        active = main.auction_state.teams["BOT"].roster_players[0]
+        assert "(M)" not in (option_for(active.name) or ""), (
+            f"{active.name} is on the active roster and must not be marked"
+        )
+
+    def test_a_trade_that_gives_a_minor_executes(self, client):
+        """The end-to-end claim the finding made: propose it, then run it.
+
+        Asserted on both rosters rather than on the response, because the
+        failure this replaces was a form that rendered perfectly well while
+        being unable to name the player.
+        """
+        import main
+        minor = self._a_minor("BOT")
+        source = next(c for c, t in main.auction_state.teams.items()
+                      if c != "BOT" and t.roster_players)
+        incoming = main.auction_state.teams[source].roster_players[0]
+
+        r = client.post("/trade-evaluate", data={
+            "give_player": [minor.name],
+            "source_team": source,
+            "receive_player": [json.dumps({
+                "name": incoming.name,
+                "position": incoming.position,
+                "salary": incoming.salary,
+                "projected_points": incoming.projected_points,
+            })],
+        })
+        assert r.status_code == 200, r.text
+        assert main.last_trade_eval is not None, (
+            f"the form could not even propose giving {minor.name}"
+        )
+
+        r = client.post("/trade-execute",
+                        data={"trade_id": main.last_trade_eval.trade_id})
+        assert r.status_code == 200, r.text
+        assert toast_of(r).get("type") != "error", toast_of(r)
+
+        bot = {p.name for p in main.auction_state.teams["BOT"].all_players}
+        theirs = {p.name for p in main.auction_state.teams[source].all_players}
+        assert minor.name not in bot, f"{minor.name} never left BOT"
+        assert minor.name in theirs, f"{minor.name} left BOT but arrived nowhere"
+        assert incoming.name in bot

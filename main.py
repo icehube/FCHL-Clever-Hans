@@ -1374,7 +1374,19 @@ async def team_view(request: Request, team_code: str):
 
 @app.get("/team-players/{team_code}")
 async def team_players(team_code: str):
-    """Return JSON list of players on a team (for trade dropdown)."""
+    """Return JSON list of players on a team (for trade dropdown).
+
+    `all_players`, not `roster_players`: a minor-league player is tradeable —
+    `execute_trade`, `remove_player` and `find_player` have always handled him —
+    and for group 2/3 his salary is fully on cap, so leaving him out of the
+    dropdown made a legal, cap-relevant trade impossible to even propose. Same
+    reasoning and the same expression as the buyout panel's list.
+
+    `is_minor` rides along because the label is built in JS here rather than by
+    the `player_label` macro, and a dropdown that silently mixes the two would
+    be worse than one that omits them: a trade reads differently when the player
+    arrives on the active roster.
+    """
     t = auction_state.teams.get(team_code)
     if t is None:
         return []
@@ -1384,8 +1396,9 @@ async def team_players(team_code: str):
             "position": p.position,
             "salary": p.salary,
             "projected_points": p.projected_points,
+            "is_minor": p.is_minor,
         }
-        for p in t.roster_players
+        for p in t.all_players
     ]
 
 

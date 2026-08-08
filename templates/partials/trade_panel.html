@@ -9,9 +9,16 @@
             <div class="grid grid-cols-2 gap-3">
                 <div>
                     <h3 class="font-semibold text-sm mb-1">I Give</h3>
+                    {# all_players, not roster_players: a minor-league player is
+                       tradeable and his salary is on cap for group 2/3, so
+                       omitting him made a legal trade impossible to propose.
+                       Marked "(M)" inline and sorted with everyone else, the
+                       same convention buyout_panel.html uses — a trade reads
+                       differently when the player lands on the active roster,
+                       which is where /trade-between puts him. #}
                     <select name="give_player" multiple size="5" class="select select-bordered select-sm bg-base-300 w-full h-auto">
-                        {% for p in team.roster_players|sort(attribute='projected_points', reverse=True) %}
-                        <option value="{{ p.name }}">{{ player_label(p) }}</option>
+                        {% for p in team.all_players|sort(attribute='projected_points', reverse=True) %}
+                        <option value="{{ p.name }}">{{ player_label(p) }}{% if p.is_minor %} (M){% endif %}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -99,7 +106,10 @@ async function loadTeamPlayers(teamCode) {
     for (const p of players) {
         const opt = document.createElement('option');
         opt.value = JSON.stringify(p);
-        opt.textContent = `${p.name} (${p.position}, $${p.salary.toFixed(1)}M, ${p.projected_points}pts)`;
+        // The "(M)" the Jinja list above adds, built again here because this
+        // half of the form is rendered by JS and the two must read alike.
+        const minors = p.is_minor ? ' (M)' : '';
+        opt.textContent = `${p.name} (${p.position}, $${p.salary.toFixed(1)}M, ${p.projected_points}pts)${minors}`;
         select.appendChild(opt);
     }
 }

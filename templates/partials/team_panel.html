@@ -11,7 +11,7 @@
 
     {# Custom grid (not DaisyUI .stats) — DaisyUI's .stat has min-width: 16rem
        which forces horizontal scroll with 6-7 tiles. Grid wraps cleanly. #}
-    <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-1 bg-base-300 rounded-md p-2 mb-2">
+    <div class="team-stats grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-1 bg-base-300 rounded-md p-2 mb-2">
         <div class="tooltip tooltip-bottom" data-tip="Total salary committed: keeper + acquired actives + minors that count on cap, plus buyout penalties">
             <div class="text-xs opacity-60">Cap Used</div>
             <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.total_salary) }}M</div>

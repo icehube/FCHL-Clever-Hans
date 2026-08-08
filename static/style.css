@@ -90,6 +90,42 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 .bid-details { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0; font-size: 0.75rem; }
 .bid-reasoning { color: var(--text-muted); font-size: 0.75rem; }
 
+/* Tooltip bubbles that stay inside the panel they belong to.
+   ---------------------------------------------------------
+   DaisyUI centres the bubble on its trigger (`left: 50%` plus
+   `translateX(-50%)`, vendor CSS `.tooltip-bottom:before`) and has no flip
+   logic — a bubble near a container's left edge simply renders off it. Measured
+   in Chrome 2026-08-08 at 375/800/1280 with a live bid running: 4 of the 10
+   tooltips on screen ended up outside the scrollable content box, the worst
+   94px out, so the explanation was unreadable exactly where it was newest.
+
+   Two different causes, so two different rules:
+
+   * `.bid-details` items are short spans hugging the panel's left edge, and it
+     is a WRAPPING flex row, so which item leads a row changes with the
+     breakpoint — at 1280 items 1 and 3 both sat at x=35. Selecting the leader
+     in CSS is not possible, so the bubble is left-anchored for all of them: it
+     then extends rightward from its trigger and can never cross the left edge.
+     Safe here because the row is narrow and sits in the left column.
+   * The team panel's stat tiles are evenly spread across a 3/4/7-column grid,
+     where left-anchoring would push the LAST tile's bubble off the right
+     instead (measured: +15px at 375). Centring is right for them; they only
+     overflowed because a 20rem bubble is wider than a 191px tile at the 800px
+     breakpoint. Capping the width fixes those without moving them.
+
+   Visibility is driven by `opacity` in the vendor CSS, not by a transform
+   scale, so overriding `transform` here costs no animation. The `:after` tail
+   is deliberately left centred on its trigger — the arrow must still point at
+   the thing it explains, even when the bubble is anchored. */
+.tooltip[data-tip]::before { max-width: 15rem; }
+.bid-details > .tooltip[data-tip]::before { left: 0; transform: translateX(0); }
+/* The stat grid's first tile is the one that sits hard against the panel's
+   left edge in every column count (3, 4 and 7 all start a row with it), and at
+   the 768px breakpoint the tiles narrow to ~191px — too narrow for a centred
+   bubble to clear the edge even at 15rem. The later tiles stay centred; they
+   have room, and anchoring them would push the last one off the right. */
+.team-stats > .tooltip[data-tip]:first-child::before { left: 0; transform: translateX(0); }
+
 /* Collapsible panel chevron */
 .collapse-chevron {
     display: inline-block;

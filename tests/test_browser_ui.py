@@ -716,3 +716,97 @@ class TestATypoDoesNotVanish:
             "typo means retyping the whole thing mid-auction"
         )
         assert not errors, f"the console threw: {errors[:3]}"
+
+
+class TestTooltipsStayInsideTheirPanel:
+    """An explanation you cannot read is worse than none — it looks answered.
+
+    DaisyUI centres a tooltip bubble on its trigger (`left: 50%` plus
+    `translateX(-50%)`, vendor `.tooltip-bottom:before`) and has no flip logic,
+    so a bubble on a trigger near a container's left edge renders off it. This
+    is unreachable from `TestClient`: the HTML is identical either way and the
+    position only exists once Chrome has laid the page out and resolved the
+    pseudo-element's box.
+
+    **Measured in grid-content coordinates, not viewport coordinates.** The
+    panels live inside `.auction-grid`, which is `overflow-y: auto` — and per
+    CSS a non-visible overflow-y forces `overflow-x` to compute as `auto` too,
+    so the grid scrolls horizontally and a panel can sit legitimately outside
+    the viewport (measured 2026-08-08: at 1280px the grid's content is 2030px
+    wide and `.area-team` starts at x=1310). Judging bubbles against
+    `innerWidth` therefore flagged six correctly-placed tooltips and would have
+    sent the fix chasing a layout problem instead — that overflow is real, but
+    it is its own finding in BACKLOG.md, not this one.
+
+    Pseudo-elements have no `getBoundingClientRect`, but their box is exactly
+    computable from the resolved `left`, the transform matrix and the trigger's
+    own rect, which is what makes this an assertion rather than a screenshot.
+    """
+
+    # Every breakpoint in style.css (1-col, 2-col, 3-col) plus the edges either
+    # side of the 768px switch, where the stat tiles narrow to ~191px and a
+    # centred 15rem bubble no longer clears the panel edge. 800 is the width
+    # that actually caught the team-panel case; 375 and 1280 did not.
+    WIDTHS = (375, 640, 700, 800, 1024, 1280, 1920)
+
+    PROBE = """() => {
+      const g = document.querySelector('.auction-grid');
+      const gr = g.getBoundingClientRect();
+      const ox = -gr.left + g.scrollLeft;      // viewport px -> grid content px
+      const out = [];
+      for (const el of document.querySelectorAll('.tooltip[data-tip]')) {
+        el.classList.add('tooltip-open');      // vendor CSS keeps it opacity:0
+        const cs = getComputedStyle(el, '::before');
+        const w = parseFloat(cs.width), l = parseFloat(cs.left);
+        const m = new DOMMatrixReadOnly(cs.transform === 'none' ? '' : cs.transform);
+        const r = el.getBoundingClientRect();
+        el.classList.remove('tooltip-open');
+        const left = r.left + l + m.m41 + ox;
+        out.push({widthAuto: isNaN(w) || isNaN(l),
+                  text: el.textContent.trim().replace(/\\s+/g, ' ').slice(0, 30),
+                  left: Math.round(left), right: Math.round(left + w)});
+      }
+      return {rows: out, contentW: g.scrollWidth};
+    }"""
+
+    def test_no_tooltip_renders_outside_the_scrollable_content(
+        self, browser, live_server
+    ):
+        offenders: list[str] = []
+        counted = 0
+        for width in self.WIDTHS:
+            context = browser.new_context(viewport={"width": width, "height": 900})
+            pg = context.new_page()
+            pg.request.post(f"{live_server}/reset")
+            _open(pg, live_server)
+            # A live bid, so .bid-details and its four tooltips actually exist —
+            # they render only inside a verdict block.
+            _start_bid(pg, _pool_top(1)[0], bidders="BOT,SRL,MAC")
+            pg.wait_for_selector(".bid-details .tooltip")
+
+            data = pg.evaluate(self.PROBE)
+            assert data["rows"], f"no tooltips found at {width}px"
+            counted = max(counted, len(data["rows"]))
+            for row in data["rows"]:
+                # `auto` means the bubble was never laid out, which would make
+                # every comparison below vacuously true.
+                assert not row["widthAuto"], (
+                    f"{width}px: could not resolve a bubble box for "
+                    f"{row['text']!r} — this measurement is not viable"
+                )
+                if row["left"] < 0 or row["right"] > data["contentW"]:
+                    offenders.append(
+                        f"{width}px {row['text']!r} spans "
+                        f"[{row['left']},{row['right']}] of 0..{data['contentW']}"
+                    )
+            context.close()
+
+        assert counted >= 8, (
+            f"only {counted} tooltips were ever measured — the page must render "
+            f"the bid panel's four and the team panel's stat tiles, or this "
+            f"passes while checking almost nothing"
+        )
+        assert not offenders, (
+            f"{len(offenders)} tooltip bubbles render outside the panel area:\n  "
+            + "\n  ".join(offenders[:8])
+        )

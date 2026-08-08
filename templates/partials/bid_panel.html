@@ -63,7 +63,11 @@
                a real price had falsified the forecast. #}
             <span class="tooltip tooltip-bottom" data-tip="No forecast available for this bid">Should win it: &mdash;</span>
             {% endif %}
-            <span class="tooltip tooltip-bottom" data-tip="How much this player improves your optimal roster — the most they're worth to you, ignoring market context">Marginal: ${{ bid_advice.marginal_value }}M</span>
+            {# Answers "why doesn't this match the Price column?" — the question
+               the old wording ("ignoring market context") invited without
+               resolving. Marginal is about YOUR roster; Price is about the
+               market's, and they are supposed to disagree. #}
+            <span class="tooltip tooltip-bottom" data-tip="What he adds to YOUR optimal roster — not what he is worth in general. It is below his Price whenever you already have that position covered, and above it when he fills a hole nobody else can. A big gap either way is the tool working, not a mispricing.">Marginal: ${{ bid_advice.marginal_value }}M</span>
             {% if bid_advice.uncontested %}
             <span class="tooltip tooltip-bottom" data-tip="No opponents left in the bidding — nobody can push the price higher, so the ceiling no longer constrains you">Ceiling: &mdash;</span>
             {% else %}

@@ -774,6 +774,7 @@ class TestTooltipsStayInsideTheirPanel:
     ):
         offenders: list[str] = []
         counted = 0
+        seen: set[str] = set()
         for width in self.WIDTHS:
             context = browser.new_context(viewport={"width": width, "height": 900})
             pg = context.new_page()
@@ -787,6 +788,7 @@ class TestTooltipsStayInsideTheirPanel:
             data = pg.evaluate(self.PROBE)
             assert data["rows"], f"no tooltips found at {width}px"
             counted = max(counted, len(data["rows"]))
+            seen.update(r["text"] for r in data["rows"])
             for row in data["rows"]:
                 # `auto` means the bubble was never laid out, which would make
                 # every comparison below vacuously true.
@@ -801,7 +803,22 @@ class TestTooltipsStayInsideTheirPanel:
                     )
             context.close()
 
-        assert counted >= 8, (
+        # Named rather than counted. A count alone goes quiet-green the day a
+        # template drops a tooltip: fewer bubbles trivially means fewer
+        # offenders, so this test would keep passing while covering less. These
+        # four are the ones the 2026-08-08 batch placed or wrote — one per
+        # distinct container, so between them they exercise every rule in the
+        # CSS block (left-anchored flex row, capped-width stat grid, the
+        # league table header, and the chart meta line).
+        required = ("Worth up to", "Marginal", "Sigma", "Proj")
+        missing = [w for w in required if not any(w in t for t in seen)]
+        assert not missing, (
+            f"{missing} never appeared as a tooltip — either the template "
+            f"dropped it or the page never reached the state that renders it, "
+            f"and this test silently stops covering it either way. "
+            f"Measured: {sorted(seen)}"
+        )
+        assert counted >= 10, (
             f"only {counted} tooltips were ever measured — the page must render "
             f"the bid panel's four and the team panel's stat tiles, or this "
             f"passes while checking almost nothing"

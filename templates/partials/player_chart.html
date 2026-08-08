@@ -18,7 +18,7 @@
     <div class="chart-meta">
         {{ chart_player.position }} · <img src="/nhl_logos/{{ chart_player.nhl_team }}.svg" alt="{{ chart_player.nhl_team }}" class="h-5 inline object-contain" title="{{ chart_player.nhl_team }}"> · {{ chart_player.projected_points }}pts
         · P(floor): {{ "%.0f"|format(chart_data.p_floor * 100) }}%
-        · Sigma: {{ "%.2f"|format(chart_data.sigma) }}
+        · <span class="tooltip tooltip-bottom" data-tip="How SPREAD OUT the predicted price is (in log dollars), not how expensive he is. A high sigma means the model is unsure — the shaded band below is wide and he could go for well above or below the prediction. It scales with the predicted price, not with points.">Sigma: {{ "%.2f"|format(chart_data.sigma) }}</span>
     </div>
 
     {% set scale = 380.0 / chart_scale_max %}

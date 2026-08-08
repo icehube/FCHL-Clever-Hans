@@ -14,7 +14,17 @@
                 <th data-sort-col="{{ 7 if any_penalties else 6 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Spendable</th>
                 <th data-sort-col="{{ 8 if any_penalties else 7 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
                 <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
-                <th data-sort-col="{{ 10 if any_penalties else 9 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Proj</th>
+                {# The two Proj figures are NOT computed the same way, and the
+                   tooltip has to say so — read as one sortable column beside a
+                   rank badge they look comparable. Your own is the MILP
+                   optimum; an opponent's is a heuristic that costs no solve
+                   (11 extra MILPs per action is what it avoids). Measured
+                   2026-08-08 on a fresh state they were 5 points apart and the
+                   rank was identical either way, which is why this is labelled
+                   rather than made comparable — see BACKLOG.md. #}
+                <th data-sort-col="{{ 10 if any_penalties else 9 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">
+                    <span class="tooltip tooltip-bottom" data-tip="Projected points once the roster is filled. Computed two ways: YOURS is the optimizer's actual best roster within your real budget, everyone else's is a quick estimate that assumes they can afford their best available players — so opponents read slightly optimistic, more so as budgets tighten.">Proj</span>
+                </th>
                 <th>Done</th>
             </tr>
         </thead>

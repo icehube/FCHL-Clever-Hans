@@ -236,12 +236,39 @@ class TestLiveDataInvariants:
         _, biddable = loaded
         assert len(biddable) > 100, "a pool this small cannot fill 11 rosters"
 
-    def test_every_biddable_is_ufa_or_rfa(self, loaded):
+    def test_the_rfa_flag_agrees_with_the_fchl_team_column(self, loaded):
+        """Two independent columns have to tell the same story.
+
+        `is_rfa` comes from GROUP (`RFA_GROUPS`); the row is biddable at all
+        because FCHL TEAM is UFA or RFA. A refresh that introduces a group code
+        `RFA_GROUPS` has never heard of — `RFA3` — loads those players as UFAs
+        silently: they keep their points, they stay in the pool, and the only
+        visible effect is the RFA/UFA split moving, which is expected to move on
+        any refresh and would be waved through.
+
+        This replaces `len(ufa) + len(rfa) == len(biddable)`, which was an
+        identity — `is_rfa` is a bool, so the two lists partition the dict by
+        construction and no change to any code could falsify it.
+        """
         _, biddable = loaded
-        ufa = [p for p in biddable.values() if not p.is_rfa]
+        with open("data/players.csv") as f:
+            declared = {
+                r["PLAYER"].strip(): r["FCHL TEAM"].strip() for r in csv.DictReader(f)
+            }
+
         rfa = [p for p in biddable.values() if p.is_rfa]
-        assert len(ufa) + len(rfa) == len(biddable)
         assert rfa, "no RFAs at all is a parsing failure, not a league state"
+
+        for p in biddable.values():
+            # Renamed duplicates carry a suffix the CSV does not; they are
+            # covered by tests/test_player_identity.py and skipped here rather
+            # than reverse-engineered back to a source row.
+            if p.name not in declared:
+                continue
+            assert p.is_rfa == (declared[p.name] == "RFA"), (
+                f"{p.name} is group {p.group} on an FCHL TEAM of "
+                f"{declared[p.name]}, but loaded with is_rfa={p.is_rfa}"
+            )
 
     def test_every_biddable_scores(self, loaded):
         _, biddable = loaded

@@ -27,6 +27,7 @@ import pytest
 import data_loader
 
 from data_loader import (
+    _PLACEHOLDER_TEAMS,
     _disambiguated_names,
     last_disambiguations,
     load_players,
@@ -254,11 +255,18 @@ class TestTheLiveFileLoadsWholeAndUnambiguous:
         """Every eligible row must reach the pool. A repeated name silently
         overwrote one on 2026-08-07 — 705 rows in, 704 players out."""
         _, biddable = loaded
+        # Reads the loader's own constant and its own blank-cell guard. Both
+        # sides of a count-equality have to mean the same thing by "eligible":
+        # a hand-copied `{"UFA", "RFA"}` drifts the moment the loader's set
+        # does — narrowing `_PLACEHOLDER_TEAMS` to `{"UFA"}` fails this as
+        # `683 == 705`, naming nothing about placeholder teams — and
+        # `int(r["PTS"] or 0)` raises on a whitespace-only cell the loader is
+        # happy to read as zero.
         eligible = [
             r for r in rows
-            if r["FCHL TEAM"].strip() in {"UFA", "RFA"}
+            if r["FCHL TEAM"].strip() in _PLACEHOLDER_TEAMS
             and r["STATUS"].strip() == ""
-            and int(r["PTS"] or 0) > 0
+            and (int(r["PTS"]) if r["PTS"].strip() else 0) > 0
         ]
         assert len(biddable) == len(eligible)
 

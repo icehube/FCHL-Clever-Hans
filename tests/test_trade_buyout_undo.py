@@ -11,7 +11,12 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from config import BUYOUT_PENALTY_RATE, MIN_SALARY, SALARY_CAP
+from config import (
+    BUYOUT_ELIGIBLE_GROUPS,
+    BUYOUT_PENALTY_RATE,
+    MIN_SALARY,
+    SALARY_CAP,
+)
 from tests.helpers import assign, squeeze, toast_of
 
 
@@ -95,12 +100,24 @@ def targets(client):
     roster = bot["keeper_players"] + bot["acquired_players"]
     assert len(roster) >= 3, "BOT needs three distinct roster players for this file"
 
+    # Both buyout targets must be LEGAL ones. BOT's active roster carries a
+    # group-B prospect, and the engine correctly refuses to buy one out, so an
+    # unfiltered pick answers "not eligible for buyout" where these tests demand
+    # BUYOUT or KEEP — naming nothing about the fixture that chose him. The
+    # margin is thinner than it looks: on 2026-08-07 the ineligible player was
+    # 6 projected points off being BOT's top scorer, i.e. inside one refresh.
+    # Same reason `helpers.a_buyout_candidate` filters; this fixture predates it.
+    eligible = [p for p in roster if p["group"] in BUYOUT_ELIGIBLE_GROUPS]
+    assert len(eligible) >= 2, "BOT has too few buyout-eligible players"
+
     # Worst money-per-point on the roster: exactly what a buyout is for.
-    buyout = max(roster, key=lambda p: p["salary"] / max(p["projected_points"], 1))
+    buyout = max(eligible, key=lambda p: p["salary"] / max(p["projected_points"], 1))
     # Best player on the roster: a buyout check must answer KEEP.
-    keep = max(roster, key=lambda p: p["projected_points"])
+    keep = max(eligible, key=lambda p: p["projected_points"])
     # Lowest scorer who is neither, so the trade tests cannot collide with the
-    # player the buyout tests permanently remove.
+    # player the buyout tests permanently remove. Drawn from the WHOLE roster,
+    # not just the eligible ones — trading an ineligible player is legal, and
+    # narrowing it here would only make a collision more likely.
     spare = min(
         (p for p in roster if p["name"] not in {buyout["name"], keep["name"]}),
         key=lambda p: p["projected_points"],

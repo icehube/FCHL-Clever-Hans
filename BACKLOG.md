@@ -69,7 +69,7 @@ Track these; don't implement upfront. The market layer (Layer 2) already compens
 
 From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items — the engine is right, the interface makes it hard to act on.
 
-- ~~**Buyout Analyzer: Scan button + dropdown of my roster → select → "Execute Buyout".**~~ Closed 2026-08-06 as **already built** — `buyout_panel.html` has the Scan button plus a row of one-click per-player buttons (better than a dropdown: no open-then-select), the verdict block, and Execute Buyout. Nothing is typed. The entry described a flow that had already been replaced; the only real gap left there is the minors-have-no-dots finding under frontend/UX.
+- ~~**Buyout Analyzer: Scan button + dropdown of my roster → select → "Execute Buyout".**~~ Closed 2026-08-06 as **already built** — `buyout_panel.html` has the Scan button plus a row of one-click per-player buttons (better than a dropdown: no open-then-select), the verdict block, and Execute Buyout. Nothing is typed. The entry described a flow that had already been replaced; the only real gap left there is the minors-have-no-dots finding under frontend/UX. **The dropdown half was reopened and decided the other way on 2026-08-08** — see the testing-pass section below. Don't read the parenthetical above as still standing: it was right about the interaction and wrong about the length.
 - **Decompose Model $ into its drivers — how much comes from projected points vs. NHL team quality** (and reputation/lag salary, which is the third big term). Needs a per-coefficient contribution breakdown out of `price_model.py`; the two-stage log-normal form means contributions are multiplicative on price, so decide whether to show them in log space or as "% of predicted price".
 - **Save State button that jumps between live state and a scenario**, so testing a what-if doesn't cost the real draft state. Interacts with the scenario loader (`POST /load-scenario`) and the undo snapshot chain — check that switching can't strand a snapshot.
 
@@ -80,21 +80,26 @@ are wants, not defects — the five things that were actually *broken* are under
 **Open findings** above, and they should be fixed first. No `file:line` here,
 because nothing is wrong at one; the file names are orientation only.
 
-**Reverses a documented decision — read this before implementing it:**
+**Amends a documented decision — read this before implementing it:**
 
-- **Swap the team panel to whichever team just drafted a player.** This is the
-  exact opposite of the owner decision recorded at `CLAUDE.md:119` (2026-08-07):
-  `/assign` calls `_view_my_team()` and resets the view to BOT *"because reading
-  an opponent's Cap Used as yours right after a pick lands is worse than
-  re-opening their roster."* The new argument is that seeing what a rival just
-  built is the more useful reflex during a live auction. Both are defensible and
-  this is the owner's call — but implementing it means **amending that decision
-  in `CLAUDE.md` in the same commit**, and `TestTheViewSticks` plus the `/assign`
-  reset tests are then expected to change, not to be worked around. A middle
-  option worth considering: swap only on an *opponent's* pick, so your own pick
-  still returns you to your roster. Note the misread the decision guards against
-  does not go away — whatever the panel shows, the header numbers are that
-  team's.
+- **On an opponent's pick, swap the team panel to that team; on your own, keep
+  returning to BOT.** Owner decision 2026-08-08, narrowing the original request
+  ("swap to whichever team just drafted"). It amends rather than reverses the
+  2026-08-07 decision at `CLAUDE.md:119`, where `/assign` calls `_view_my_team()`
+  unconditionally *"because reading an opponent's Cap Used as yours right after a
+  pick lands is worse than re-opening their roster."* That reasoning only ever
+  bit on **your own** pick — the moment you are most likely to glance at the
+  header — and your own pick is exactly the case this keeps. So: `_view_my_team()`
+  on a BOT assign, view-the-buyer on an opponent assign, success path only (a
+  rejected assign is still not a draft action). **Amend that CLAUDE.md bullet in
+  the same commit**, and expect `TestTheViewSticks` and the `/assign` reset tests
+  to change with it rather than be worked around. Two things to settle while
+  building it: `/undo` also calls `_view_my_team()` and can revert either kind of
+  assign, which is the open `main.py (undo)` finding under **frontend/UX** — this
+  makes that one worth fixing at the same time, since both need `restore_snapshot`
+  to say what it undid; and `/assign` must still return the panel OOB the way
+  `/team-view` does (`team_view_response.html`), never `all_panels.html`, or the
+  swap destroys the bidding session.
 
 **Nomination panel**
 
@@ -110,13 +115,21 @@ because nothing is wrong at one; the file names are orientation only.
 
 **Buyout Analyzer**
 
-- **Dropdown instead of a row of ~15 buttons.** Note this reverses the
-  2026-08-06 judgment recorded in the UI/UX section above (buttons beat a
-  dropdown: no open-then-select) — what changed is the count, which grows with
-  the roster and now wraps. A dropdown plus one Execute button, or keep buttons
-  and cap the visible row with a "more" disclosure. Whichever wins, the list has
-  to keep reading `all_players|selectattr('can_be_bought_out')` — the same
-  expression as the scan and the dots, per CLAUDE.md.
+- **A list, not a row of ~15 buttons.** Owner decision 2026-08-08, and it
+  supersedes the 2026-08-06 judgment recorded in the UI/UX section above, which
+  closed this as already-built on the grounds that buttons beat a dropdown (no
+  open-then-select). What changed is the count: the candidate set is
+  `all_players|selectattr('can_be_bought_out')`, so it grows with the roster and
+  keeps growing all draft — the button row already wraps, and open-then-select
+  costs less than hunting a name in a wrapped block. The list has to keep reading
+  that same expression, per CLAUDE.md — the scan, the dots and this list are
+  deliberately one expression, and a `roster_players` copy is the 2026-08-07 bug
+  that silently hid 11 of BOT's 15 eligible players. Two constraints that come
+  with it: the buyout **dots** are per-player OOB swap targets keyed by
+  `main._dom_id`, so if the list collapses to a `<select>` the dots need somewhere
+  to live (per-option text, or the list stays expanded and only the *actions*
+  collapse); and it stays BOT-only, since `_recompute_buyout_indicators` scores
+  against BOT's MILP total.
 
 **Logs**
 

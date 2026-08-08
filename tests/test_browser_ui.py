@@ -520,3 +520,47 @@ class TestTheViewSticksOnScreen:
             "coming home left the scan button missing until some unrelated "
             "full-page swap restored it"
         )
+
+
+class TestTheDataBannerOutlivesAPick:
+    """The renamed-players note has to still be there after the first pick.
+
+    `TestClient` can see that `GET /` puts the banner before `<div id="app">`,
+    which is an argument about HTML ordering — the same proxy the counterfactual
+    test at the top of this file exists to replace. What matters is whether the
+    element is still in the document once htmx has replaced `#app`'s innerHTML,
+    and only a browser has run that swap. Same failure the startup banner was
+    moved out of `#app` to avoid: drafting one player silently clears the notice
+    explaining why half the pool has parenthesised suffixes.
+    """
+
+    def test_the_banner_is_outside_app_and_survives_an_assign(
+        self, page, live_server
+    ):
+        import data_loader
+
+        if not data_loader.loaded_disambiguations:
+            pytest.skip("players.csv has no duplicate names — nothing to report")
+
+        _open(page, live_server)
+        assert page.locator("#data-warning").count() == 1
+        assert page.evaluate(
+            "() => !document.querySelector('#app')"
+            ".contains(document.querySelector('#data-warning'))"
+        ), "the banner is inside #app, so the next panel swap deletes it"
+
+        # A real pick through the real controls, not htmx.ajax: the Assign form
+        # is what targets #app with the whole page, and it is the swap the
+        # operator triggers first.
+        player = _pool_top(1)[0]
+        _start_bid(page, player)
+        with page.expect_response(re.compile(r"/assign")):
+            page.click("#bid-panel form[hx-vals] button[type='submit']")
+        page.wait_for_selector("#toast-container .alert")
+
+        assert page.locator("#data-warning").count() == 1, (
+            "the first pick of the draft wiped the note explaining the renamed "
+            "players, and nothing brings it back until a full page load"
+        )
+        original = next(iter(data_loader.loaded_disambiguations))
+        assert original in page.locator("#data-warning").inner_text()

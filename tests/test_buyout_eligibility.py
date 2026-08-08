@@ -21,6 +21,7 @@ The BACKLOG entry that asked for one was working from a wrong premise.
 import pytest
 
 from config import BUYOUT_PENALTY_RATE, MY_TEAM
+from main import _dom_id
 from trade import evaluate_buyout, execute_buyout
 
 
@@ -252,8 +253,11 @@ class TestUIMatchesEligibility:
             pytest.skip("no ineligible player on BOT's active roster in current data")
 
         html = client.get("/team-view/" + MY_TEAM).text
-        dot_id = f'bo-{victim.name.replace(" ", "-")}'
-        assert dot_id not in html, (
+        # Through `_dom_id`, the one derivation both templates use. This used to
+        # hand-roll `name.replace(" ", "-")`, which stopped matching the moment
+        # the id changed — and a "not in html" assertion against a string the
+        # app never emits passes no matter what the app does.
+        assert f'id="bo-{_dom_id(victim.name)}"' not in html, (
             f"{victim.name} is group {victim.group} and can't be bought out, "
             f"but the panel renders a buyout indicator for him"
         )
@@ -272,19 +276,73 @@ class TestUIMatchesEligibility:
         )
         assert scanned, "scan produced nothing at all"
 
-    def test_scan_does_not_solve_for_players_with_no_dot(self, client):
-        """Minors have no row in the team table, so a solve for one is discarded.
+    def test_the_scan_covers_eligible_minors(self, client):
+        """Group 2/3 in the minors is a legal buyout with a full cap hit.
 
-        The scan briefly covered them, which cost four MILP solves per click
-        and rendered nothing.
+        This test used to assert the OPPOSITE — that the scan skips minors —
+        on the premise that they had no row in the team table to fill. That
+        premise expired when team_panel.html grew a Minors table, and the
+        Analyzer had been offering these players the whole time, so Scan
+        reported on BOT's 11 active players and said nothing about 4 more
+        holding $2.0M of cap. "No buyout helps" is a very different statement
+        from "I didn't look".
         """
         import main
 
-        client.get("/buyout-indicators")
         bot = main.auction_state.teams[MY_TEAM]
-        minors = {p.name for p in bot.minor_players}
-        assert not (set(main.buyout_indicators) & minors), (
-            "scan solved for minors players, which have no placeholder to fill"
+        eligible_minors = {p.name for p in bot.minor_players if p.can_be_bought_out}
+        if not eligible_minors:
+            pytest.skip("BOT holds no group 2/3 minors in current data")
+
+        client.get("/buyout-indicators")
+        missing = eligible_minors - set(main.buyout_indicators)
+        assert not missing, f"scan skipped buyout-eligible minors: {sorted(missing)}"
+
+    def test_eligible_minors_have_a_dot_to_fill(self, client):
+        """A solve with no placeholder is discarded work, and an OOB swap with
+        no target logs `htmx:oobErrorNoTarget`. The scan and the panel have to
+        cover the same set."""
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        eligible_minors = [p for p in bot.minor_players if p.can_be_bought_out]
+        if not eligible_minors:
+            pytest.skip("BOT holds no group 2/3 minors in current data")
+
+        html = client.get(f"/team-view/{MY_TEAM}").text
+        for p in eligible_minors:
+            assert f'id="bo-{_dom_id(p.name)}"' in html, (
+                f"{p.name} (group {p.group}, in the minors) is buyout-eligible "
+                f"but the panel gives the scan nowhere to report it"
+            )
+
+    def test_ineligible_minors_get_no_dot(self, client):
+        """The eligibility rule is the same wherever the player sits."""
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = next(
+            (p for p in bot.minor_players if not p.can_be_bought_out), None
+        )
+        if victim is None:
+            pytest.skip("BOT holds no A-E minors in current data")
+
+        html = client.get(f"/team-view/{MY_TEAM}").text
+        assert f'id="bo-{_dom_id(victim.name)}"' not in html, (
+            f"{victim.name} is group {victim.group} — a dot there promises a "
+            f"verdict on a move the engine refuses"
+        )
+
+    def test_an_opponents_minors_get_no_dots(self, client):
+        """Dots are BOT-only by construction: `_recompute_buyout_indicators`
+        scores every hypothetical against BOT's MILP total. Widening the scan
+        to the minors must not widen it to other teams."""
+        import main
+
+        other = next(c for c in main.auction_state.teams if c != MY_TEAM)
+        html = client.get(f"/team-view/{other}").text
+        assert 'class="buyout-light' not in html, (
+            f"{other}'s panel renders buyout dots that can never be filled"
         )
 
     def test_benched_keeper_can_be_demoted_from_the_ui(self, client):

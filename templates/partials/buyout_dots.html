@@ -1,6 +1,18 @@
 {# Buyout indicator dots — loaded lazily via HTMX OOB swap.
-   Each span targets the placeholder dot by ID and replaces it. #}
-{% for p in team.roster_players|selectattr('can_be_bought_out') %}
+   Each span targets the placeholder dot by ID and replaces it.
+
+   `all_players`, not `roster_players`, and the expression mirrors
+   buyout_panel.html's list exactly: eligibility is a property of the contract
+   group alone, so a group 2/3 player in the minors can be bought out and his
+   salary is fully on the cap. Listing him in the Analyzer while the scan
+   skipped him meant Scan reported on 11 players and silently said nothing
+   about 4 more — which reads as "no buyout helps" when it never looked.
+
+   The id comes from the `dom_id` filter, which team_panel.html's placeholders
+   also use. Two copies of an expression would be enough here: htmx resolves
+   this target as `querySelectorAll("#" + id)`, so the two have to agree
+   character for character or the swap silently misses. #}
+{% for p in team.all_players|selectattr('can_be_bought_out') %}
 {% set bo = buyout_indicators.get(p.name, "keep") if buyout_indicators is defined else "keep" %}
-<span id="bo-{{ p.name|replace(' ', '-')|replace("'", '')|replace('.', '') }}" class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}" hx-swap-oob="true"></span>
+<span id="bo-{{ p.name|dom_id }}" class="buyout-light {{ 'light-red' if bo == 'buyout' else 'light-green' }}" title="{{ 'Consider buyout' if bo == 'buyout' else 'Keep' }}" hx-swap-oob="true"></span>
 {% endfor %}

@@ -66,6 +66,17 @@ class PlayerOnRoster:
     nhl_team: str = ""
     is_minor: bool = False
     is_bench: bool = False
+    # PROVENANCE: was this player on an FCHL team before the auction? Same
+    # meaning "keeper" carries in send_to_minors — not a league rule, and
+    # nothing in the engine branches on it.
+    #
+    # It exists because provenance was previously encoded ONLY by which list a
+    # player sat in, and `minor_players` is a third list that holds neither. So
+    # a keeper sent down and recalled came back into `acquired_players` and
+    # `team_panel.html` coloured him green, i.e. "I bought him at auction",
+    # permanently. Default False is the right one: a drafted or traded-for
+    # player IS acquired, and green should say so.
+    is_keeper: bool = False
 
     @property
     def counts_on_cap(self) -> bool:
@@ -300,7 +311,8 @@ class TeamState:
         legal move a group A-E player has: those can't be bought out, and the
         minors is where their cap hit goes to zero.
 
-        A demoted keeper recalls into acquired_players, losing only that label.
+        Provenance survives the trip: `is_keeper` is set on the player, so
+        recall_from_minors puts a keeper back where he came from.
         """
         for source in (self.acquired_players, self.keeper_players):
             i = _index_of(source, player_name)
@@ -319,7 +331,14 @@ class TeamState:
         raise ValueError(f"Player '{player_name}' not on active roster of {self.code}")
 
     def recall_from_minors(self, player_name: str) -> None:
-        """Move a player from minors back to acquired (active roster).
+        """Move a player from minors back onto the active roster.
+
+        Back to the list he came from: `keeper_players` for someone who was on
+        an FCHL team before the auction, `acquired_players` for a draftee. The
+        two lists are the only record of that distinction, so recalling
+        everybody into `acquired_players` relabelled a keeper as a player BOT
+        had bought — and `team_panel.html` colours rows green on exactly that,
+        so the change was visible and permanent.
 
         The one move that cannot auto-route to the minors when the roster is
         full — recalling INTO a full roster is the illegal act itself, and the
@@ -335,7 +354,11 @@ class TeamState:
                     f"'{player_name}'"
                 )
             self.minor_players[i].is_minor = False
-            self.acquired_players.append(self.minor_players.pop(i))
+            recalled = self.minor_players.pop(i)
+            destination = (
+                self.keeper_players if recalled.is_keeper else self.acquired_players
+            )
+            destination.append(recalled)
             self._invalidate_cache()
             return
         raise ValueError(f"Player '{player_name}' not in minors on {self.code}")
@@ -545,6 +568,7 @@ def _player_on_roster_to_dict(p: PlayerOnRoster) -> dict:
         "nhl_team": p.nhl_team,
         "is_minor": p.is_minor,
         "is_bench": p.is_bench,
+        "is_keeper": p.is_keeper,
     }
 
 
@@ -558,6 +582,11 @@ def _player_on_roster_from_dict(d: dict) -> PlayerOnRoster:
         nhl_team=d.get("nhl_team", ""),
         is_minor=d.get("is_minor", False),
         is_bench=d.get("is_bench", False),
+        # .get so a state file written before this field existed still loads —
+        # a draft four hours in must not fail to parse over a colour. For the
+        # two active lists _team_from_dict then overwrites this from the list
+        # itself, which is authoritative; only minors rely on the stored value.
+        is_keeper=d.get("is_keeper", False),
     )
 
 
@@ -589,6 +618,19 @@ def _team_from_dict(d: dict) -> TeamState:
         logo=d.get("logo", ""),
         is_my_team=d.get("is_my_team", False),
     )
+    # The list a player is in decides his provenance, not the stored flag: for
+    # the two active lists, position IS the record and has been since long
+    # before `is_keeper` existed. Overwriting rather than trusting the file
+    # means a state saved before this field self-heals on load instead of
+    # colouring every keeper as a draftee.
+    #
+    # `minor_players` is deliberately absent: it is the one list that cannot
+    # re-derive provenance from position, which is the whole reason the field
+    # exists. Legacy saves fall back to `_backfill_keeper_flags` in main.py.
+    for p in team.keeper_players:
+        p.is_keeper = True
+    for p in team.acquired_players:
+        p.is_keeper = False
     team._invalidate_cache()
     return team
 

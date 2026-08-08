@@ -40,7 +40,7 @@ def _make_team(
     acquired: list[PlayerOnRoster] | None = None,
     penalties: float = 0.0,
 ) -> TeamState:
-    return TeamState(
+    team = TeamState(
         code=code,
         name="Test Team",
         keeper_players=keepers or [],
@@ -50,6 +50,15 @@ def _make_team(
         colors={"primary": "#000", "secondary": "#fff"},
         logo="1.gif",
     )
+    # Build a team that could actually exist. `data_loader` sets is_keeper on
+    # everyone it puts in keeper_players and `_team_from_dict` re-derives it on
+    # load, so a keeper with the flag unset is not a state the app can produce
+    # — and a fixture that produces one made the byte-for-byte round-trip
+    # guards fail on the loader CORRECTING it. Callers that want a specific
+    # flag (the minors cases) set it on the player themselves.
+    for p in team.keeper_players:
+        p.is_keeper = True
+    return team
 
 
 class TestPlayerOnRoster:
@@ -355,6 +364,53 @@ class TestAuctionStateSerialization:
         assert len(restored.transaction_log) == 1
         assert restored.nomination_round == 1
         assert restored.snake_draft is True
+
+    def test_keeper_provenance_survives_a_round_trip(self):
+        """`is_keeper` is the only roster-player field position cannot rebuild.
+
+        TestSnapshotFieldsCannotDrift guards AuctionState's fields against
+        to_json drifting; PlayerOnRoster has no such guard, so a field left out
+        of `_player_on_roster_to_dict` would come back as its default and a
+        demoted keeper would silently recall as a draftee after any save.
+        """
+        state = self._make_state()
+        minor = state.teams["BOT"].minor_players[0]
+        minor.is_keeper = True
+
+        restored = AuctionState.from_json(state.to_json())
+        team = restored.teams["BOT"]
+
+        assert team.minor_players[0].is_keeper, (
+            "the minors are the one list where provenance cannot be re-derived "
+            "from which list a player is in — it has to survive the file"
+        )
+        team.recall_from_minors("Minor1")
+        assert [p.name for p in team.keeper_players] == ["Keeper1", "Minor1"]
+
+    def test_the_active_lists_repair_provenance_on_load(self):
+        """A state file written before `is_keeper` existed still colours right.
+
+        Position IS the record for keeper_players and acquired_players, and has
+        been since long before the flag. So from_dict overwrites rather than
+        trusting the file, and a legacy save — no `is_keeper` key anywhere —
+        self-heals for both active lists. Minors cannot be repaired this way,
+        which is what `main._backfill_keeper_flags` is for.
+        """
+        import json
+
+        payload = json.loads(self._make_state().to_json())
+        for team in payload["teams"].values():
+            for bucket in ("keeper_players", "acquired_players", "minor_players"):
+                for p in team[bucket]:
+                    del p["is_keeper"]
+
+        restored = AuctionState.from_json(json.dumps(payload))
+        team = restored.teams["BOT"]
+
+        assert team.keeper_players[0].is_keeper, "a keeper is a keeper by position"
+        assert all(not p.is_keeper for p in team.acquired_players)
+        # Not repaired, and deliberately so — nothing in the file says which.
+        assert not team.minor_players[0].is_keeper
 
     def test_round_trip_preserves_types(self):
         state = self._make_state()
@@ -674,16 +730,26 @@ class TestMinorsMovement:
         assert team.minor_players == []
         assert team.acquired_players[0].is_minor is False
 
-    def test_demoted_keeper_recalls_into_acquired(self):
-        """A demoted keeper loses only the provenance label, and cap math holds.
+    def test_demoted_keeper_recalls_back_into_keepers(self):
+        """A demoted keeper comes back a keeper, and cap math holds.
 
-        Nothing in the app branches on keeper-vs-acquired — every other reader
-        concatenates the two — so landing in acquired_players on recall is
-        cosmetic. Pinned because it is the one visible consequence of dropping
-        the keeper refusal, and because the cap must return to where it started.
+        INVERTED 2026-08-08. This test used to assert the opposite — "keeper
+        label is not restored" — on the stated grounds that "nothing in the app
+        branches on keeper-vs-acquired; every other reader concatenates the
+        two, so landing in acquired_players on recall is cosmetic".
+
+        **That justification was false when it was written, not merely made
+        stale.** `team_panel.html` reads `acquired_players` on its own to
+        colour rows `text-success` — "I bought him at auction" — and has done
+        since f440053 (2026-05-02). This test landed in c8d7fc6 (2026-08-06),
+        three months later. So the round trip silently relabelled a keeper as a
+        draftee on screen, permanently, and the test pinned it as correct.
+
+        The cap assertions are original and still the reason the test exists.
         """
         p = _make_player_on_roster(name="Round Tripper", group="A", salary=2.5)
         p.is_bench = True
+        p.is_keeper = True
         team = _make_team(keepers=[p])
         cap_before = team.total_salary
 
@@ -691,10 +757,64 @@ class TestMinorsMovement:
         assert team.total_salary == 0.0, "group A in the minors costs nothing"
 
         team.recall_from_minors("Round Tripper")
-        assert team.keeper_players == [], "keeper label is not restored"
-        assert [q.name for q in team.acquired_players] == ["Round Tripper"]
+        assert [q.name for q in team.keeper_players] == ["Round Tripper"], (
+            "a keeper must come back a keeper — acquired_players is what the "
+            "team panel colours green"
+        )
+        assert team.acquired_players == [], "he was never bought at auction"
         assert team.total_salary == cap_before, "cap must return to where it began"
         assert len(team.roster_players) == 1, "still on the active roster either way"
+
+    def test_a_pre_auction_minor_recalls_into_keepers(self):
+        """The case the bug report missed, checked against real loaded data.
+
+        `data_loader` builds ONE PlayerOnRoster for every player on a real FCHL
+        team and routes it by STATUS, so a row marked MINOR is a keeper who
+        happens to start in the minors — provenance, not a purchase. Recalling
+        him coloured him green too, and nobody noticed because the report only
+        described the START -> bench -> minors -> recall path.
+
+        Built from `build_initial_state()` rather than a hand-made player on
+        purpose: the claim is about what the loader produces, and a hand-set
+        `is_keeper=True` would test the assertion against itself.
+        """
+        from data_loader import build_initial_state
+
+        state = build_initial_state()
+        team, minor = next(
+            ((t, p) for t in state.teams.values() for p in t.minor_players),
+            (None, None),
+        )
+        assert minor is not None, "no team loaded with anyone in the minors"
+        assert minor.is_keeper, (
+            f"{minor.name} was on {team.code} before the auction, so he is a "
+            f"keeper by provenance whatever his STATUS column says"
+        )
+
+        team.recall_from_minors(minor.name)
+        assert minor.name in [p.name for p in team.keeper_players]
+        assert minor.name not in [p.name for p in team.acquired_players]
+
+    def test_a_drafted_player_sent_down_still_recalls_into_acquired(self):
+        """The other direction — the flag must not make everyone a keeper.
+
+        Goes through add_acquired_player rather than setting a list directly,
+        because that is the one door every draft and trade takes and it is what
+        leaves the flag at its default.
+        """
+        team = _make_team()
+        team.add_acquired_player(
+            _make_player_on_roster(name="Bought Him", group="3", salary=4.0)
+        )
+        bought = team.acquired_players[0]
+        assert not bought.is_keeper, "a drafted player is not a keeper"
+        bought.is_bench = True
+
+        team.send_to_minors("Bought Him")
+        team.recall_from_minors("Bought Him")
+
+        assert [p.name for p in team.acquired_players] == ["Bought Him"]
+        assert team.keeper_players == [], "a draftee must not become a keeper"
 
     def test_send_active_player_raises(self):
         p = _make_player_on_roster(name="Starter", group="A")

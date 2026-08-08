@@ -98,6 +98,59 @@ def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv")
                 p.nhl_team = nhl_lookup.get(p.name, "")
 
 
+def _backfill_keeper_flags(
+    state: AuctionState, csv_path: str = "data/players.csv"
+) -> None:
+    """Restore `is_keeper` on MINOR-LEAGUE players from old state files.
+
+    Provenance for the two active lists is re-derived from position by
+    `_team_from_dict` — a player in `keeper_players` is a keeper by definition.
+    The minors are the one list where that is impossible, which is exactly why
+    the flag exists, so a state written before it did would recall a demoted
+    keeper into `acquired_players` and colour him as a player BOT had bought.
+
+    `players.csv` is the same pre-auction record `data_loader` derives keepers
+    from, read with the same rule and the same constant
+    (`data_loader._PLACEHOLDER_TEAMS`, deliberately not a second copy of
+    `{"UFA", "RFA"}` here): a real FCHL TEAM means the player was rostered
+    before the auction. Anyone drafted INTO the minors during this auction was
+    biddable, so his row carries UFA/RFA and he is correctly left alone.
+
+    Idempotent, and only ever sets the flag — never clears one, so re-running
+    it cannot undo what a newer save already recorded.
+
+    The undo chain is NOT repaired: `AuctionState._snapshots` is a list of whole
+    JSON documents, so fixing them here would mean this module reaching
+    into serialization keys that belong to state.py. Consequence, filed in
+    BACKLOG.md: after booting a legacy file, undoing back past everything done
+    this session restores minors without the flag. Narrow, cosmetic, and cheaper
+    to record than to hard-code a second copy of the state's JSON shape.
+
+    Matched on the DISAMBIGUATED name, not `row["PLAYER"]`, because that is the
+    name the state file holds: `_disambiguated_names` renames every member of a
+    colliding group, so the raw string would miss a minor-league keeper called
+    `Matt Murray (DAL)` and leave him mis-coloured with no way to tell. (The
+    older `_backfill_nhl_teams` above has the same gap; it costs a blank NHL
+    team, not a wrong provenance.) The call resets `last_disambiguations` as a
+    side effect, which is harmless here — the banner reads
+    `loaded_disambiguations`, written only by `build_initial_state`, and this
+    runs on the path where that was never called.
+    """
+    import csv
+    with open(csv_path) as f:
+        rows = list(csv.DictReader(f))
+    pre_auction = {
+        name
+        for row, name in zip(rows, data_loader._disambiguated_names(rows))
+        if (fchl := row.get("FCHL TEAM", "").strip())
+        and fchl not in data_loader._PLACEHOLDER_TEAMS
+    }
+    for team in state.teams.values():
+        for p in team.minor_players:
+            if not p.is_keeper and p.name in pre_auction:
+                p.is_keeper = True
+
+
 def _backfill_team_metadata(
     state: AuctionState, teams_path: str = "data/fchl_teams.json"
 ) -> None:
@@ -164,6 +217,7 @@ def _load_saved_state(path: str) -> AuctionState | None:
     # the identifier and the exception for whoever debugs it afterwards.
     for label, backfill in (
         ("NHL teams on rostered players", _backfill_nhl_teams),
+        ("keeper labels on minor-league players", _backfill_keeper_flags),
         ("team logos", _backfill_team_metadata),
         ("price model inputs, so PRICES MAY BE WRONG", _backfill_model_inputs),
     ):

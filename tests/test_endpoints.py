@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import pytest
 
 from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
-from tests.helpers import a_buyout_candidate, section_of, squeeze, toast_of
+from tests.helpers import a_buyout_candidate, assign, section_of, squeeze, toast_of
 
 
 @contextmanager
@@ -1291,7 +1291,13 @@ class TestOverCapRosterEdits:
         self._recall(client, "BOT", minor.name)
 
         bot = client.get("/state").json()["teams"]["BOT"]
-        assert minor.name in [p["name"] for p in bot["acquired_players"]]
+        # Active roster, not `acquired_players` specifically: every minor at
+        # reset was on an FCHL team before the auction, so he recalls back into
+        # `keeper_players` (2026-08-08). The claim here is that the over-cap
+        # recall HAPPENED, and reading one list made that claim depend on
+        # provenance, which this test is not about.
+        on_roster = [p["name"] for p in bot["keeper_players"] + bot["acquired_players"]]
+        assert minor.name in on_roster
         assert minor.name not in [p["name"] for p in bot["minor_players"]]
 
     def test_legal_recall_stays_silent(self, client):
@@ -1580,3 +1586,99 @@ class TestBuyoutScanIsOfferedOnlyWhereItWorks:
         make the fragment swap itself over itself on every pick.
         """
         assert "hx-swap-oob" not in self._scan_fragment(client.get("/").text)
+
+
+class TestARecalledKeeperIsNotColouredAsAPurchase:
+    """The 2026-08-07 testing-pass symptom, at the level the operator sees it.
+
+    `team_panel.html` renders a row `text-success` when the player is in
+    `acquired_players` — green means "I bought him at auction". Before
+    2026-08-08 `recall_from_minors` put EVERYBODY into that list, so a keeper
+    who went Active -> Bench -> Minors -> Recall came back permanently green
+    and the roster lied at a glance.
+
+    Driven through the endpoints rather than `TeamState` directly, because the
+    state-level tests can only show which list he is in; this shows the colour,
+    which is the thing that was wrong. The panel is opened first, per the
+    CLAUDE.md rule that `_viewed_team` is the only thing deciding what
+    `team_panel.html` renders.
+    """
+
+    def _row_of(self, html: str, name: str) -> str:
+        """The one `<tr>` for this player in the team panel.
+
+        Matched as a whole element, not by splitting on `<tr` — team_panel.html
+        also carries the `/trade-between` form, whose `<select>` lists the same
+        players as `<option>`s, so a naive split put the roster row and the
+        trade form in one chunk and the colour assertion read the wrong markup.
+        """
+        panel = section_of(html, "team-panel")
+        rows = [
+            m.group(0)
+            for m in re.finditer(r"<tr\b.*?</tr>", panel, re.S)
+            if name in m.group(0)
+        ]
+        assert rows, f"{name} is in no table row of the team panel"
+        assert len(rows) == 1, f"{name} appears in {len(rows)} rows"
+        return rows[0]
+
+    def _a_benchable_keeper(self):
+        """A keeper BOT can legally send down: on the active roster, worst first.
+
+        Derived by role — a hard-coded name stops matching the moment
+        players.csv is replaced, which CLAUDE.md forbids for exactly this.
+        """
+        import main
+        keepers = main.auction_state.teams["BOT"].keeper_players
+        assert keepers, "BOT has no keepers — the fixture is wrong"
+        return min(keepers, key=lambda p: p.projected_points)
+
+    def test_a_keeper_survives_the_round_trip_uncoloured(self, client):
+        keeper = self._a_benchable_keeper()
+        client.get("/team-view/BOT")
+
+        before = self._row_of(client.get("/").text, keeper.name)
+        assert "text-success" not in before, (
+            "precondition: a keeper is not green before anything happens"
+        )
+
+        for endpoint, payload in (
+            ("/toggle-bench", {"team_code": "BOT", "player_name": keeper.name}),
+            ("/move-to-minors", {"team_code": "BOT", "player_name": keeper.name}),
+            ("/move-to-roster", {"team_code": "BOT", "player_name": keeper.name}),
+        ):
+            r = client.post(endpoint, data=payload)
+            assert r.status_code == 200, f"{endpoint} failed"
+            assert toast_of(r).get("type") != "error", f"{endpoint}: {toast_of(r)}"
+
+        after = self._row_of(client.get("/team-view/BOT").text, keeper.name)
+        assert "text-success" not in after, (
+            f"{keeper.name} is a keeper but renders green after a trip through "
+            f"the minors — green means BOT bought him at auction"
+        )
+
+    def test_a_drafted_player_is_still_coloured_after_the_round_trip(self, client):
+        """The other half — the fix must not stop green meaning anything.
+
+        Without this, routing every recall into `keeper_players` would pass the
+        test above while making the colour permanently dead.
+        """
+        import main
+        top = max(main.auction_state.available_players.values(),
+                  key=lambda p: p.projected_points)
+        assign(client, top.name, "BOT", 1.0)
+        client.get("/team-view/BOT")
+
+        assert "text-success" in self._row_of(client.get("/").text, top.name), (
+            "precondition: a player BOT just drafted renders green"
+        )
+
+        for endpoint in ("/toggle-bench", "/move-to-minors", "/move-to-roster"):
+            r = client.post(endpoint, data={"team_code": "BOT", "player_name": top.name})
+            assert r.status_code == 200 and toast_of(r).get("type") != "error"
+
+        after = self._row_of(client.get("/team-view/BOT").text, top.name)
+        assert "text-success" in after, (
+            f"{top.name} was bought at auction and must stay green through a "
+            f"trip to the minors"
+        )

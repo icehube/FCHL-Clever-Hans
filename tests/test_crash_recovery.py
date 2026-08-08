@@ -20,6 +20,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.helpers import toast_of
+
 
 # Everything lifespan and _recompute own. Restoring `auction_state` alone is
 # WORSE than restoring nothing: it pairs a restored roster with a MILP solution
@@ -332,3 +334,192 @@ class TestBackupSurvivesTheRestart:
             data = json.load(f)
         assert player in json.dumps(data["teams"][team]), \
             "the backup no longer holds the recovered draft"
+
+
+def _a_pre_auction_minor() -> tuple[str, str]:
+    """Team code + name of somebody in the minors of the CURRENT state.
+
+    Read off the loaded state rather than hardcoded, per CLAUDE.md: players.csv
+    is replaced before every draft and a literal name stops matching silently.
+    Every player in the minors of a *fresh* state got there from the CSV's
+    `STATUS = MINOR`, so any of them is a keeper by provenance.
+    """
+    import main
+    for code, team in main.auction_state.teams.items():
+        if team.minor_players:
+            return code, team.minor_players[0].name
+    pytest.fail("no team has a minor-league player — the CSV cannot exercise this")
+
+
+def _legacy_state_without_keeper_flags(state_dir, build=lambda c: None):
+    """Save an auction through the app, then strip every `is_keeper` from it.
+
+    That field landed 2026-08-08, so this is precisely the shape of a file saved
+    mid-auction by the previous build. Written by the app and edited afterwards
+    rather than hand-authored, for the reason `_good_state_with_pick` gives: a
+    fixture blob drifts from `to_json` and the test then covers a shape nothing
+    writes. Both copies on disk get it, so the recovery ladder cannot quietly
+    supply a newer file.
+    """
+    import main
+
+    with TestClient(main.app) as c:
+        c.post("/reset")
+        built = build(c)
+
+    def strip(obj):
+        if isinstance(obj, dict):
+            return {k: strip(v) for k, v in obj.items() if k != "is_keeper"}
+        if isinstance(obj, list):
+            return [strip(v) for v in obj]
+        return obj
+
+    current = state_dir / "auction_state.json"
+    with open(current) as f:
+        data = strip(json.load(f))
+    # `AuctionState._snapshots` is a list of whole JSON DOCUMENTS, not of
+    # dicts, so the walk above steps over each one as an opaque string
+    # and left the field in the undo chain — which is how this helper first hung
+    # pytest rather than failing: `assert "is_keeper" not in text` on 2MB sends
+    # difflib quadratic. A file written by the old build has no `is_keeper`
+    # anywhere, chain included.
+    data["_snapshots"] = [
+        json.dumps(strip(json.loads(s))) for s in data.get("_snapshots", [])
+    ]
+    text = json.dumps(data)
+    leaked = text.count('"is_keeper"')
+    assert leaked == 0, f"the strip missed {leaked} copies of the field"
+    current.write_text(text)
+    (state_dir / "auction_state.json.backup").write_text(text)
+    return built
+
+
+def _send_down(client, team_code: str, player_name: str) -> None:
+    """Bench a player then demote him, asserting each half landed."""
+    for endpoint in ("/toggle-bench", "/move-to-minors"):
+        r = client.post(
+            endpoint, data={"team_code": team_code, "player_name": player_name})
+        assert r.status_code == 200, r.text
+        assert toast_of(r).get("type") != "error", f"{endpoint}: {toast_of(r)}"
+
+
+class TestKeeperProvenanceSurvivesAnOldStateFile:
+    """The minors are the one list whose provenance cannot be re-derived.
+
+    `_team_from_dict` reads the two ACTIVE lists as authoritative — a player in
+    `keeper_players` is a keeper by definition, whatever the file says. The
+    minors hold demoted keepers and drafted players side by side, so a state
+    written before `is_keeper` existed carries no way to tell them apart, and
+    recalling a keeper out of it would file him under `acquired_players` and
+    paint him green as somebody BOT had bought at auction.
+
+    `_backfill_keeper_flags` re-reads that one bit from players.csv, which is
+    the same pre-auction record `data_loader` derives keepers from. It is a
+    fixup, so per the rule above it is never fatal — but it is the only thing
+    standing between a legacy save and a wrong roster.
+    """
+
+    def test_the_flag_comes_back(self, state_dir):
+        import main
+
+        _legacy_state_without_keeper_flags(state_dir)
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            code, name = _a_pre_auction_minor()
+            demoted = main.auction_state.teams[code].minor_players[0]
+            assert demoted.name == name
+            assert demoted.is_keeper, (
+                f"{name} was on {code} before the auction, but loaded off a "
+                f"legacy file as a player they bought"
+            )
+
+    def test_recalling_him_puts_him_back_with_the_keepers(self, state_dir):
+        """The consequence, which is what the operator actually sees.
+
+        Asserted through the endpoint rather than on the flag alone: the flag is
+        only worth restoring because `recall_from_minors` routes on it.
+        """
+        import main
+
+        _legacy_state_without_keeper_flags(state_dir)
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            code, name = _a_pre_auction_minor()
+            r = c.post("/move-to-roster",
+                       data={"team_code": code, "player_name": name})
+            assert r.status_code == 200, r.text
+
+            team = main.auction_state.teams[code]
+            assert name in {p.name for p in team.keeper_players}, (
+                f"{name} did not come back a keeper: {toast_of(r)}"
+            )
+            assert name not in {p.name for p in team.acquired_players}
+
+    def test_a_player_drafted_into_the_minors_is_left_alone(self, state_dir):
+        """The backfill must not simply flag everyone in the minors.
+
+        A player bought at auction and sent down IS acquired, and green has to
+        keep meaning that — a fixup that over-reaches kills the colour entirely
+        instead of fixing it. His players.csv row says UFA/RFA, which is exactly
+        how the two are told apart.
+        """
+        import main
+
+        def build(c):
+            name = _an_available_player()
+            _draft(c, name, "BOT", 1.0)
+            _send_down(c, "BOT", name)
+            return name
+
+        drafted = _legacy_state_without_keeper_flags(state_dir, build)
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            team = main.auction_state.teams["BOT"]
+            player = next(p for p in team.minor_players if p.name == drafted)
+            assert not player.is_keeper, (
+                f"{drafted} was drafted this auction — the backfill claimed him "
+                f"as a pre-auction keeper"
+            )
+
+            r = c.post("/move-to-roster",
+                       data={"team_code": "BOT", "player_name": drafted})
+            assert r.status_code == 200, r.text
+            assert drafted in {p.name for p in team.acquired_players}, toast_of(r)
+
+    def test_a_renamed_keeper_is_found_too(self, state_dir):
+        """The lookup key is the name the STATE holds, not the CSV's.
+
+        `_disambiguated_names` renames every member of a colliding group, so a
+        keeper stored as `Jack Hughes (NJD)` is not in players.csv under that
+        string at all. Matching on `row["PLAYER"]` finds nobody and leaves him
+        mis-coloured with nothing on screen to say why — and the collisions are
+        not hypothetical: the 2026-08-07 file has three, two of them keepers.
+        """
+        import data_loader
+        import main
+
+        def build(c):
+            renamed = {n for names in data_loader.loaded_disambiguations.values()
+                       for n in names}
+            if not renamed:
+                pytest.skip("players.csv has no duplicate names to disambiguate")
+            for code, team in main.auction_state.teams.items():
+                for p in team.keeper_players:
+                    if p.name in renamed:
+                        _send_down(c, code, p.name)
+                        return code, p.name
+            pytest.skip("no renamed player is a keeper in this players.csv")
+
+        code, name = _legacy_state_without_keeper_flags(state_dir, build)
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            demoted = next(p for p in main.auction_state.teams[code].minor_players
+                           if p.name == name)
+            assert demoted.is_keeper, (
+                f"{name} kept his provenance only if the backfill matched on "
+                f"the disambiguated name"
+            )

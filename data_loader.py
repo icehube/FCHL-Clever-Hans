@@ -249,6 +249,13 @@ def load_players(
                 projected_points=pts,
                 nhl_team=nhl_team,
                 is_minor=is_minor,
+                # BOTH destinations are keepers by provenance: this branch is
+                # "already on an FCHL team before the auction", and STATUS only
+                # says where on that team. A pre-auction MINOR recalled during
+                # the draft is not a player you bought, so he must not colour
+                # like one — the original bug report only noticed the
+                # START -> minors -> recall path.
+                is_keeper=True,
             )
             if fchl_team not in team_players:
                 team_players[fchl_team] = {"keepers": [], "minors": []}

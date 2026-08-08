@@ -1773,6 +1773,47 @@ class TestTheTradeFormCanSeeTheMinors:
         assert opt, f"{minor.name} cannot be offered in the Trade Between form"
         assert "(M)" in opt.group(1), f"nothing marks {minor.name}: {opt.group(1)!r}"
 
+    def test_a_traded_keeper_is_acquired_by_the_team_that_gets_him(self, client):
+        """`/trade-between` reuses the roster object; `execute_trade` rebuilds.
+
+        That difference is invisible until provenance rides on the object. This
+        path resets `is_minor` and `is_bench` on arrival and used to leave
+        `is_keeper` alone, so another team's keeper arrived still flagged — and
+        a later bench → minors → recall filed him under THEIR `keeper_players`,
+        the 2026-08-08 colouring bug pointing the other way. It self-heals on
+        reload, which is exactly why it would never reproduce after a restart.
+        """
+        import main
+        giver = next(c for c, t in main.auction_state.teams.items()
+                     if c != "BOT" and t.keeper_players)
+        taker = next(c for c in main.auction_state.teams if c not in (giver, "BOT"))
+        keeper = main.auction_state.teams[giver].keeper_players[0]
+        assert keeper.is_keeper, "precondition: he is his own team's keeper"
+
+        r = client.post("/trade-between", data={
+            "team_a": giver, "team_b": taker,
+            "players_from_a": keeper.name, "players_from_b": "",
+        })
+        assert r.status_code == 200, r.text
+        assert toast_of(r).get("type") != "error", toast_of(r)
+
+        arrived = main.auction_state.teams[taker].find_player(keeper.name)
+        assert arrived is not None, f"{keeper.name} never reached {taker}"
+        assert not arrived.is_keeper, (
+            f"{taker} acquired {keeper.name} in a trade — he is not their keeper"
+        )
+
+        # The consequence, not just the flag: a round trip must keep him theirs.
+        for endpoint in ("/toggle-bench", "/move-to-minors", "/move-to-roster"):
+            rr = client.post(endpoint,
+                             data={"team_code": taker, "player_name": keeper.name})
+            assert rr.status_code == 200 and toast_of(rr).get("type") != "error", (
+                f"{endpoint}: {toast_of(rr)}"
+            )
+        team = main.auction_state.teams[taker]
+        assert keeper.name in {p.name for p in team.acquired_players}
+        assert keeper.name not in {p.name for p in team.keeper_players}
+
     def test_a_trade_that_gives_a_minor_executes(self, client):
         """The end-to-end claim the finding made: propose it, then run it.
 

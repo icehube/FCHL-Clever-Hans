@@ -1617,6 +1617,15 @@ async def trade_between(
     ):
         p.is_minor = False
         p.is_bench = False
+        # He was somebody else's keeper; on `target` he is a player they
+        # acquired. `trade.execute_trade` gets this free by constructing a fresh
+        # PlayerOnRoster — this path REUSES the roster object, so the flag has
+        # to be reset explicitly or the two trade paths disagree. Left set, a
+        # bench → minors → recall on the new team would file him under
+        # `keeper_players`, which is the 2026-08-08 colouring bug pointing the
+        # other way. It self-heals on the next reload (`_team_from_dict` derives
+        # the flag from the list) and so would never reproduce after a restart.
+        p.is_keeper = False
         if target.add_acquired_player(p):
             demoted.append(f"{p.name} → {dest} minors")
         _log_transaction(p.name, p.position, f"{source}→{dest}", p.salary, "trade", timestamp=now)

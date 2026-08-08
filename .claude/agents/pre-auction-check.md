@@ -33,27 +33,40 @@ with TestClient(app) as c:
 ```
 Verify: index returns 200, state returns 200 with 11 teams, MILP is Optimal, market ceiling > MIN_SALARY, floor_demand is False.
 
-### 3. Data quality — duplicate names
-Run:
+### 3. Data quality — duplicate names and lost rows
+The loader now renames colliding names (`Matt Murray (DAL)` / `Matt Murray (TOR)`)
+instead of dropping one, so this check confirms it worked rather than warning
+that it will break. It scans the WHOLE file, not just the biddable rows — the
+worse collision is a keeper who is also in the pool, which the old biddable-only
+scan could not see.
 ```bash
 python3 -c "
-import csv
+import csv, logging
 from collections import Counter
-names = []
-with open('data/players.csv') as f:
-    for row in csv.DictReader(f):
-        if row['FCHL TEAM'].strip() in ('UFA', 'RFA') and row['STATUS'].strip() == '':
-            names.append(row['PLAYER'].strip())
-dupes = {k: v for k, v in Counter(names).items() if v > 1}
-if dupes:
-    print(f'WARNING: {len(dupes)} duplicate names in biddable pool:')
-    for name, count in dupes.items():
-        print(f'  {name} appears {count} times')
-else:
-    print('OK: No duplicate biddable player names')
+from data_loader import load_players, load_team_odds, last_disambiguations
+rows = list(csv.DictReader(open('data/players.csv')))
+dupes = {k: v for k, v in Counter(r['PLAYER'].strip() for r in rows).items() if v > 1}
+team_players, biddable = load_players(team_odds=load_team_odds())
+eligible = [r for r in rows if r['FCHL TEAM'].strip() in ('UFA','RFA')
+            and r['STATUS'].strip() == '' and int(r['PTS'] or 0) > 0]
+owned = {p.name for d in team_players.values() for p in d['keepers'] + d['minors']}
+print(f'{len(rows)} rows, {len(dupes)} duplicate name(s): {sorted(dupes)}')
+print(f'renamed by the loader: {last_disambiguations}')
+print(f'biddable eligible rows {len(eligible)} -> loaded {len(biddable)}'
+      + ('  OK' if len(eligible) == len(biddable) else '  *** ROWS LOST ***'))
+overlap = sorted(owned & set(biddable))
+print(f'owned AND draftable: {overlap}' + ('' if not overlap else '  *** CAN BE DRAFTED TWICE ***'))
 "
 ```
-Duplicates cause player lookup failures during the auction. Report any found.
+Report any lost rows or overlap as a **blocker**. Duplicate names themselves are
+fine — but check the renames read sensibly, because they appear on screen and in
+the `#data-warning` banner, and you will be reading them at the podium.
+
+### 3b. Data fingerprint
+Run `pytest tests/test_data_loader.py -k fingerprint -q`. A failure here means
+the data files changed since the fingerprint was recorded. If that was
+deliberate, read the diff and regenerate per CLAUDE.md; if it was not, the data
+moved under you and that is a blocker.
 
 ### 4. Data quality — missing fields
 Run:

@@ -75,6 +75,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 - **Buyout indicators**: A manual "Scan Roster" button fires `GET /buyout-indicators` (one MILP solve per roster player), which returns OOB-swapped green/red dots into the placeholder dots.
 - **Atomic saves**: `_save_state()` writes to `.tmp` then `os.replace()` (POSIX atomic). Previous state kept as `.backup`.
 - **Startup recovery**: `lifespan` walks current → `.backup` → fresh, and a file that fails to **parse** is renamed `.corrupt` rather than left in place — otherwise the next save rotates it over the good backup and both copies are gone. `_load_saved_state` catches broad `Exception` on purpose: at startup of a tool that may be four hours into a live auction, degrading beats failing to boot. **Only the parse decides usability.** The three `_backfill_*` calls each get their own net and are never fatal — none is load-bearing for the draft record, and folding them into the parse net meant one raise on a legacy snapshot renamed a byte-perfect draft `.corrupt` and started fresh, silently. Any degraded startup sets `_startup_warning`, which `_context` passes to `base.html` as a banner **outside `#app`** (a panel swap replaces `#app`, so an inside banner would vanish on the first pick); `POST /reset` clears it. Pinned by `tests/test_crash_recovery.py`. **On draft day**: the backup is one save behind by construction, so a recovery costs the most recent transaction — check the last pick is still there and re-enter it if not.
+- **Two banners, not one.** `#startup-warning` describes *this boot* and `/reset` clears it; `#data-warning` describes *the CSV* (duplicate names the loader had to rename) and survives a reset, because the renames do. Merging them breaks both directions: a permanent data note turns the degraded-boot alarm into wallpaper — which is exactly what `test_the_happy_path_shows_no_banner` guards — and routing the renames through `_warn_at_startup` would make them vanish on a reset that repopulates them. `_data_warning()` composes at render time rather than being pushed at startup, so it always describes the pool actually loaded; booting onto a *saved* state says nothing, correctly. It reads `data_loader.loaded_disambiguations`, written **only** by `build_initial_state`, not `last_disambiguations`, which any `load_players` caller resets — a test fixture or the pre-auction runbook loading a different CSV would otherwise blank the banner for whatever ran next.
 - **Undo restores by enumeration, not by a list.** `restore_snapshot` loops over `fields(self)` and copies everything except `_snapshots` — never re-introduce hand-written `self.X = restored.X` lines, because a field added to `AuctionState` would silently stop being restored, on the one operation with nothing behind it. The `_snapshots` skip is load-bearing: snapshots are written with `include_snapshots=False`, so the restored chain is always empty and copying it makes `Ctrl+Z` work exactly once per session. `to_json`/`from_json` are still hand-written, so two guards in `tests/test_state.py::TestSnapshotFieldsCannotDrift` cover them — one structural (fields == JSON keys), one behavioural (every field survives a round trip); they catch different mutants and neither is redundant.
 - **A new mutating `@app.post` either calls `save_snapshot()` or joins `NO_SNAPSHOT_NEEDED`** in `tests/test_state.py::TestEveryMutatingPostTakesASnapshot`, in the same commit, with the reason. It walks `main.py`'s ast, so forgetting fails the suite instead of surfacing as a wrong `Ctrl+Z` four hours into a draft.
 - **Undo tests need an empty snapshot chain**, which is why they use a function-scoped `client` shadow. With a chain carried over, `/undo` pops *somebody else's* snapshot and a broken endpoint looks restored — and the shared chain can come from the test's own setup, not just from earlier tests: `test_undo_reverts_move_to_minors` has to bench a player first, `/toggle-bench` snapshots, and pre-bench has the same roster and minors counts as post-bench, so a counts-only reading passed against a `/move-to-minors` that had stopped snapshotting entirely. **Read something that separates the two states**, not just the thing the endpoint moved.
@@ -198,8 +199,39 @@ TDD. Key validations:
 - Endpoints update state correctly
 
 Shared non-fixture test utilities live in `tests/helpers.py` (`squeeze`,
-`toast_of`), not in `conftest.py` — that file is for fixtures. Import from there
-rather than copy-pasting; `squeeze` reached three copies before it was folded in.
+`toast_of`, `assign`, `a_buyout_candidate`), not in `conftest.py` — that file is for fixtures. Import
+from there rather than copy-pasting; `squeeze` reached three copies before it
+was folded in.
+
+**Never hard-code a player name in a test.** Derive the target from the loaded
+state by the ROLE it needs to play — BOT's worst points-per-dollar keeper, the
+top available forward, the first two names in the pool — because `players.csv`
+is replaced before every draft and a literal name silently stops matching.
+Draft picks go through `helpers.assign`, which fails at the pick: `/assign`
+answers **200 with a toast** when it rejects, so `assert r.status_code == 200`
+passes on a pick that never happened, and the 2026-08-07 drill saw one missing
+name surface as `assert 24 == 25` three tests downstream, naming neither the
+player nor the reason.
+
+**Refreshing the data.** `data/players.csv`,
+`data/goalie_projection_stats.csv`, `data/model_params.json` (+ the matching
+`tests/fixtures/auction_predictions_current.csv`) and `data/team_odds.json`
+move together from the pricer repo. Then:
+
+1. `.venv/bin/pytest tests/ -q` — expect **exactly one** failure,
+   `TestDataFingerprint`, with a field-by-field diff of what changed.
+2. `FCHL_WRITE_FINGERPRINT=1 .venv/bin/pytest tests/test_data_loader.py -k fingerprint`
+   rewrites `tests/fixtures/data_fingerprint.json` and **fails on purpose**.
+3. `git diff` that file. A pool that halved, a team that vanished, or a
+   nomination order that shuffled is a data problem, not a test problem.
+4. Re-run without the variable to go green, then commit the data and the
+   fingerprint in the same commit.
+
+Any *other* failure is a real one. `tests/test_data_loader.py` is split three
+ways so this holds: loader **rules** run against `tests/fixtures/players_sample.csv`
+(ours, never refreshed), live data is checked only by **invariants**, and the
+fingerprint is the single place a number is pinned. It used to assert 19 exact
+live numbers, and a refresh drill drowned two real bugs in them.
 
 **Take `client` from `conftest.py`; don't declare your own.** It is
 function-scoped and resets the auction before each test, over a session-scoped

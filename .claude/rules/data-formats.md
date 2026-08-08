@@ -34,6 +34,35 @@ Connor Ingram,G,3,MINOR,BOT,UTH,27,0.5,0,30,
 | `PTS` | Projected fantasy points |
 | `PRIOR FCHL TEAM` | For RFAs only: which FCHL team previously held this player (for ROFR) |
 
+### Duplicate PLAYER names
+
+**The player name is the app's primary key** — `available_players`,
+`market_prices`, `find_player`, every endpoint's `player` form field, the
+transaction log, and the `bo-<name>` DOM ids. `players.csv` does not guarantee
+uniqueness: as of 2026-08-07 it had 2158 rows and 2155 distinct names.
+
+`data_loader._disambiguated_names` suffixes every row of a colliding group,
+escalating only as far as it must: `Name (TEAM)`, then `Name (TEAM POS)` when
+two share an NHL team, then `Name (#n)`. **Every row in the group is suffixed**,
+never just the later ones — `X` beside `X (VAN D)` reads as one player listed
+twice. The renames are logged and shown in an `#data-warning` banner (separate
+from `#startup-warning`, which `/reset` clears).
+
+Two ways a collision breaks things, and both are live in the current file:
+
+- **two biddable rows** — `biddable[name] = ...` overwrote one, so `Matt Murray`
+  (DAL and TOR) made 705 eligible rows load as 704 and the DAL one could not be
+  drafted at all;
+- **a roster row and a biddable row** — different dicts, nothing overwrites, so
+  the same name is owned *and* draftable (`Jack Hughes`, `Elias Pettersson`).
+  Only the zero-point exclusion hides those today; a projection refresh removes
+  it.
+
+The goalie-wins join uses the **raw** CSV name, because
+`goalie_projection_stats.csv` carries that and cannot disambiguate either —
+two goalies sharing a name share a wins figure. Looking the rename up there
+would silently degrade every renamed goalie to the pts/win fallback.
+
 ### Deriving player categories
 
 - **Keepers**: `STATUS = START` and `FCHL TEAM` is a team code (not UFA/RFA)

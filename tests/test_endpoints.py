@@ -228,34 +228,57 @@ class TestCounterfactualVerdict:
         )
         return cf.points_difference
 
-    def test_verdict_follows_the_engine_both_ways(self, client):
-        """Both branches render, and each matches the sign of the engine's delta.
+    # Verdict wording keyed by the sign of the engine's delta. THREE entries,
+    # not two: the panel has a break-even branch (see
+    # `test_break_even_is_a_toss_up_not_a_skip`) and a two-way `if gain > 0 /
+    # else` here silently demanded "Skip him at $" for a zero. The 2026-08-07
+    # refresh drill produced exactly that — a goalie whose delta came out 0 on
+    # perturbed points — and the test failed on correct behaviour.
+    _VERDICTS = {
+        1: ("buy", "Worth having at $", "lineup points over your best roster without him"),
+        # The unconditional half of each sentence: the clauses naming an
+        # alternative player are all `{% if alt %}`, so asserting on one would
+        # fail whenever the counterfactual happens to find no replacement.
+        0: ("even", "Toss-up at $", "scores the same with or without him"),
+        -1: ("skip", "Skip him at $", "costs you"),
+    }
+
+    def test_verdict_follows_the_engine_every_way(self, client):
+        """Each branch renders, and matches the sign of the engine's delta.
 
         Don't pin a player: points_difference is the roster delta AT THAT PRICE,
         so an elite player can be a "skip" (McDavid forced in at $9.5M costs
         lineup points elsewhere) while a mid-tier one is a "buy". Derive the
         expected branch instead of assuming it.
+
+        Walks down the pool until both verdict branches have been seen rather
+        than taking a fixed slice, because every hit is a MILP solve and today's
+        data covers both inside the first few. A dataset where the top of the
+        pool is all one way widens the sample instead of failing.
         """
         import main
 
         ranked = sorted(
             main.auction_state.available_players.values(),
             key=lambda p: -p.projected_points,
-        )[:4]
+        )[:12]
         seen = set()
         for p in ranked:
             gain = self._delta(main, p.name)
+            label, verdict, detail = self._VERDICTS[(gain > 0) - (gain < 0)]
             r = client.get(f"/explain/{p.name}")
             assert r.status_code == 200
-            if gain > 0:
-                assert "Worth having at $" in r.text, f"{p.name} gained {gain}"
-                assert "lineup points over your best roster without him" in r.text
-                seen.add("buy")
-            else:
-                assert "Skip him at $" in r.text, f"{p.name} lost {gain}"
-                assert "costs you" in r.text
-                seen.add("skip")
-        assert seen == {"buy", "skip"}, f"sample should cover both branches, got {seen}"
+            assert verdict in r.text, f"{p.name} scored {gain}, wanted {label}"
+            assert detail in r.text
+            seen.add(label)
+            if {"buy", "skip"} <= seen:
+                break
+        # A toss-up is a legitimate extra, but it must not be the whole sample:
+        # the two branches carrying an actual recommendation are the ones worth
+        # pinning against the engine.
+        assert {"buy", "skip"} <= seen, (
+            f"sample of {len(ranked)} never covered both verdicts, got {seen}"
+        )
 
     def _render_verdict(self, gain: int, alt: str | None = None) -> str:
         """Render the panel against a stubbed counterfactual.

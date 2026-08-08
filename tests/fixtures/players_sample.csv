@@ -1,0 +1,17 @@
+PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS,PRIOR FCHL TEAM
+Sample Keeper Forward,F,2,START,BOT,EDM,27,8.0,0,100,
+Sample Keeper Defence,D,3,START,BOT,COL,26,4.0,0,70,
+Sample Keeper Goalie,G,3,START,BOT,WPG,31,3.0,0,55,
+Sample Minor On Cap,F,3,MINOR,BOT,TOR,22,0.5,0,20,
+Sample Minor Off Cap,F,A,MINOR,BOT,BOS,20,0.9,0,15,
+Sample Rival Keeper,F,3,START,SRL,FLA,30,5.0,0,85,
+Sample Ufa Forward,F,3,,UFA,NYR,29,7.3,0,90,
+Sample Ufa Rookie,D,3,,UFA,CGY,21,0,0,45,
+Sample Ufa Goalie,G,3,,UFA,DAL,28,2.0,0,50,
+Sample Ufa Zero Points,F,3,,UFA,SEA,35,1.0,0,0,
+Sample Ufa Blank Fields,F,3,,UFA,MTL,,,0,40,
+Sample Ufa Utah,D,3,,UFA,UTH,25,0,0,52,
+Sample Rfa One,F,RFA1,,RFA,VAN,23,1.5,0,80,GVR
+Sample Rfa Two,F,RFA2,,RFA,EDM,27,11.4,0,132,SRL
+Sample Placeholder With Status,F,3,MINOR,UFA,NYI,24,0.5,0,30,
+Sample No Fchl Team,F,3,,,MTL,24,0,0,30,

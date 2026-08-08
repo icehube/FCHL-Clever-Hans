@@ -86,6 +86,21 @@
                 onclick="document.getElementById('startup-warning').remove()">✕</button>
     </div>
     {% endif %}
+    {% if data_warning %}
+    {# A SEPARATE banner from the one above, not an extra sentence in it. The
+       two have opposite lifecycles: the startup warning describes this boot and
+       /reset clears it, while a duplicate name in players.csv is still true
+       after a reset. Merged, either the startup alarm becomes permanent
+       wallpaper — the exact thing test_the_happy_path_shows_no_banner guards —
+       or this note disappears while the renames it describes are still live.
+       Outside #app for the same reason as the one above. #}
+    <div id="data-warning" role="alert"
+         class="alert alert-info rounded-none py-2 px-4 flex items-start gap-3">
+        <span class="text-sm flex-1">{{ data_warning }}</span>
+        <button type="button" class="btn btn-xs btn-ghost" title="Dismiss"
+                onclick="document.getElementById('data-warning').remove()">✕</button>
+    </div>
+    {% endif %}
     {# Outside #app on purpose, like the startup banner above: every panel swap
        replaces #app's innerHTML, so a modal mounted inside it would be torn out
        mid-read the moment a pick landed or an htmx trigger fired.

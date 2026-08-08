@@ -16,6 +16,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
+# Imported as a module so `data_loader.loaded_disambiguations` is read live. It
+# is mutated in place, so a from-import would happen to work today — but it
+# would also survive data_loader switching to a rebind, silently and wrongly.
+import data_loader
 from data_loader import build_initial_state, load_goalie_wins
 from market import (
     MarketInfo,
@@ -190,6 +194,38 @@ def _warn_at_startup(message: str) -> None:
     """
     global _startup_warning
     _startup_warning = f"{_startup_warning} {message}" if _startup_warning else message
+
+
+def _data_warning() -> str | None:
+    """What the loader had to change about players.csv to make it usable.
+
+    Kept OUT of `_startup_warning` and rendered as its own banner, because the
+    two have opposite lifecycles and merging them breaks both. The startup
+    warning is about how this BOOT went and `POST /reset` clears it — a
+    deliberate fresh start answers it. The renames are about the DATA and are
+    still true after a reset, so folding them in would either make the startup
+    alarm permanent wallpaper (which is what
+    `test_the_happy_path_shows_no_banner` exists to prevent) or make the rename
+    note vanish while the renames were still in force.
+
+    Composed at render time rather than pushed through `_warn_at_startup` so it
+    tracks the loaded CSV: `/reset` re-runs `build_initial_state()`, which
+    repopulates `data_loader.loaded_disambiguations`.
+
+    Booting onto a SAVED state leaves it empty and says nothing, which is
+    right: that file's names were fixed when it was built, and describing
+    today's CSV would name a pool the draft is not using.
+    """
+    if not data_loader.loaded_disambiguations:
+        return None
+    renames = "; ".join(
+        f"{original} → {' / '.join(replacements)}"
+        for original, replacements in data_loader.loaded_disambiguations.items()
+    )
+    return (
+        f"players.csv repeats {len(data_loader.loaded_disambiguations)} player "
+        f"name(s). They were renamed so each one can be drafted separately: {renames}."
+    )
 
 
 @asynccontextmanager
@@ -620,10 +656,11 @@ def _context(request: Request) -> dict:
         "market_prices": market_prices,
         "projections": projections,
         "default_bidders": default_bidders,
-        # Read by base.html only, so it reaches the screen on a full page load
-        # and not on htmx partial swaps — which is what keeps it on screen: a
-        # panel swap replaces panels, never the banner above them.
+        # Both read by base.html only, so they reach the screen on a full page
+        # load and not on htmx partial swaps — which is what keeps them on
+        # screen: a panel swap replaces panels, never the banners above them.
         "startup_warning": _startup_warning,
+        "data_warning": _data_warning(),
     }
 
 

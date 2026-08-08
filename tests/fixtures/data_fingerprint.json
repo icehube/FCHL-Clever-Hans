@@ -1,0 +1,28 @@
+{
+  "teams": 11,
+  "nomination_order": [
+    "BOT",
+    "LPT",
+    "GVR",
+    "ZSK",
+    "JHN",
+    "LGN",
+    "SRL",
+    "VPP",
+    "MAC",
+    "SHF",
+    "HSM"
+  ],
+  "biddable_total": 705,
+  "biddable_ufa": 683,
+  "biddable_rfa": 22,
+  "biddable_by_position": {
+    "D": 234,
+    "F": 407,
+    "G": 64
+  },
+  "roster_players": 248,
+  "bot_total_salary": 30.3,
+  "total_picks_needed": 165,
+  "odds_sum_percent": 99.99
+}

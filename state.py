@@ -416,29 +416,57 @@ class AuctionState:
             active = list(reversed(active))
         return active
 
-    def save_snapshot(self) -> None:
-        """Save current state for undo. Keeps last MAX_SNAPSHOTS."""
-        snapshot = self.to_json(include_snapshots=False)
+    def capture_snapshot(self) -> str:
+        """Serialize the current state WITHOUT putting it on the undo chain.
+
+        Split out from `save_snapshot` so an endpoint that might reject can
+        capture the pre-state, attempt the operation, and only commit on
+        success. `save_snapshot` is not free to call speculatively: it evicts
+        the oldest entry the moment the chain passes MAX_SNAPSHOTS, so
+        snapshot-then-restore is not the no-op it reads as — it destroys a real
+        undo step. Measured 2026-08-07 on a full chain: a rejected
+        /move-to-minors took the depth from 50 to 49 and the oldest snapshot
+        was gone.
+        """
+        return self.to_json(include_snapshots=False)
+
+    def commit_snapshot(self, snapshot: str) -> None:
+        """Put an already-captured snapshot on the chain. Keeps last MAX_SNAPSHOTS.
+
+        The eviction lives here rather than in `capture_snapshot` on purpose:
+        it is the act of committing that costs chain depth, so a captured-but-
+        never-committed snapshot costs nothing at all.
+        """
         self._snapshots.append(snapshot)
         if len(self._snapshots) > MAX_SNAPSHOTS:
             self._snapshots.pop(0)
 
-    def restore_snapshot(self) -> bool:
-        """Restore the most recent snapshot. Returns False if no snapshots.
+    def save_snapshot(self) -> None:
+        """Save current state for undo. Keeps last MAX_SNAPSHOTS.
+
+        Right for the endpoints that cannot reject after this point. One that
+        can should capture/commit instead, so a refusal leaves the chain
+        untouched.
+        """
+        self.commit_snapshot(self.capture_snapshot())
+
+    def rollback_to(self, snapshot: str) -> None:
+        """Restore a captured snapshot WITHOUT touching the undo chain.
+
+        For an endpoint undoing its own failed attempt. `restore_snapshot`
+        spends a chain entry on purpose because that is what Ctrl+Z means; a
+        rejected request must not, or a mis-click erodes the operator's undo
+        history at the one moment there is nothing behind it.
 
         Enumerates the dataclass fields rather than listing them, because a
         hand-written list fails open: add a field to AuctionState and undo
-        silently stops restoring it, in the one operation with nothing behind
-        it. `tests/test_state.py::TestSnapshotFieldsCannotDrift` covers the
-        other half — a field that never reaches the JSON at all.
+        silently stops restoring it. `tests/test_state.py::TestSnapshotFieldsCannotDrift`
+        covers the other half — a field that never reaches the JSON at all.
         """
-        if not self._snapshots:
-            return False
-        snapshot = self._snapshots.pop()
         restored = AuctionState.from_json(snapshot)
         for f in fields(self):
-            # The undo CHAIN is not part of what undo restores. save_snapshot
-            # writes to_json(include_snapshots=False), so restored._snapshots is
+            # The undo CHAIN is not part of what undo restores. Snapshots are
+            # written with include_snapshots=False, so restored._snapshots is
             # always the empty default — copying it would wipe the chain and
             # make the second Ctrl+Z do nothing. Skipped by name and not by a
             # leading-underscore rule, so a future private field is restored by
@@ -447,6 +475,16 @@ class AuctionState:
             if f.name == "_snapshots":
                 continue
             setattr(self, f.name, getattr(restored, f.name))
+
+    def restore_snapshot(self) -> bool:
+        """Restore the most recent snapshot. Returns False if no snapshots.
+
+        This is Ctrl+Z: it SPENDS a chain entry. An endpoint rolling back its
+        own rejected attempt wants `rollback_to`.
+        """
+        if not self._snapshots:
+            return False
+        self.rollback_to(self._snapshots.pop())
         return True
 
     def to_json(self, include_snapshots: bool = True) -> str:

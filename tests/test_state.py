@@ -766,6 +766,14 @@ class TestEveryMutatingPostTakesASnapshot:
     prove a snapshot is taken on the path that matters.
     """
 
+    # Two ways to put a state on the undo chain, and both count. `save_snapshot`
+    # captures and commits in one step, which is right for an endpoint that
+    # cannot reject after that point. An endpoint that CAN reject captures
+    # first and calls `commit_snapshot` only on the success path, so a refusal
+    # leaves the chain untouched — `capture_snapshot` deliberately does NOT
+    # appear here, because capturing without committing snapshots nothing.
+    SNAPSHOTTING_CALLS = {"save_snapshot", "commit_snapshot"}
+
     # Every POST that legitimately takes no snapshot, and why. Not a
     # suppression list — an entry is a claim that the endpoint does not change
     # state that undo is responsible for.
@@ -799,7 +807,7 @@ class TestEveryMutatingPostTakesASnapshot:
                 found[route] = any(
                     isinstance(n, ast.Call)
                     and isinstance(n.func, ast.Attribute)
-                    and n.func.attr == "save_snapshot"
+                    and n.func.attr in self.SNAPSHOTTING_CALLS
                     for n in ast.walk(node)
                 )
         return found
@@ -826,8 +834,9 @@ class TestEveryMutatingPostTakesASnapshot:
         )
         assert not missing, (
             f"these POST endpoints change state but take no undo snapshot: "
-            f"{missing}. Either call auction_state.save_snapshot(), or add the "
-            f"route to NO_SNAPSHOT_NEEDED with the reason it needs none."
+            f"{missing}. Either call auction_state.save_snapshot() (or "
+            f"capture_snapshot/commit_snapshot if the endpoint can reject), or "
+            f"add the route to NO_SNAPSHOT_NEEDED with the reason it needs none."
         )
 
     def test_the_allow_list_has_no_stale_entries(self):

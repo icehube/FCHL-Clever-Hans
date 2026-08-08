@@ -969,16 +969,22 @@ async def trade_execute(request: Request, trade_id: str = Form("")):
     trade_receive = last_trade_eval.receive
     source_team = last_trade_eval.source_team_code
 
-    auction_state.save_snapshot()
+    # Capture, attempt, commit on success. A rejected trade must leave the undo
+    # chain exactly as it found it: save_snapshot evicts the oldest entry once
+    # the chain is full, so snapshotting speculatively costs a real undo step
+    # on every refusal. The rollback is still needed here — execute_trade
+    # removes from one team before adding to another and can raise partway.
+    before = auction_state.capture_snapshot()
     try:
         execute_trade(auction_state, trade_give, trade_receive, source_team_code=source_team)
     except ValueError as e:
-        auction_state.restore_snapshot()
+        auction_state.rollback_to(before)
         last_trade_eval = None
         return _toast(
             _render(request, "partials/all_panels.html"),
             f"Trade failed: {e}", "error",
         )
+    auction_state.commit_snapshot(before)
     last_trade_eval = None
 
     # Log trade transactions for both teams (when source_team is known)
@@ -1035,17 +1041,22 @@ async def buyout(request: Request, player: str = Form(...)):
         bo_position = p.position
         bo_salary = p.salary
 
-    auction_state.save_snapshot()
+    # Capture, attempt, commit on success — a refused buyout must not cost an
+    # undo step. Ineligible players are refused routinely (the Analyzer only
+    # offers group 2/3, but /buyout takes any name), so this path is walked.
+    # The rollback stays: execute_buyout can raise after mutating.
+    before = auction_state.capture_snapshot()
     try:
         execute_buyout(auction_state, player)
     except ValueError as e:
-        auction_state.restore_snapshot()
+        auction_state.rollback_to(before)
         # Report the actual reason: this used to say "not found" for every
         # failure, so an ineligible-group refusal named the wrong problem.
         return _toast(
             _render(request, "partials/all_panels.html"),
             f"Buyout failed: {e}", "error",
         )
+    auction_state.commit_snapshot(before)
 
     # Log buyout transaction
     if p:
@@ -1421,15 +1432,19 @@ async def move_to_minors(
     t = auction_state.teams.get(team_code)
     if t is None:
         return _render(request, "partials/all_panels.html")
-    auction_state.save_snapshot()
+    # Capture, attempt, commit on success. No rollback: send_to_minors
+    # validates before mutating, so a refusal has changed nothing. "Send down"
+    # sits next to every roster row and refuses an unbenched player, so this is
+    # the most-clicked rejection in the app — it must cost no undo depth.
+    before = auction_state.capture_snapshot()
     try:
         t.send_to_minors(player_name)
     except ValueError as e:
-        auction_state.restore_snapshot()
         return _toast(
             _render(request, "partials/all_panels.html"),
             str(e), "error",
         )
+    auction_state.commit_snapshot(before)
     _log_change("move-to-minors", team_code, f"{player_name} → minors")
     _recompute()
     _save_state()
@@ -1446,16 +1461,18 @@ async def move_to_roster(
     t = auction_state.teams.get(team_code)
     if t is None:
         return _render(request, "partials/all_panels.html")
-    auction_state.save_snapshot()
+    # Capture, attempt, commit on success. No rollback: recall_from_minors
+    # validates before mutating, so a refusal has changed nothing.
+    before = auction_state.capture_snapshot()
     try:
         t.recall_from_minors(player_name)
     except ValueError as e:
-        auction_state.restore_snapshot()
         # Surface the real reason: this used to hardcode "not in minors", which
         # is an actively wrong explanation for a roster-capacity refusal.
         return _toast(
             _render(request, "partials/all_panels.html"), str(e), "error",
         )
+    auction_state.commit_snapshot(before)
     _log_change("move-to-roster", team_code, f"{player_name} → active")
     _recompute()
     _save_state()

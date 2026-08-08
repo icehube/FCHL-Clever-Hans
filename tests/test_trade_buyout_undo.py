@@ -934,3 +934,240 @@ class TestUndoRevertsEveryRosterEdit:
             names,
             "/trade-between",
         )
+
+
+class TestARejectedEditCostsNoUndoDepth:
+    """A refusal must leave the undo chain exactly as it found it.
+
+    Four endpoints used to `save_snapshot()` and then `restore_snapshot()` on
+    the failure path, which reads as a no-op and is not one. `save_snapshot`
+    evicts index 0 the moment the chain passes MAX_SNAPSHOTS; `restore_snapshot`
+    pops from the END. So a rejected request at a full chain drops the oldest
+    entry to make room for a snapshot it immediately throws away. Measured
+    2026-08-07: depth 50 -> 49, oldest gone.
+
+    The harm is modest — you lose the deepest step, not the next one — but the
+    trigger is not: "Send down" sits beside every roster row and refuses an
+    unbenched player, so this is the most-clicked rejection in the app, and it
+    costs undo history on the one operation that has nothing behind it.
+
+    Depth alone is not enough of an assertion: a build that evicts and re-adds
+    ends at the same length. Each case reads the OLDEST entry too.
+    """
+
+    @pytest.fixture
+    def client(self):
+        """Function-scoped, shadowing the module fixture deliberately.
+
+        These cases fill the snapshot chain to its cap, which would leak a
+        50-deep chain into whatever ran next under the module fixture and make
+        every later `/undo` pop something this class pushed.
+        """
+        from main import app
+        with TestClient(app) as c:
+            c.post("/reset")
+            yield c
+            c.post("/reset")
+
+    def _fill_chain(self):
+        """Fill to MAX_SNAPSHOTS and return (depth, oldest entry).
+
+        The eviction only bites at the cap, so a test on a short chain passes
+        against the bug — that is the whole reason this helper exists rather
+        than a bare `save_snapshot()` or two.
+        """
+        import main
+        from state import MAX_SNAPSHOTS
+
+        chain = main.auction_state._snapshots
+        while len(chain) < MAX_SNAPSHOTS:
+            main.auction_state.save_snapshot()
+        assert len(chain) == MAX_SNAPSHOTS
+        return len(chain), chain[0]
+
+    def _assert_chain_intact(self, depth, oldest, label):
+        import main
+
+        chain = main.auction_state._snapshots
+        assert len(chain) == depth, (
+            f"{label} was refused but the undo chain went {depth} -> "
+            f"{len(chain)}; a rejected request must not spend a snapshot"
+        )
+        assert chain[0] is oldest, (
+            f"{label} was refused but the OLDEST snapshot was evicted — the "
+            f"chain is the same length because the eviction was masked by the "
+            f"pop, so depth alone would not catch this"
+        )
+
+    def _unbenched(self):
+        import main
+
+        for p in main.auction_state.teams["BOT"].roster_players:
+            if not p.is_bench:
+                return p.name
+        raise AssertionError("every BOT roster player is benched — no rejection available")
+
+    def _ineligible(self):
+        """A BOT player /buyout must refuse: contract group outside 2/3."""
+        import main
+
+        for p in main.auction_state.teams["BOT"].roster_players:
+            if p.group not in BUYOUT_ELIGIBLE_GROUPS:
+                return p.name
+        raise AssertionError("BOT holds no buyout-ineligible player")
+
+    def test_a_refused_send_down_leaves_the_chain_alone(self, client):
+        name = self._unbenched()
+        depth, oldest = self._fill_chain()
+        r = client.post("/move-to-minors", data={"team_code": "BOT", "player_name": name})
+        assert r.status_code == 200
+        assert "benched" in toast_of(r).get("message", ""), (
+            "expected a refusal; this test proves nothing if the move succeeded"
+        )
+        self._assert_chain_intact(depth, oldest, "/move-to-minors")
+
+    def test_a_refused_recall_leaves_the_chain_alone(self, client):
+        name = self._unbenched()  # on the active roster, so not in the minors
+        depth, oldest = self._fill_chain()
+        r = client.post("/move-to-roster", data={"team_code": "BOT", "player_name": name})
+        assert r.status_code == 200
+        assert "not in minors" in toast_of(r).get("message", "")
+        self._assert_chain_intact(depth, oldest, "/move-to-roster")
+
+    def test_a_refused_buyout_leaves_the_chain_alone(self, client):
+        name = self._ineligible()
+        depth, oldest = self._fill_chain()
+        r = client.post("/buyout", data={"player": name})
+        assert r.status_code == 200
+        assert "Buyout failed" in toast_of(r).get("message", "")
+        self._assert_chain_intact(depth, oldest, "/buyout")
+
+    def _half_failing_trade(self, client):
+        """Set up a two-player trade whose SECOND removal raises.
+
+        This shape matters. `execute_trade` does
+        `[bot.remove_player(p.name) for p in give]`, so with one give player a
+        failure raises before anything moved and the rollback has nothing to
+        do — which is how the first version of this test let a build with no
+        `rollback_to` pass. With two, the first player is already off BOT's
+        roster when the second raises, and only the rollback puts him back.
+
+        Reaching that raise at all takes a state change that does NOT go
+        through `_recompute()`, since every endpoint clears `last_trade_eval`
+        first and hits the earlier "state changed" guard. Editing the roster
+        directly is the race the rollback exists for.
+
+        Returns (trade_id, name of the player who must come back).
+        """
+        import main
+
+        bot = main.auction_state.teams["BOT"]
+        keep, vanish = bot.roster_players[0], bot.roster_players[1]
+        kept_name, gone_name = keep.name, vanish.name
+
+        r = client.post("/trade-evaluate", data={
+            "give_player": [kept_name, gone_name],
+            "receive_player": [json.dumps({
+                "name": "Trade Target",
+                "position": keep.position,
+                "salary": keep.salary,
+                "projected_points": keep.projected_points + 20,
+            })],
+        })
+        assert r.status_code == 200
+        assert main.last_trade_eval is not None, "no trade evaluation to execute"
+
+        bot.acquired_players = [p for p in bot.acquired_players if p.name != gone_name]
+        bot.keeper_players = [p for p in bot.keeper_players if p.name != gone_name]
+        bot._invalidate_cache()
+        assert any(p.name == kept_name for p in bot.roster_players), (
+            "precondition: the first give player must still be on the roster"
+        )
+        return main.last_trade_eval.trade_id, kept_name
+
+    def test_a_failed_trade_leaves_the_chain_alone(self, client):
+        trade_id, _ = self._half_failing_trade(client)
+        depth, oldest = self._fill_chain()
+        r = client.post("/trade-execute", data={"trade_id": trade_id})
+        assert r.status_code == 200
+        assert "Trade failed" in toast_of(r).get("message", ""), (
+            "the trade succeeded, so this proves nothing about the failure path"
+        )
+        self._assert_chain_intact(depth, oldest, "/trade-execute")
+
+    def test_a_failed_trade_still_rolls_back(self, client):
+        """The rollback has to survive the capture/commit split.
+
+        Capturing without committing is only safe when a failure leaves the
+        state alone — either because the operation validated first, or because
+        something put it back. `execute_trade` strips both rosters before it
+        adds to either, so a mid-list raise leaves a player belonging to
+        nobody, and `rollback_to` is the only thing that returns him.
+        """
+        import main
+
+        trade_id, kept_name = self._half_failing_trade(client)
+        r = client.post("/trade-execute", data={"trade_id": trade_id})
+        assert "Trade failed" in toast_of(r).get("message", "")
+
+        bot = main.auction_state.teams["BOT"]
+        assert any(p.name == kept_name for p in bot.roster_players), (
+            f"{kept_name} was removed by a trade that failed and never came "
+            f"back — the rollback did not run"
+        )
+        srl = main.auction_state.teams["SRL"]
+        assert not any(p.name == kept_name for p in srl.all_players), (
+            f"{kept_name} ended up on SRL from a trade that was reported failed"
+        )
+
+    def test_a_refused_buyout_changes_nothing(self, client):
+        """Note what this does and does NOT prove.
+
+        It passes on `execute_buyout`'s up-front validation — `find_player`
+        then `_require_buyout_eligible`, both before `remove_player` — not on
+        /buyout's `rollback_to`, which stays as insurance for the two-step
+        mutation (remove, then add the penalty) and is currently unreachable.
+        Deleting that rollback leaves this test green; the honest place for it
+        is here in the docstring rather than in an assertion that would claim
+        coverage it hasn't got.
+        """
+        import main
+
+        name = self._ineligible()
+        bot = main.auction_state.teams["BOT"]
+
+        def reading():
+            return (
+                sorted(p.name for p in bot.all_players),
+                round(bot.total_salary, 1),
+                round(bot.penalties, 1),
+            )
+
+        before = reading()
+        r = client.post("/buyout", data={"player": name})
+        assert "Buyout failed" in toast_of(r).get("message", "")
+        assert reading() == before, (
+            f"a refused buyout changed the roster: {before} -> {reading()}"
+        )
+
+    def test_the_success_path_still_snapshots(self, client):
+        """The other half: committing on success must actually commit.
+
+        An endpoint that captured and never committed would pass every
+        assertion above and silently break Ctrl+Z — the exact failure the
+        capture/commit split could introduce.
+        """
+        import main
+
+        name = self._unbenched()
+        client.post("/toggle-bench", data={"team_code": "BOT", "player_name": name})
+        depth = len(main.auction_state._snapshots)
+        r = client.post("/move-to-minors", data={"team_code": "BOT", "player_name": name})
+        assert r.status_code == 200
+        assert any(p.name == name for p in main.auction_state.teams["BOT"].minor_players), (
+            f"{name} was not sent down: {toast_of(r).get('message', '(no toast)')}"
+        )
+        assert len(main.auction_state._snapshots) == depth + 1, (
+            "/move-to-minors succeeded without committing a snapshot, so Ctrl+Z "
+            "would revert the previous action instead"
+        )

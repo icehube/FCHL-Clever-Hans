@@ -215,7 +215,13 @@ function loadTradePartner(teamCode, viewTeamCode) {
             players.forEach(function(p) {
                 var opt = document.createElement('option');
                 opt.value = p.name;
-                opt.textContent = p.name + ' (' + p.position + ', $' + p.salary.toFixed(1) + 'M)';
+                /* "(M)" as everywhere else. /team-players returns all_players,
+                   so minors arrive here whether or not this label says so —
+                   and an unmarked one misdescribes the trade, because a group
+                   A-E minor costs the receiving team his full salary the
+                   moment he lands on the active roster. */
+                opt.textContent = p.name + ' (' + p.position + ', $' + p.salary.toFixed(1) + 'M)'
+                    + (p.is_minor ? ' (M)' : '');
                 sel.appendChild(opt);
             });
         });

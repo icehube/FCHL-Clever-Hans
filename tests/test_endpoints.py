@@ -1735,9 +1735,43 @@ class TestTheTradeFormCanSeeTheMinors:
         # The marker has to mean something, or it is noise on every row.
         import main
         active = main.auction_state.teams["BOT"].roster_players[0]
-        assert "(M)" not in (option_for(active.name) or ""), (
+        control = option_for(active.name)
+        # Found FIRST, then checked: `"(M)" not in None-or-empty` is true for a
+        # row that is simply absent, so without this the control could stop
+        # controlling anything and still read as a passing assertion.
+        assert control is not None, f"{active.name} is missing from the Give list"
+        assert "(M)" not in control, (
             f"{active.name} is on the active roster and must not be marked"
         )
+
+    def test_the_trade_between_form_offers_them_too(self, client):
+        """The app has TWO trade forms, and the first fix reached only one.
+
+        `team_panel.html`'s "Trade Between Teams" is how a trade between two
+        OTHER teams gets recorded during a break. Measured in Chrome before this
+        was fixed: BOT could offer 12 of its 49 players there, while the
+        "Receives" half of the same form — fed by the already-widened
+        `/team-players` — listed 18 of SRL's minors unmarked.
+        """
+        import main
+        minor = self._a_minor("BOT")
+        bot = main.auction_state.teams["BOT"]
+        panel = section_of(client.get("/").text, "team-panel")
+
+        block = re.search(r"<select[^>]*trade-from-a-BOT[^>]*>(.*?)</select>",
+                          panel, re.S)
+        assert block, "the Trade Between Teams 'sends' list is not on the page"
+        sends = block.group(1)
+
+        assert sends.count("<option") == len(bot.all_players), (
+            f"the sends list offers {sends.count('<option')} of "
+            f"{len(bot.all_players)} players"
+        )
+        opt = re.search(
+            rf'<option value="{re.escape(html.escape(minor.name))}">(.*?)</option>',
+            sends, re.S)
+        assert opt, f"{minor.name} cannot be offered in the Trade Between form"
+        assert "(M)" in opt.group(1), f"nothing marks {minor.name}: {opt.group(1)!r}"
 
     def test_a_trade_that_gives_a_minor_executes(self, client):
         """The end-to-end claim the finding made: propose it, then run it.

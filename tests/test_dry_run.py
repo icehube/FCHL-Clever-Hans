@@ -14,55 +14,32 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config import MAX_SALARY, MIN_SALARY, SALARY_CAP
+from tests.helpers import assign
 
 TEAMS = ["BOT", "SRL", "MAC", "LPT", "SHF", "JHN", "GVR", "ZSK", "LGN", "VPP", "HSM"]
 
-# 40 picks distributed across all teams (4 BOT, 36 opponents)
-PICKS = [
+# The SHAPE of the 40 picks — who buys, and for how much — across all teams (4
+# BOT, 36 opponents), with prices falling as the auction runs. WHO gets bought
+# is decided by `picks` below, against the live pool.
+#
+# This list used to name 40 real players, and the 2026-08-07 refresh drill broke
+# it twice over: a name that leaves players.csv makes `/assign` a silent no-op,
+# and the failure then surfaced as a transaction-log count in a LATER test,
+# several picks downstream of the rejection and naming neither the player nor
+# the reason.
+PICK_SHAPE = [
     # Phase 1: Early auction (picks 1-15)
-    ("Connor McDavid", "GVR", 11.4),
-    ("Artemi Panarin", "BOT", 5.0),
-    ("J.T. Miller", "ZSK", 5.0),
-    ("Filip Forsberg", "SRL", 5.5),
-    ("Sidney Crosby", "MAC", 5.5),
-    ("Sebastian Aho", "LPT", 4.7),
-    ("Roman Josi", "SHF", 7.0),
-    ("Mitch Marner", "HSM", 4.7),
-    ("Sergei Bobrovsky", "JHN", 3.0),
-    ("Steven Stamkos", "LGN", 3.5),
-    ("Jason Robertson", "BOT", 3.9),
-    ("Aleksander Barkov", "VPP", 3.9),
-    ("Mathew Barzal", "GVR", 3.9),
-    ("Zach Hyman", "ZSK", 3.0),
-    ("Vincent Trocheck", "SRL", 3.0),
+    ("GVR", 11.4), ("BOT", 5.0), ("ZSK", 5.0), ("SRL", 5.5), ("MAC", 5.5),
+    ("LPT", 4.7), ("SHF", 7.0), ("HSM", 4.7), ("JHN", 3.0), ("LGN", 3.5),
+    ("BOT", 3.9), ("VPP", 3.9), ("GVR", 3.9), ("ZSK", 3.0), ("SRL", 3.0),
     # Phase 2: Mid-auction (picks 16-25)
-    ("Igor Shesterkin", "MAC", 10.5),
-    ("Jake Guentzel", "LPT", 3.0),
-    ("Victor Hedman", "SHF", 7.1),
-    ("Nazem Kadri", "HSM", 2.8),
-    ("Adrian Kempe", "JHN", 2.5),
-    ("Gustav Nyquist", "LGN", 2.1),
-    ("Chris Kreider", "VPP", 2.5),
-    ("Stuart Skinner", "GVR", 3.0),
-    ("Jake Oettinger", "BOT", 3.0),
-    ("Kevin Fiala", "ZSK", 2.5),
+    ("MAC", 10.5), ("LPT", 3.0), ("SHF", 7.1), ("HSM", 2.8), ("JHN", 2.5),
+    ("LGN", 2.1), ("VPP", 2.5), ("GVR", 3.0), ("BOT", 3.0), ("ZSK", 2.5),
     # Phase 3: Late auction with teams done (picks 26-35)
-    ("Brock Boeser", "SRL", 2.0),
-    ("Lucas Raymond", "MAC", 2.0),
-    ("Carter Verhaeghe", "LPT", 2.0),
-    ("Mika Zibanejad", "SHF", 2.0),
-    ("Mark Scheifele", "HSM", 2.0),
-    ("Anze Kopitar", "JHN", 1.5),
-    ("Ryan O'Reilly", "LGN", 1.5),
-    ("Brock Nelson", "VPP", 1.5),
-    ("Jonathan Marchessault", "GVR", 1.5),
-    ("Bo Horvat", "BOT", 2.0),
+    ("SRL", 2.0), ("MAC", 2.0), ("LPT", 2.0), ("SHF", 2.0), ("HSM", 2.0),
+    ("JHN", 1.5), ("LGN", 1.5), ("VPP", 1.5), ("GVR", 1.5), ("BOT", 2.0),
     # Phase 4: Final picks (picks 36-40)
-    ("Brad Marchand", "ZSK", 1.5),
-    ("Joe Pavelski", "SRL", 1.0),
-    ("Nico Hischier", "MAC", 1.5),
-    ("Evgeni Malkin", "LPT", 1.5),
-    ("Matt Duchene", "SHF", 1.0),
+    ("ZSK", 1.5), ("SRL", 1.0), ("MAC", 1.5), ("LPT", 1.5), ("SHF", 1.0),
 ]
 
 
@@ -89,20 +66,45 @@ def _get_state(client):
     return r.json()
 
 
+@pytest.fixture(scope="module")
+def picks(client):
+    """The 40 picks as (player, team, salary), best players first.
+
+    Module-scoped and resolved ONCE, before pick 1: the phases consume slices
+    of the same list, and re-ranking a pool that has already lost its top 15
+    would hand phase 2 a different set than phase 1 skipped.
+
+    Descending projected points is roughly how a real auction runs, and it puts
+    the expensive picks at the top of `PICK_SHAPE`'s price ladder where the
+    shape expects them.
+    """
+    pool = _get_state(client)["available_players"].values()
+    ranked = sorted(pool, key=lambda p: -p["projected_points"])
+    assert len(ranked) >= len(PICK_SHAPE), (
+        f"pool has {len(ranked)} players; a {len(PICK_SHAPE)}-pick dry run needs more"
+    )
+    return [
+        (player["name"], team, salary)
+        for player, (team, salary) in zip(ranked, PICK_SHAPE)
+    ]
+
+
+def _bot_roster(client) -> list[dict]:
+    """BOT's keepers plus anything drafted or traded in, in roster order."""
+    bot = _get_state(client)["teams"]["BOT"]
+    return bot["keeper_players"] + bot["acquired_players"]
+
+
 class TestDryRun:
     """40-pick simulated auction: the full auction-day experience."""
 
-    def test_00_phase1_early_auction(self, client):
+    def test_00_phase1_early_auction(self, client, picks):
         """Picks 1-15: early auction with basic invariant checks."""
         state = _get_state(client)
         initial_available = len(state["available_players"])
 
         for i in range(15):
-            player, team, salary = PICKS[i]
-            r = client.post("/assign", data={
-                "player": player, "team": team, "salary": str(salary),
-            })
-            assert r.status_code == 200, f"Pick {i+1} failed"
+            r = assign(client, *picks[i])
 
             # Every assign should have a toast
             trigger = r.headers.get("HX-Trigger", "")
@@ -119,38 +121,40 @@ class TestDryRun:
         # Should have RFA or UFA pick with strategy info
         assert any(s in r.text for s in ["target", "drain", "depth"])
 
-    def test_02_bid_check_with_price_increments(self, client):
+    def test_02_bid_check_with_price_increments(self, client, picks):
         """Bid check at different prices should return different advice."""
+        # The last pick of the run: still in the pool, and cheap enough that
+        # $0.5M and $5.0M land on opposite sides of any sane verdict.
+        target = picks[-1][0]
         r1 = client.post("/bid-check", data={
-            "player": "Matt Duchene", "price": "0.5", "bidders": "",
+            "player": target, "price": "0.5", "bidders": "",
         })
         r2 = client.post("/bid-check", data={
-            "player": "Matt Duchene", "price": "5.0", "bidders": "",
+            "player": target, "price": "5.0", "bidders": "",
         })
         assert r1.status_code == 200
         assert r2.status_code == 200
         # At $0.5 should likely BID, at $5.0 likely DROP or CAUTION
         assert r1.text != r2.text
 
-    def test_03_phase2_mid_auction(self, client):
+    def test_03_phase2_mid_auction(self, client, picks):
         """Picks 16-25: mid-auction drafting."""
         for i in range(15, 25):
-            player, team, salary = PICKS[i]
-            r = client.post("/assign", data={
-                "player": player, "team": team, "salary": str(salary),
-            })
-            assert r.status_code == 200
+            assign(client, *picks[i])
 
         state = _get_state(client)
         assert len(state["transaction_log"]) == 25
 
     def test_04_trade_flow(self, client):
         """Execute a trade mid-auction: evaluate → execute → verify."""
-        # Trade BOT's Artemi Panarin for an opponent's player
+        # Give away whatever BOT drafted first; take back a hypothetical player
+        # who is deliberately NOT in the pool, so the trade cannot collide with
+        # a real name (the incoming side of a trade is free-form by design).
+        give = _bot_roster(client)[-1]["name"]
         r = client.post("/trade-evaluate", data={
-            "give_player": ["Artemi Panarin"],
+            "give_player": [give],
             "receive_player": [json.dumps({
-                "name": "Evgeni Malkin",
+                "name": "Traded In Centreman",
                 "position": "F",
                 "salary": 1.5,
                 "projected_points": 67,
@@ -171,12 +175,14 @@ class TestDryRun:
 
     def test_05_buyout_flow(self, client):
         """Execute a buyout mid-auction."""
-        # Check buyout on a low-value keeper
-        r = client.get("/buyout-check/Dougie Hamilton")
+        # BOT's lowest-scoring keeper: the one a buyout would plausibly target.
+        target = min(_bot_roster(client), key=lambda p: p["projected_points"])["name"]
+
+        r = client.get(f"/buyout-check/{target}")
         assert r.status_code == 200
 
         # Execute buyout
-        r = client.post("/buyout", data={"player": "Dougie Hamilton"})
+        r = client.post("/buyout", data={"player": target})
         assert r.status_code == 200
         trigger = r.headers.get("HX-Trigger", "")
         assert "showToast" in trigger, "Buyout should have toast"
@@ -184,7 +190,7 @@ class TestDryRun:
         # Undo
         client.post("/undo")
 
-    def test_06_phase3_teams_done(self, client):
+    def test_06_phase3_teams_done(self, client, picks):
         """Mark 5 teams as done, verify market adjusts."""
         import main
 
@@ -200,24 +206,16 @@ class TestDryRun:
 
         # Continue drafting picks 26-35
         for i in range(25, 35):
-            player, team, salary = PICKS[i]
-            r = client.post("/assign", data={
-                "player": player, "team": team, "salary": str(salary),
-            })
-            assert r.status_code == 200
+            assign(client, *picks[i])
 
         # Un-done the teams for remaining picks
         for code in done_teams:
             client.post("/team-done", data={"team_code": code})
 
-    def test_07_phase4_final_picks(self, client):
+    def test_07_phase4_final_picks(self, client, picks):
         """Picks 36-40: final picks."""
         for i in range(35, 40):
-            player, team, salary = PICKS[i]
-            r = client.post("/assign", data={
-                "player": player, "team": team, "salary": str(salary),
-            })
-            assert r.status_code == 200
+            assign(client, *picks[i])
 
         state = _get_state(client)
         assert len(state["transaction_log"]) == 40
@@ -233,10 +231,14 @@ class TestDryRun:
                 assert p["name"] not in all_names, f"{p['name']} on multiple teams"
                 all_names.add(p["name"])
 
-        # No roster player in available pool
+        # No roster player in the available pool. `overlap` used to be computed
+        # here and never asserted on — the whole check rested on the narrower
+        # acquired-only loop below. Since the loader disambiguates duplicate
+        # names, the broad version holds too, and it is the one that catches a
+        # keeper being re-drafted.
         available_names = set(state["available_players"].keys())
-        overlap = all_names & available_names
-        # Keepers may share names with minors but acquired should not be in available
+        overlap = sorted(all_names & available_names)
+        assert not overlap, f"{overlap} are on a roster AND still biddable"
         for code, team in state["teams"].items():
             for p in team["acquired_players"]:
                 assert p["name"] not in available_names, (

@@ -20,7 +20,7 @@ from config import (
     ROSTER_SIZE,
     SALARY_CAP,
 )
-from tests.helpers import section_of
+from tests.helpers import a_buyout_candidate, section_of
 from market import compute_market_ceiling, compute_market_price, MarketInfo
 from optimizer import solve_optimal_roster
 from price_model import predict_price, load_model_params
@@ -469,8 +469,11 @@ class TestAPIEdgeCases:
 
     def test_trade_evaluate_malformed_json(self, client):
         """Trade evaluate with malformed receive JSON should not crash."""
+        import main
+
+        give = main.auction_state.teams[main.MY_TEAM].keeper_players[0].name
         r = client.post("/trade-evaluate", data={
-            "give_player": ["Clayton Keller"],
+            "give_player": [give],
             "receive_player": ["not valid json {{{"],
         })
         assert r.status_code == 200
@@ -633,7 +636,9 @@ class TestBuyoutEdgeCases:
         )
         market_prices = {name: price for name, (price, _) in market_data.items()}
 
-        result = evaluate_buyout(state, "Dougie Hamilton", market_prices)
-        assert abs(result.penalty_added - 4.2 * BUYOUT_PENALTY_RATE) < 0.01
-        assert abs(result.salary_freed - 4.2) < 0.01
-        assert abs(result.net_cap_freed - 4.2 * (1 - BUYOUT_PENALTY_RATE)) < 0.01
+        target = a_buyout_candidate(state)
+        salary = target.salary
+        result = evaluate_buyout(state, target.name, market_prices)
+        assert abs(result.penalty_added - salary * BUYOUT_PENALTY_RATE) < 0.01
+        assert abs(result.salary_freed - salary) < 0.01
+        assert abs(result.net_cap_freed - salary * (1 - BUYOUT_PENALTY_RATE)) < 0.01

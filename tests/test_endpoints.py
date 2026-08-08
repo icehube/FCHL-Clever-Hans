@@ -6,7 +6,7 @@ from contextlib import contextmanager
 import pytest
 
 from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
-from tests.helpers import section_of, squeeze, toast_of
+from tests.helpers import a_buyout_candidate, section_of, squeeze, toast_of
 
 
 @contextmanager
@@ -328,30 +328,85 @@ class TestPriceColumn:
             main.model_prices[name].expected_price, 1
         )
 
-    def test_nothing_capped_at_full_budgets(self, client):
+    def test_capped_means_exactly_over_the_ceiling(self, client):
+        """The RULE, not today's outcome.
+
+        This used to assert that NOTHING is capped at full budgets, which held
+        only because the priciest model price (~$9.5M) happens to sit under the
+        full-budget ceiling ($11.4M). A pricier pool would have failed it with
+        nothing wrong — it was on the backlog as data-coupled. Asserting the
+        equivalence instead is both data-independent and strictly stronger: it
+        catches a row capped when it should not be AND one uncapped when it
+        should be.
+        """
         import main
 
-        assert not any(
-            self._capped(main, n) for n in main.auction_state.available_players
-        ), "no row should be ceiling-capped while every team still has budget"
+        self._assert_rule_holds(main, "full budgets")
+
+    def _assert_rule_holds(self, main, label: str) -> int:
+        """Check the equivalence and return how many rows are capped."""
+        ceiling = main.market_info.market_ceiling
+        wrong = [
+            n for n in main.auction_state.available_players
+            if self._capped(main, n)
+            != (round(main.model_prices[n].expected_price, 1) > round(ceiling, 1))
+        ]
+        assert not wrong, (
+            f"{label}: capped flag disagrees with the ${ceiling:.1f}M ceiling "
+            f"for {wrong[:5]}"
+        )
+        return sum(
+            1 for n in main.auction_state.available_players if self._capped(main, n)
+        )
 
     def test_capped_flips_once_the_ceiling_bites(self, client):
-        """Drain every opponent's cap; the ceiling then cuts the top prices."""
+        """Squeeze every opponent to a $3M ceiling; the top prices then cut.
+
+        Also where the equivalence above gets its teeth. At full budgets the
+        ceiling ($11.4M) sits over every model price, so both sides of that
+        assertion are false for every row and it cannot fail — verified by
+        mutation: capping a dollar low, and not capping at all, both leave it
+        green. The rule only has content once something IS capped.
+
+        **The ceiling is now solved for rather than approximated.** This used to
+        set `penalties = 54.0` with a comment claiming "~$2.8M of cap", which
+        ignored the salary already on the roster: every opponent's physical max
+        fell under MIN_SALARY, they all dropped out of demand, and
+        `compute_market_price` returned `MIN_SALARY` from its `floor_demand`
+        branch **without reaching the ceiling line at all**. So the test named
+        after the ceiling was exercising the floor, and both cap mutations
+        survived it. `floor_demand` is asserted False for that reason.
+        """
         import main
 
         model = {n: p.expected_price for n, p in main.model_prices.items()}
         priciest = max(model, key=model.get)
-        assert model[priciest] > 1.0, "need a player priced above the floor"
+        target = 3.0
+        assert model[priciest] > target, "need a player priced above the ceiling"
 
         saved = {c: t.penalties for c, t in main.auction_state.teams.items()}
         try:
             for code, t in main.auction_state.teams.items():
-                if code != main.MY_TEAM:
-                    t.penalties = 54.0  # leaves each opponent ~$2.8M of cap
-                    t._invalidate_cache()
+                if code == main.MY_TEAM:
+                    continue
+                # Invert physical_max_bid to land on `target` exactly, the same
+                # way helpers.squeeze inverts total_salary: zero the penalties
+                # first so total_salary reads the roster alone.
+                t.penalties = 0.0
+                t._invalidate_cache()
+                wanted = target - MIN_SALARY + t.total_spots_remaining * MIN_SALARY
+                t.penalties = round(SALARY_CAP - t.total_salary - wanted, 1)
+                t._invalidate_cache()
             main._recompute()
-            assert main.market_info.market_ceiling < model[priciest]
+
+            assert not main.market_info.floor_demand, (
+                "every opponent dropped out, so prices come from the floor branch "
+                "and the ceiling is never consulted"
+            )
+            assert main.market_info.market_ceiling == pytest.approx(target, abs=0.11)
             assert self._capped(main, priciest)
+            capped = self._assert_rule_holds(main, "opponents squeezed")
+            assert capped, "fixture stopped capping anything — the rule asserts nothing"
         finally:
             for code, pen in saved.items():
                 main.auction_state.teams[code].penalties = pen
@@ -884,7 +939,7 @@ class TestAssignSurvivesAPriceChange:
 class TestBuyout:
     def test_buyout_check(self, client):
         """Buyout check should return preview."""
-        r = client.get("/buyout-check/Clayton Keller")
+        r = client.get(f"/buyout-check/{a_buyout_candidate().name}")
         assert r.status_code == 200
         assert "Buyout" in r.text
 

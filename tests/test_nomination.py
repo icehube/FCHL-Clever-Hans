@@ -23,7 +23,7 @@ def _setup():
     return state, mp, model_expected, info
 
 
-def _drain_state(leave_each: float = 3.0):
+def _drain_state(target_ceiling: float = 2.5):
     """A state where BOT is roster-full and every opponent is ceiling-bound.
 
     Both squeezes are needed to reach the drain path with anything to measure:
@@ -38,12 +38,24 @@ def _drain_state(leave_each: float = 3.0):
 
     Stars stay on the board while nobody can pay for them, so the market ceiling
     binds and model price diverges from what a player can actually fetch.
+
+    `target_ceiling` is SOLVED FOR, not hoped for. This used to take a
+    `leave_each` cap-space figure and let the ceiling fall where it may, and the
+    2026-08-07 refresh drill landed it at exactly `MIN_DRAIN_PRICE` — the one
+    value that makes `assert ceiling < MIN_DRAIN_PRICE` fail while nothing is
+    wrong. Every opponent is identical after the squeeze, so the second-highest
+    physical max IS the target, and inverting `physical_max_bid` gives the
+    budget that produces it. Same trick as `helpers.squeeze`, including zeroing
+    the penalties first so `total_salary` reads the roster alone.
+
+    A target above what the roster leaves room for clamps the penalty at zero,
+    which is the deliberate "ceiling does not bind" case (pass MAX_SALARY).
     """
     from data_loader import build_initial_state
     from market import compute_market_ceiling, compute_market_price
     from price_model import load_model_params, predict_all_prices
     from state import PlayerOnRoster
-    from config import ROSTER_SIZE, SALARY_CAP
+    from config import MAX_SALARY, MIN_SALARY, ROSTER_SIZE, SALARY_CAP
 
     state = build_initial_state()
     # Cheapest-first, so the expensive players remain available to nominate.
@@ -60,13 +72,27 @@ def _drain_state(leave_each: float = 3.0):
                 salary=0.5, projected_points=p.projected_points,
             ))
         if code != MY_TEAM:
-            team.penalties = round(max(0.0, SALARY_CAP - team.total_salary - leave_each), 1)
+            team.penalties = 0.0
+            team._invalidate_cache()
+            # Invert physical_max_bid: spendable = remaining - spots*MIN, and
+            # physical_max = spendable + MIN, so remaining = target - MIN +
+            # spots*MIN buys exactly `target_ceiling` of bidding room.
+            wanted_remaining = (
+                target_ceiling - MIN_SALARY + team.total_spots_remaining * MIN_SALARY
+            )
+            team.penalties = round(
+                max(0.0, SALARY_CAP - team.total_salary - wanted_remaining), 1
+            )
         team._invalidate_cache()
 
     preds = predict_all_prices(state.available_players, load_model_params())
     model = {n: pred.expected_price for n, pred in preds.items()}
     info = compute_market_ceiling(state.teams)
     mp = {n: compute_market_price(model[n], info) for n in model}
+    assert info.market_ceiling == pytest.approx(min(target_ceiling, MAX_SALARY), abs=0.11), (
+        f"asked for a ${target_ceiling:.1f}M ceiling and built ${info.market_ceiling:.1f}M "
+        "— the construction is wrong, not the test that uses it"
+    )
     return state, mp, model, info
 
 
@@ -234,7 +260,9 @@ class TestDrainStrategy:
         a position more teams still needed could outrank a pricier player —
         measured mid-draft, it took Aho at $7.5M over Vasilevskiy at $7.7M and
         left $0.3M of opponent cap unburned."""
-        state, mp, model, _ = _drain_state(leave_each=14.0)
+        from config import MAX_SALARY
+
+        state, mp, model, _ = _drain_state(target_ceiling=MAX_SALARY)
         _, ufa_pick = recommend_nomination(state, mp, model)
         assert ufa_pick is not None and ufa_pick.strategy == "drain"
 
@@ -251,13 +279,28 @@ class TestDrainStrategy:
 
     def test_reasoning_never_claims_zero_can_afford(self):
         """"0 can afford — drains opponent budgets" is self-contradicting: a
-        player nobody can bid on drains nothing."""
+        player nobody can bid on drains nothing.
+
+        Reads the NUMBER rather than testing for the substring "0 can afford",
+        which the string "10 can afford" also contains — it passed only while
+        the fixture happened to leave a single-digit count.
+        """
+        import re
+
         state, mp, model, _ = _drain_state()
         rfa_pick, ufa_pick = recommend_nomination(state, mp, model)
 
+        counted = 0
         for pick in (rfa_pick, ufa_pick):
             if pick and pick.strategy == "drain":
-                assert "0 can afford" not in pick.reasoning, pick.reasoning
+                # The RFA drain is worded without a count ("the priciest RFA the
+                # market can reach"), so there is nothing to read on that one.
+                m = re.search(r"(\d+) can afford", pick.reasoning)
+                if m is None:
+                    continue
+                counted += 1
+                assert int(m.group(1)) > 0, pick.reasoning
+        assert counted, "no drain reasoning carried a count — this asserted nothing"
 
     def test_can_afford_count_is_at_least_two(self):
         """Structural invariant, not luck: the market price IS the second-highest
@@ -283,7 +326,9 @@ class TestDrainStrategy:
         Gating on the model price called that a drain and burned the turn."""
         from config import MIN_DRAIN_PRICE
 
-        state, mp, model, info = _drain_state(leave_each=1.2)
+        # Half the gate: unambiguously below it, and it stays below if the
+        # constant moves, which a literal would not.
+        state, mp, model, info = _drain_state(target_ceiling=MIN_DRAIN_PRICE / 2)
         assert info.market_ceiling < MIN_DRAIN_PRICE, "fixture must starve the market"
 
         expensive = max(model.values())

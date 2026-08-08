@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config import BUYOUT_PENALTY_RATE, MIN_SALARY, SALARY_CAP
-from tests.helpers import squeeze, toast_of
+from tests.helpers import assign, squeeze, toast_of
 
 
 @pytest.fixture(scope="module")
@@ -75,26 +75,79 @@ def _roster_names(team_data):
     return names
 
 
+@pytest.fixture(scope="module")
+def targets(client):
+    """The players this file acts on, chosen by ROLE rather than by name.
+
+    Every one of these used to be a literal ("Dougie Hamilton", "Clayton
+    Keller", "Evander Kane", "Steven Stamkos"), which coupled the whole file to
+    a dataset that is replaced before every draft. The 2026-08-07 refresh drill
+    showed how that reads when it breaks: `/buyout-check/<gone>` still answers
+    200, so the failure was "Should recommend KEEP for top player" against a
+    player who was not on the roster at all.
+
+    Resolved ONCE, before the first buyout — these tests share one auction, and
+    re-deriving after test_03 removes a player would quietly pick a different
+    one for the tests that follow.
+    """
+    state = _get_state(client)
+    bot = state["teams"]["BOT"]
+    roster = bot["keeper_players"] + bot["acquired_players"]
+    assert len(roster) >= 3, "BOT needs three distinct roster players for this file"
+
+    # Worst money-per-point on the roster: exactly what a buyout is for.
+    buyout = max(roster, key=lambda p: p["salary"] / max(p["projected_points"], 1))
+    # Best player on the roster: a buyout check must answer KEEP.
+    keep = max(roster, key=lambda p: p["projected_points"])
+    # Lowest scorer who is neither, so the trade tests cannot collide with the
+    # player the buyout tests permanently remove.
+    spare = min(
+        (p for p in roster if p["name"] not in {buyout["name"], keep["name"]}),
+        key=lambda p: p["projected_points"],
+    )
+    assert len({buyout["name"], keep["name"], spare["name"]}) == 3
+
+    pool = state["available_players"]
+    # The incoming half of the upgrade trade plays `spare`'s position, so the
+    # swap cannot lose a lineup slot and turn an upgrade into a DECLINE.
+    incoming = max(
+        (p for p in pool.values() if p["position"] == spare["position"]),
+        key=lambda p: p["projected_points"],
+    )
+    # A second, unrelated pool player for the acquire-then-trade-away sequence.
+    acquired = max(
+        (p for p in pool.values() if p["name"] != incoming["name"]),
+        key=lambda p: p["projected_points"],
+    )
+    return {
+        "buyout": buyout,
+        "keep": keep,
+        "spare": spare,
+        "incoming": incoming,
+        "acquired": acquired,
+    }
+
+
 # ── Buyout ──────────────────────────────────────────────────────────
 
 
 class TestBuyoutFlow:
     """Check a buyout, verify recommendation, execute, verify penalty."""
 
-    def test_00_buyout_check_low_value_player(self, client):
+    def test_00_buyout_check_low_value_player(self, client, targets):
         """Buyout check on a low-point expensive player should return advice."""
-        # Dougie Hamilton: 16pts, $4.2M — likely a buyout candidate
-        r = client.get("/buyout-check/Dougie Hamilton")
+        target = targets["buyout"]
+        r = client.get(f"/buyout-check/{target['name']}")
         assert r.status_code == 200
         assert any(v in r.text for v in ["BUYOUT", "KEEP"]), (
             "Buyout check should return BUYOUT or KEEP verdict"
         )
         # Verify penalty math is shown
-        assert "$4.2M" in r.text or "4.2" in r.text, "Should show salary info"
+        assert f"{target['salary']:g}" in r.text, "Should show salary info"
 
-    def test_01_buyout_check_high_value_player(self, client):
+    def test_01_buyout_check_high_value_player(self, client, targets):
         """Buyout check on a high-point player should recommend KEEP."""
-        r = client.get("/buyout-check/Clayton Keller")
+        r = client.get(f"/buyout-check/{targets['keep']['name']}")
         assert r.status_code == 200
         assert "KEEP" in r.text, "Should recommend KEEP for top player"
 
@@ -103,7 +156,7 @@ class TestBuyoutFlow:
         r = client.get("/buyout-check/Nobody McFake")
         assert r.status_code == 200
 
-    def test_03_execute_buyout(self, client):
+    def test_03_execute_buyout(self, client, targets):
         """Execute buyout: player removed, 50% penalty applied."""
         state_before = _get_state(client)
         bot_before = state_before["teams"]["BOT"]
@@ -111,9 +164,8 @@ class TestBuyoutFlow:
         salary_before = _team_salary(bot_before)
         roster_before = _roster_names(bot_before)
 
-        # Buyout Dougie Hamilton ($4.2M salary → $2.1M penalty)
-        target = "Dougie Hamilton"
-        target_salary = 4.2
+        target = targets["buyout"]["name"]
+        target_salary = targets["buyout"]["salary"]
         expected_penalty = target_salary * BUYOUT_PENALTY_RATE
 
         assert target in roster_before, f"{target} should be on roster before buyout"
@@ -147,21 +199,23 @@ class TestBuyoutFlow:
             f"Net cap freed should be ${expected_penalty}M (50% of salary)"
         )
 
-    def test_04_buyout_logs_transaction(self, client):
+    def test_04_buyout_logs_transaction(self, client, targets):
         """Buyout from test_03 should appear in transaction_log with full salary."""
         state = _get_state(client)
         log = state["transaction_log"]
+        name = targets["buyout"]["name"]
+        salary = targets["buyout"]["salary"]
 
         buyout_entries = [t for t in log if t["transaction_type"] == "buyout"
-                          and t["player_name"] == "Dougie Hamilton"]
+                          and t["player_name"] == name]
         assert len(buyout_entries) == 1, (
-            f"Expected 1 buyout log entry for Dougie Hamilton, got {len(buyout_entries)}"
+            f"Expected 1 buyout log entry for {name}, got {len(buyout_entries)}"
         )
         entry = buyout_entries[0]
         assert entry["team_code"] == "BOT"
         # Full salary, not penalty — reader uses badge to know it's 50%
-        assert abs(entry["salary"] - 4.2) < 0.01, (
-            f"Buyout log salary should be player's full salary $4.2M, got ${entry['salary']}M"
+        assert abs(entry["salary"] - salary) < 0.01, (
+            f"Buyout log salary should be the full ${salary}M, got ${entry['salary']}M"
         )
 
 
@@ -171,24 +225,19 @@ class TestBuyoutFlow:
 class TestUndoFlow:
     """Verify undo fully reverts state after various operations."""
 
-    def test_00_undo_reverts_assign(self, client):
+    def test_00_undo_reverts_assign(self, client, targets):
         """Assign a player, undo, verify complete revert."""
         state_before = _get_state(client)
         available_before = len(state_before["available_players"])
         log_before = len(state_before["transaction_log"])
+        player = targets["acquired"]["name"]
 
-        # Assign a player
-        r = client.post("/assign", data={
-            "player": "Artemi Panarin",
-            "team": "BOT",
-            "salary": "5.0",
-        })
-        assert r.status_code == 200
+        assign(client, player, "BOT", 5.0)
 
         # Verify assignment happened
         state_mid = _get_state(client)
         assert len(state_mid["available_players"]) == available_before - 1
-        assert "Artemi Panarin" not in state_mid["available_players"]
+        assert player not in state_mid["available_players"]
 
         # Undo
         r = client.post("/undo")
@@ -199,22 +248,23 @@ class TestUndoFlow:
         assert len(state_after["available_players"]) == available_before, (
             "Available count should revert after undo"
         )
-        assert "Artemi Panarin" in state_after["available_players"], (
+        assert player in state_after["available_players"], (
             "Player should return to available pool after undo"
         )
         assert len(state_after["transaction_log"]) == log_before, (
             "Transaction log should revert after undo"
         )
 
-    def test_01_undo_reverts_buyout(self, client):
+    def test_01_undo_reverts_buyout(self, client, targets):
         """Buyout a player, undo, verify player restored and penalty removed."""
         state_before = _get_state(client)
         bot_before = state_before["teams"]["BOT"]
         penalty_before = bot_before["penalties"]
         roster_before = _roster_names(bot_before)
 
-        # Pick a player to buyout
-        target = "Aaron Ekblad"
+        # The best player on the roster — nothing else mutates him, and undoing
+        # a buyout of the most valuable player is the case worth proving.
+        target = targets["keep"]["name"]
         assert target in roster_before
 
         # Execute buyout
@@ -263,19 +313,10 @@ class TestUndoFlow:
         """Assign two players, undo twice, verify both reverted."""
         state_original = _get_state(client)
         available_original = len(state_original["available_players"])
+        first, second = list(state_original["available_players"])[:2]
 
-        # Assign first
-        client.post("/assign", data={
-            "player": "Steven Stamkos",
-            "team": "MAC",
-            "salary": "3.5",
-        })
-        # Assign second
-        client.post("/assign", data={
-            "player": "Vincent Trocheck",
-            "team": "SRL",
-            "salary": "3.0",
-        })
+        assign(client, first, "MAC", 3.5)
+        assign(client, second, "SRL", 3.0)
 
         state_mid = _get_state(client)
         assert len(state_mid["available_players"]) == available_original - 2
@@ -288,8 +329,8 @@ class TestUndoFlow:
         assert len(state_after["available_players"]) == available_original, (
             "Two undos should restore both players"
         )
-        assert "Steven Stamkos" in state_after["available_players"]
-        assert "Vincent Trocheck" in state_after["available_players"]
+        assert first in state_after["available_players"]
+        assert second in state_after["available_players"]
 
 
 # ── Trade ───────────────────────────────────────────────────────────
@@ -298,44 +339,43 @@ class TestUndoFlow:
 class TestTradeFlow:
     """Evaluate a trade, verify recommendation, execute, verify state."""
 
-    def test_00_setup_acquire_player(self, client):
+    def test_00_setup_acquire_player(self, client, targets):
         """First acquire a player so we have someone to trade away."""
-        # Assign Panarin to BOT so we can trade him
-        r = client.post("/assign", data={
-            "player": "Artemi Panarin",
-            "team": "BOT",
-            "salary": "5.0",
-        })
-        assert r.status_code == 200
+        player = targets["acquired"]["name"]
+        assign(client, player, "BOT", 5.0)
         state = _get_state(client)
-        assert _find_player_on_roster(state["teams"]["BOT"], "Artemi Panarin")
+        assert _find_player_on_roster(state["teams"]["BOT"], player)
 
-    def test_01_trade_evaluate_good_trade(self, client):
+    def test_01_trade_evaluate_good_trade(self, client, targets):
         """Evaluate giving a low player for a better player at similar salary — should ACCEPT."""
-        # Give Evander Kane (44pts, $1.1M), receive Steven Stamkos (81pts, $1.5M)
-        # Modest salary increase but big points upgrade
+        # The incoming player is built FROM the outgoing one: same position, so
+        # no lineup slot is lost, and a big points gain for a small salary rise.
+        # Absolute figures would go stale with the projections.
+        give = targets["spare"]
         r = client.post("/trade-evaluate", data={
-            "give_player": ["Evander Kane"],
+            "give_player": [give["name"]],
             "receive_player": [json.dumps({
-                "name": "Steven Stamkos",
-                "position": "F",
-                "salary": 1.5,
-                "projected_points": 81,
+                "name": "Trade Target Upgrade",
+                "position": give["position"],
+                "salary": give["salary"] + 0.4,
+                "projected_points": give["projected_points"] + 37,
             })],
         })
         assert r.status_code == 200
         assert "ACCEPT" in r.text, (
-            "Trading 44pts for 81pts at similar salary should recommend ACCEPT"
+            f"Trading {give['projected_points']}pts for "
+            f"{give['projected_points'] + 37}pts at a $0.4M rise should ACCEPT"
         )
 
-    def test_02_trade_evaluate_returns_verdict(self, client):
+    def test_02_trade_evaluate_returns_verdict(self, client, targets):
         """Trade evaluation should always return a verdict (ACCEPT or DECLINE)."""
-        # Give Clayton Keller (76pts, $2.0M) for an expensive low player
+        # A good player for an expensive bad one — the verdict itself is not
+        # what is being asserted, only that one comes back.
         r = client.post("/trade-evaluate", data={
-            "give_player": ["Clayton Keller"],
+            "give_player": [targets["keep"]["name"]],
             "receive_player": [json.dumps({
-                "name": "Zach Sanford",
-                "position": "F",
+                "name": "Trade Target Downgrade",
+                "position": targets["keep"]["position"],
                 "salary": 5.0,
                 "projected_points": 6,
             })],
@@ -345,15 +385,16 @@ class TestTradeFlow:
             "Trade evaluation should return ACCEPT or DECLINE verdict"
         )
 
-    def test_03_trade_execute(self, client):
+    def test_03_trade_execute(self, client, targets):
         """Execute a trade: give low player, receive better player."""
         state_before = _get_state(client)
         bot_before = state_before["teams"]["BOT"]
         roster_before = _roster_names(bot_before)
         available_before = set(state_before["available_players"].keys())
 
-        give_name = "Evander Kane"
-        receive_name = "Steven Stamkos"
+        give_name = targets["spare"]["name"]
+        receive = targets["incoming"]
+        receive_name = receive["name"]
         receive_salary = 1.5
 
         assert give_name in roster_before
@@ -364,9 +405,9 @@ class TestTradeFlow:
             "give_player": [give_name],
             "receive_player": [json.dumps({
                 "name": receive_name,
-                "position": "F",
+                "position": receive["position"],
                 "salary": receive_salary,
-                "projected_points": 81,
+                "projected_points": receive["projected_points"],
             })],
         })
 
@@ -402,7 +443,7 @@ class TestTradeFlow:
             f"Received player should have group 3, got {received['group']}"
         )
 
-    def test_04_undo_reverts_trade(self, client):
+    def test_04_undo_reverts_trade(self, client, targets):
         """Undo the trade, verify both players return to original positions."""
         # Undo the trade executed in test_03
         r = client.post("/undo")
@@ -411,23 +452,20 @@ class TestTradeFlow:
         state = _get_state(client)
         bot = state["teams"]["BOT"]
         roster = _roster_names(bot)
+        given, received = targets["spare"]["name"], targets["incoming"]["name"]
 
-        # Evander Kane should be back on roster
-        assert "Evander Kane" in roster, (
-            "Given player should return to roster after undo"
-        )
-        # Steven Stamkos should be back in available pool
-        assert "Steven Stamkos" in state["available_players"], (
+        assert given in roster, "Given player should return to roster after undo"
+        assert received in state["available_players"], (
             "Received player should return to available pool after undo"
         )
-        assert "Steven Stamkos" not in roster
+        assert received not in roster
 
-    def test_07_trade_execute_logs_transactions(self, client):
+    def test_07_trade_execute_logs_transactions(self, client, targets):
         """Execute a trade and verify trade_out + trade_in records are logged."""
         state_before = _get_state(client)
         log_before_count = len(state_before["transaction_log"])
 
-        give_name = "Artemi Panarin"  # on BOT from test_00
+        give_name = targets["acquired"]["name"]  # on BOT from test_00
         assert give_name in _roster_names(state_before["teams"]["BOT"])
 
         # Pick any available forward dynamically

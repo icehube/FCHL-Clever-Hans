@@ -45,6 +45,62 @@ def toast_of(response: Any) -> dict:
     return json.loads(header)["showToast"] if header else {}
 
 
+def assign(client: Any, player: str, team: str, salary: float) -> Any:
+    """POST /assign and fail HERE if the pick did not land.
+
+    `/assign` answers 200 with a toast when it REJECTS — unknown player,
+    unknown team — so `assert r.status_code == 200` passes on a pick that never
+    happened. The 2026-08-07 refresh drill found this the expensive way: one
+    hard-coded name left the pool and the suite reported `assert 24 == 25` in a
+    later test, three picks downstream of the rejection, naming neither the
+    player nor the reason.
+
+    Checks the transaction log rather than the toast TYPE, because the
+    unknown-player toast is "warning" and so is a perfectly successful assign
+    that puts a team over the cap.
+    """
+    import main
+
+    before = len(main.auction_state.transaction_log)
+    response = client.post(
+        "/assign", data={"player": player, "team": team, "salary": str(salary)}
+    )
+    assert response.status_code == 200
+    assert len(main.auction_state.transaction_log) == before + 1, (
+        f"/assign did not draft {player} to {team} at ${salary}M: "
+        f"{toast_of(response).get('message', '(no toast)')}"
+    )
+    return response
+
+
+def a_buyout_candidate(state=None):
+    """BOT's worst money-per-point player that may legally be bought out.
+
+    Tests used to name one ("Dougie Hamilton", $4.2M / 16pts) and assert against
+    a hard-coded salary. `players.csv` is replaced before every draft, so a
+    literal silently stops matching — and `/buyout-check/<gone>` still answers
+    200, which is how the 2026-08-07 drill produced "Should recommend KEEP for
+    top player" about a player who was not on the roster.
+
+    Only groups 2 and 3 are eligible (`can_be_bought_out`), so filter first:
+    picking the worst value overall lands on an A-E prospect the engine will
+    correctly refuse.
+
+    Defaults to the live `main.auction_state`; pass a state to work on a clone.
+    """
+    import main
+
+    if state is None:
+        state = main.auction_state
+    team = state.teams[main.MY_TEAM]
+    eligible = [
+        p for p in team.keeper_players + team.acquired_players
+        if p.can_be_bought_out
+    ]
+    assert eligible, "BOT has no buyout-eligible player — the fixture is wrong"
+    return max(eligible, key=lambda p: p.salary / max(p.projected_points, 1))
+
+
 def squeeze(code: str, headroom: float) -> None:
     """Set `code`'s penalties so exactly `headroom` of cap space remains.
 

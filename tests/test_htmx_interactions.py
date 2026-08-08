@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 
 from config import MAX_SALARY, MIN_SALARY
 
+from tests.helpers import a_buyout_candidate
+
 # Repo-relative so the scan works from any rootdir pytest is invoked with.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(_REPO_ROOT, "templates")
@@ -57,7 +59,7 @@ class TestToastHeaders:
 
     def test_buyout_success_toast(self, client):
         """Successful buyout returns success toast."""
-        r = client.post("/buyout", data={"player": "Dougie Hamilton"})
+        r = client.post("/buyout", data={"player": a_buyout_candidate().name})
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
         assert "showToast" in trigger
         assert trigger["showToast"]["type"] == "success"

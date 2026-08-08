@@ -16,16 +16,24 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
-Last triaged 2026-08-07, when three entries were swept and closed (see
-Resolved). No entries are waiting on a manual check.
+Last triaged 2026-08-07. Three entries were swept and closed that day (see
+[CHANGELOG.md](CHANGELOG.md)) and a live testing pass added the
+`[owner-testing]` entries below — each of those was reproduced against the
+running app before being written down, so they record a mechanism rather than a
+symptom. No entries are waiting on a manual check.
 
 ### engine/market
 
+- [2026-08-07] [owner-testing] optimizer.py:433 (compute_bid_recommendation) — **the bid panel advertises a price the league forbids.** `expected_stop = round(ceiling + SALARY_INCREMENT, 1)` has no cap, and `physical_max_bid` already clamps every opponent at `MAX_SALARY`, so at full budgets the ceiling is $11.4M and "Should win it" reads **$11.5M — an illegal bid**. Reproduced across the whole pool: McDavid (value_cap 8.5) and a replacement-level forward (value_cap 0.5) both show 11.5, which is the operator's other complaint — while no opponent is budget-constrained the forecast carries no information at all. The deeper problem is semantic: the pricing rules define `ceiling + 0.1` as "by construction the price that outbids the strongest opponent", and that stops being true precisely when the ceiling IS the cap, because a rival can match you to $11.4M and no legal bid beats them. So a clamp alone is not the fix — at the cap the forecast has not *retired* (`passed`/`uncontested` both mean something else), it has never started, and `stop_status` probably needs a fourth value saying so
+- [2026-08-07] [owner-testing] main.py:587 (_context) — **the League State "Proj" column means two different things.** BOT's is `milp_solution.total_points`, a real MILP optimum over the affordable pool; every opponent's is `current + starter_slots × mean(points of the top slots×3 affordable players)`, a heuristic that deliberately costs no solve — 11 extra MILPs per action is the thing it avoids. Defensible, but rendered in one sortable column beside a rank badge it reads as comparable and is not, and the operator asked why the numbers behave differently. Either make it comparable (a cheap greedy fill for BOT too, so both sides use the same rule) or label the two — deferred pending which of those you want
 - [2026-07-05] [review] optimizer.py:247 (solve_optimal_roster) — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in auction_control.html so it's no longer silent; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — deferred, and **probably not worth building**: measured 2026-08-06, position slack on the live pool is F +333 / D +197 / G +53 against league-wide open needs, so the pool-too-small trigger is unreachable, and the budget-too-tight trigger is the commissioner-prevented case closed below. Left open only because a future pool could be thinner; re-measure before building anything
 
 
 ### frontend/UX
 
+- [2026-08-07] [owner-testing] state.py:338 (recall_from_minors) — **a keeper who round-trips through the minors turns green and stays green.** `team_panel.html:91` colours a row `text-success` on `is_acquired`, which is membership in `acquired_players`; `recall_from_minors` appends the recalled player there unconditionally — documented in that method as "a demoted keeper recalls into `acquired_players`, losing only that label". Reproduced: Active → Bench → Minors → Recall on a keeper leaves him rendered as a player BOT bought at auction. Green is the operator's read of "this one I paid for", so this quietly falsifies the roster at a glance. Deferred because the fix is a real modelling choice, not a template tweak: `acquired_players` currently carries two meanings (bought at auction / not a keeper) and the recall path needs to know which the player was — either remember the original list on the way down, or track keeper-ness separately from acquisition
+- [2026-08-07] [owner-testing] trade_panel.html:13 — **the trade form cannot express a legal trade involving a minor-league player.** Both sides of the form read `roster_players`, which excludes the minors: this line for "I Give", and `main.py:1331 (team_players)` for the "I Receive" dropdown. A group 2/3 player in the minors has his salary fully on cap (see the buyout-dots note in CLAUDE.md, which is the same class of bug caught on 2026-08-07) and is perfectly tradeable. `execute_trade` itself is fine — the restriction is in the two lists that feed the form. Deferred: needs a decision on whether minors show inline with a marker or as a separate group, and whether the same widening applies to the buyout dropdown
+- [2026-08-07] [owner-testing] templates/partials/bid_panel.html:45 — **the "Worth up to" tooltip renders off the left edge of the screen.** All 9 tooltips in the panel are `tooltip-bottom`, which centres the bubble under its trigger; they sit inside `.bid-details`, which is `display: flex; flex-wrap: wrap` (`static/style.css:90`), so whenever the row wraps the first item lands hard against the panel's left edge and a centred bubble overflows the viewport. DaisyUI has no auto-flip. Fix is per-tooltip placement (`tooltip-right` on the leading item) or a wrapper that constrains the bubble — deferred: it wants checking in a real browser at each of the three breakpoints, since which item leads a row is a layout accident
 - [2026-08-06] [owner] static/vendor/tailwindcss-play-3.4.17.js — Tailwind's Play bundle JITs utility classes in the browser on every page load; a real build would ship a fraction of the CSS with no runtime cost — deferred: needs node + npm + the daisyui plugin and a rebuild on every template edit, and it is *riskier* here, because `static/shortcuts.js` builds class names at runtime (`'alert-' + type`) which a source-scanning build cannot see. That case survives today only because DaisyUI's prebuilt CSS carries every `alert-*` variant. Revisit only if page load becomes a real complaint
 - [2026-08-07] [browser] main.py (undo) — `/undo` calls `_view_my_team()`, so undoing a *roster edit on an opponent* throws the panel back to BOT. Observed in Chrome: view SRL, bench a player, Ctrl+Z, and you are looking at your own team. This is the 2026-08-07 owner decision working as written (draft actions reset the view, and undo can revert an `/assign` where returning to BOT is right), but the decision was made about draft actions and undo is now the one endpoint that is *both* — it reverts whichever kind of action came last. Deferred: the fix is to reset only when the undone action was a draft action, which means `restore_snapshot` reporting what it undid, and that is a state-layer change to serve a view concern. Raise it only if it bites during a real audit
 - [2026-08-06] [owner] main.py (_counterfactual) — the auto-shown counterfactual is computed at the MARKET price, not the live bid, so it does not sharpen as bidding climbs. That is what makes it cacheable: re-solving per $0.1M increment costs ~200ms and would put a response back inside the Assign mousedown/mouseup window. If it reads as stale in a real draft the follow-up is a manual "recompute at this price" button, never an automatic one — deferred pending draft-day experience
@@ -64,6 +72,101 @@ From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items 
 - ~~**Buyout Analyzer: Scan button + dropdown of my roster → select → "Execute Buyout".**~~ Closed 2026-08-06 as **already built** — `buyout_panel.html` has the Scan button plus a row of one-click per-player buttons (better than a dropdown: no open-then-select), the verdict block, and Execute Buyout. Nothing is typed. The entry described a flow that had already been replaced; the only real gap left there is the minors-have-no-dots finding under frontend/UX.
 - **Decompose Model $ into its drivers — how much comes from projected points vs. NHL team quality** (and reputation/lag salary, which is the third big term). Needs a per-coefficient contribution breakdown out of `price_model.py`; the two-stage log-normal form means contributions are multiplicative on price, so decide whether to show them in log space or as "% of predicted price".
 - **Save State button that jumps between live state and a scenario**, so testing a what-if doesn't cost the real draft state. Interacts with the scenario loader (`POST /load-scenario`) and the undo snapshot chain — check that switching can't strand a snapshot.
+
+### From the 2026-08-07 testing pass
+
+Cockpit ergonomics from a live run-through, source tag `[owner-testing]`. These
+are wants, not defects — the five things that were actually *broken* are under
+**Open findings** above, and they should be fixed first. No `file:line` here,
+because nothing is wrong at one; the file names are orientation only.
+
+**Reverses a documented decision — read this before implementing it:**
+
+- **Swap the team panel to whichever team just drafted a player.** This is the
+  exact opposite of the owner decision recorded at `CLAUDE.md:119` (2026-08-07):
+  `/assign` calls `_view_my_team()` and resets the view to BOT *"because reading
+  an opponent's Cap Used as yours right after a pick lands is worse than
+  re-opening their roster."* The new argument is that seeing what a rival just
+  built is the more useful reflex during a live auction. Both are defensible and
+  this is the owner's call — but implementing it means **amending that decision
+  in `CLAUDE.md` in the same commit**, and `TestTheViewSticks` plus the `/assign`
+  reset tests are then expected to change, not to be worked around. A middle
+  option worth considering: swap only on an *opponent's* pick, so your own pick
+  still returns you to your roster. Note the misread the decision guards against
+  does not go away — whatever the panel shows, the header numbers are that
+  team's.
+
+**Nomination panel**
+
+- **Show the model price beside the market price.** Today's "Expected" figure is
+  `market_prices`, deliberately — drain nominations rank on the money that
+  actually leaves a rival's budget, and the model/market gap is already the
+  tie-break (see `.claude/rules/pricing-pipeline.md`). So this is an *additional*
+  column, not a correction: the two side by side show at a glance who is cheap
+  because the market is thin versus cheap because the model rates him low.
+- **Hide the recommendations once "Bid on X" is clicked.** They are stale the
+  moment the auction starts, and they stay on screen competing with the bid
+  panel for attention.
+
+**Buyout Analyzer**
+
+- **Dropdown instead of a row of ~15 buttons.** Note this reverses the
+  2026-08-06 judgment recorded in the UI/UX section above (buttons beat a
+  dropdown: no open-then-select) — what changed is the count, which grows with
+  the roster and now wraps. A dropdown plus one Execute button, or keep buttons
+  and cap the visible row with a "more" disclosure. Whichever wins, the list has
+  to keep reading `all_players|selectattr('can_be_bought_out')` — the same
+  expression as the scan and the dots, per CLAUDE.md.
+
+**Logs**
+
+- **Split into three tabs: Auction, Transaction, Change.** Auction = draft
+  picks; Transaction = trades and buyouts; Change = roster edits (bench,
+  salary corrections, minors moves). This is a filter over `transaction_log`'s
+  existing type tags, not new plumbing — check the tags actually partition
+  cleanly before building the tabs.
+- **Make the team name in a log row clickable**, opening that team's panel
+  (`GET /team-view/{code}`) — the log is where you notice a rival's pick, and
+  the panel is two clicks away.
+- **NHL team logos in both logs.** Same asset path the roster tables use.
+
+**League State table**
+
+- **Three-letter codes only.** Full names wrap and cost the column width the
+  numbers need.
+- **Render Done as an X**, not the current text — it is a binary flag in a
+  dense table.
+
+**Available Players**
+
+- **RFA filter.** Rows already carry the data (`is-rfa`), and this extends the
+  existing `filterPosition()` / `data-position` pattern rather than adding a new
+  one.
+
+**Bid panel**
+
+- **Drop the `$` submit button.** `team_panel.html` already documents it as a
+  fallback for the auto-submit; if the auto-submit is trusted, the button is
+  noise in the busiest panel on screen. Confirm the auto-submit fires on every
+  input path first — that is what the fallback was for.
+- **Tooltip on Sigma**, explaining that it is the spread of the price
+  distribution (a function of the predicted log-price, not of points) and that a
+  wide sigma means the model is unsure rather than that the player is expensive.
+- **Tooltip on marginal value vs. price**, explaining that marginal value is
+  what this player adds to the *optimal roster* — so it can sit below the model
+  price on a good player the roster does not need, and that is the tool working.
+
+**Trade form**
+
+- **Bigger, clearer multi-selects.** Both sides are cramped and the multi-select
+  affordance is not obvious; this is the panel most likely to be used under time
+  pressure during a break.
+
+**Counterfactual**
+
+- **Close button.** Copy `player_chart.html`'s `this.closest('.the-card').remove()`
+  — *not* `getElementById`, per the CLAUDE.md rule about partials mounted in two
+  places.
 
 ### Testing
 

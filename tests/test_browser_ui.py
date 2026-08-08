@@ -764,6 +764,7 @@ class TestTooltipsStayInsideTheirPanel:
         const left = r.left + l + m.m41 + ox;
         out.push({widthAuto: isNaN(w) || isNaN(l),
                   text: el.textContent.trim().replace(/\\s+/g, ' ').slice(0, 30),
+                  tip: el.getAttribute('data-tip') || '',
                   left: Math.round(left), right: Math.round(left + w)});
       }
       return {rows: out, contentW: g.scrollWidth};
@@ -788,7 +789,7 @@ class TestTooltipsStayInsideTheirPanel:
             data = pg.evaluate(self.PROBE)
             assert data["rows"], f"no tooltips found at {width}px"
             counted = max(counted, len(data["rows"]))
-            seen.update(r["text"] for r in data["rows"])
+            seen.update(r["tip"] for r in data["rows"])
             for row in data["rows"]:
                 # `auto` means the bubble was never laid out, which would make
                 # every comparison below vacuously true.
@@ -810,13 +811,24 @@ class TestTooltipsStayInsideTheirPanel:
         # distinct container, so between them they exercise every rule in the
         # CSS block (left-anchored flex row, capped-width stat grid, the
         # league table header, and the chart meta line).
-        required = ("Worth up to", "Marginal", "Sigma", "Proj")
-        missing = [w for w in required if not any(w in t for t in seen)]
+        #
+        # Matched on `data-tip`, NOT on the trigger's label. Labels are not
+        # unique: the first version of this required "Proj", which the team
+        # panel's pre-existing "Proj PTS" tile satisfies — so deleting the
+        # league-table Proj tooltip this batch added left the test green.
+        # Caught by mutation, which is the only thing that would have caught it.
+        required = {
+            "Worth up to (bid panel)": "HARD LIMIT",
+            "Marginal (bid panel)": "What he adds to YOUR optimal roster",
+            "Sigma (price chart)": "How SPREAD OUT",
+            "Proj (league table)": "Computed two ways",
+        }
+        missing = [k for k, frag in required.items() if not any(frag in t for t in seen)]
         assert not missing, (
             f"{missing} never appeared as a tooltip — either the template "
             f"dropped it or the page never reached the state that renders it, "
             f"and this test silently stops covering it either way. "
-            f"Measured: {sorted(seen)}"
+            f"Measured tips: {sorted(t[:40] for t in seen)}"
         )
         assert counted >= 10, (
             f"only {counted} tooltips were ever measured — the page must render "

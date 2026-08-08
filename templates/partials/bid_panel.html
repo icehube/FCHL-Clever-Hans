@@ -50,7 +50,14 @@
             {% elif bid_advice.stop_status == "unaffordable" %}
             <span class="tooltip tooltip-bottom" data-tip="No roster spot or budget for any bid — a target price would only invite one the engine has already refused">Should win it: &mdash; <span class="opacity-60">(can't bid)</span></span>
             {% elif bid_advice.stop_status == "at_cap" %}
-            <span class="tooltip tooltip-bottom" data-tip="No opponent is budget-constrained yet, so bidding can run all the way to the ${{ max_salary }}M league maximum and no legal bid guarantees a win. Only value binds. This clears once someone's budget drops below the cap.">Should win it: &mdash; <span class="opacity-60">(rivals can reach the max)</span></span>
+            {# "the opponents bidding here", NOT "someone" — the ceiling is the
+               HIGHEST active opponent's max while BOT is in the bidding and the
+               second-highest while it is only watching, so one team dropping
+               below the cap changes nothing. Measured 2026-08-08: draining one
+               opponent left 9 of 10 at the cap and the panel still said at_cap;
+               it took three. An earlier draft of this tip said "once someone's
+               budget drops below the cap", which is simply false. #}
+            <span class="tooltip tooltip-bottom" data-tip="Nobody bidding is budget-constrained yet, so bidding can run to the ${{ max_salary }}M league maximum and no legal bid guarantees a win — it becomes a race, not a budget question. Only value binds. This clears once the opponents in the bidding can no longer reach the maximum.">Should win it: &mdash; <span class="opacity-60">(rivals can reach the max)</span></span>
             {% elif bid_advice.stop_status == "passed" %}
             <span class="tooltip tooltip-bottom" data-tip="Bidding went past the forecast, so it's been falsified — a real price on the table beats a prediction. Only value binds now.">Should win it: &mdash; <span class="opacity-60">(bidding passed it)</span></span>
             {% else %}

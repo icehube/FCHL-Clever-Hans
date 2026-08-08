@@ -333,6 +333,27 @@ class TestUIMatchesEligibility:
             f"verdict on a move the engine refuses"
         )
 
+    def test_the_scan_fills_every_placeholder_it_finds(self, client):
+        """Set equality, BOTH ways — they fail differently and both are silent.
+
+        `test_dry_run.py::test_10_buyout_indicators_oob` checks only that no
+        dot arrives without a placeholder (htmx would log oobErrorNoTarget).
+        The other direction has no console signal at all: a placeholder the
+        scan never fills just stays grey, which the tooltip explicitly reads as
+        "not analyzed — click Scan". Pointing the dots template back at
+        `roster_players` while the panel renders `all_players` leaves the four
+        minors grey forever and every other test green.
+        """
+        import re as _re
+
+        panel = set(_re.findall(r'id="(bo-[^"]+)"', client.get(f"/team-view/{MY_TEAM}").text))
+        dots = set(_re.findall(r'id="(bo-[^"]+)"', client.get("/buyout-indicators").text))
+        assert panel, "the team panel rendered no dot placeholders at all"
+        assert dots == panel, (
+            f"placeholders the scan never fills: {sorted(panel - dots)}; "
+            f"dots with nowhere to land: {sorted(dots - panel)}"
+        )
+
     def test_an_opponents_minors_get_no_dots(self, client):
         """Dots are BOT-only by construction: `_recompute_buyout_indicators`
         scores every hypothetical against BOT's MILP total. Widening the scan

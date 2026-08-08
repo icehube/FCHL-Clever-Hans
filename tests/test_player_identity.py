@@ -333,10 +333,32 @@ class TestNamesSurviveBecomingDomIds:
             f"these names produce an id htmx cannot build a selector from: {illegal}"
         )
 
+    def test_names_that_differ_only_in_punctuation_get_different_ids(self):
+        """The digest, stated as something that can fail.
+
+        Slugging is lossy: `Matt Murray (DAL)` and `Matt Murray DAL` collapse
+        to the same characters, and two dots sharing one id is the same class
+        of defect the name suffixing removed, one layer down. The live-data
+        check below cannot demonstrate this — measured 2026-08-07, 953 names
+        produce zero slug collisions, so dropping the digest leaves it green.
+        This is the case that goes red.
+        """
+        from main import _dom_id
+
+        assert _dom_id("Matt Murray (DAL)") != _dom_id("Matt Murray DAL")
+        assert _dom_id("O`Connor") != _dom_id("O'Connor")
+        # Same name, same id, every render — the placeholder and the swap that
+        # has to find it are built by two different requests.
+        assert _dom_id("Cale Makar") == _dom_id("Cale Makar")
+
     def test_two_players_never_share_an_id(self, every_name):
-        """A lossy id would put the collision back one layer down — two dots
-        fighting over one target, which is the same class of defect the
-        suffixing removed. The digest is what prevents it."""
+        """The same property over the real pool.
+
+        Insurance rather than a live catch: today nothing collides even without
+        the digest. It is here because a refresh is what would introduce one,
+        and by then the symptom is two dots fighting over a target rather than
+        anything that names a cause.
+        """
         from main import _dom_id
 
         seen: dict[str, str] = {}

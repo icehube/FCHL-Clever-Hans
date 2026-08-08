@@ -56,9 +56,12 @@ class BidRecommendation:
     # being retired. max_bid stays the min of the two while the forecast holds.
     value_cap: float = 0.0          # HARD: past this he isn't worth it
     expected_stop: float | None = None  # FORECAST: None once it stops binding
-    # Why the forecast retired — a bare dash reads the same for all three, and
+    # Why there is no forecast — a bare dash reads the same for all of them, and
     # they call for different reactions: wait vs bid on value vs don't bid.
-    stop_status: str = "live"  # "live" | "passed" | "uncontested" | "unaffordable"
+    # "at_cap" is the odd one out: the other three describe a forecast that
+    # retired, that one a forecast that never existed because the ceiling is the
+    # league maximum.
+    stop_status: str = "live"  # live | passed | uncontested | unaffordable | at_cap
 
 
 @dataclass
@@ -394,7 +397,9 @@ def compute_bid_recommendation(
     * **value cap** = min(marginal_value, physical_max_bid). A hard limit —
       past it the player costs more than he is worth to this roster.
     * **expected stop** = market_ceiling + INCREMENT. A *forecast* of where
-      bidding runs out, so we never pay more than winning requires.
+      bidding runs out, so we never pay more than winning requires. It does not
+      exist when the ceiling is already MAX_SALARY — there is no legal price
+      above it — and that case reports stop_status "at_cap" rather than a figure.
 
     `max_bid` blends the two, but the BID/CAUTION/DROP ladder runs on the value
     cap ALONE. Running it on the blend made advice non-monotonic in price: the
@@ -436,6 +441,31 @@ def compute_bid_recommendation(
         # which — "no rivals left" and "bidding went past it" call for different
         # reactions, and a bare dash for both tells the operator nothing.
         max_bid, stop_status, shown_stop = value_cap, "uncontested", None
+    elif expected_stop > MAX_SALARY:
+        # The ceiling IS the league maximum, so there is no forecast to make.
+        # `ceiling + INCREMENT` means "the price that outbids the strongest
+        # opponent" — true only while a legal price above the ceiling exists.
+        # At MAX_SALARY a rival can match $11.4M and nothing beats them, so the
+        # figure this arm replaces was $11.5M: a bid the league forbids, shown
+        # on every player at once. Measured 2026-08-08 on a fresh state, all 11
+        # teams sit at physical_max_bid = MAX_SALARY, which is also why the
+        # number looked identical pool-wide — no opponent is budget-constrained
+        # yet, so the forecast carries no information about any particular
+        # player.
+        #
+        # NOT reusable as "passed" or "uncontested": both claim something
+        # specific and false here. This forecast did not retire, it never
+        # started, and the panel has to be able to say so.
+        #
+        # max_bid is unchanged by construction — value_cap is min(marginal,
+        # physical_max_bid) and physical_max_bid is itself clamped at
+        # MAX_SALARY, so value_cap <= MAX_SALARY < expected_stop and the old
+        # min() already returned value_cap. Ordered ahead of the `passed` check
+        # because current_price >= expected_stop is unreachable through legal
+        # bidding when expected_stop exceeds MAX_SALARY; the two can only meet
+        # on an illegal typed price, where "the ceiling is the league max" is
+        # the more honest of the two answers.
+        max_bid, stop_status, shown_stop = value_cap, "at_cap", None
     elif current_price >= expected_stop:
         max_bid, stop_status, shown_stop = value_cap, "passed", None
     else:

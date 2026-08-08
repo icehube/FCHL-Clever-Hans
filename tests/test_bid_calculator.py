@@ -423,21 +423,42 @@ class TestBidPanelNumbers:
 
         Money is quantized to $0.1M everywhere else in this app (_legal_salary,
         _floor_to_increment); the forecast has to be too.
+
+        Phrased as "IF a figure is shown, bidding it retires it" rather than
+        "every ceiling ends up `passed`", because at MAX_SALARY there is no
+        figure to bid — that ceiling reports `at_cap` and shows nothing, which
+        satisfies this contract rather than violating it. The earlier phrasing
+        read the status directly and so failed on a state where the panel was
+        telling the truth. Bidding the ROUNDED figure is the load-bearing part:
+        that is what the panel renders and what an operator types, and it is
+        what the raw-float version got wrong.
         """
         team, pool, prices = self._setup()
         contradictions = []
+        shown_at_least_once = 0
         steps = int((MAX_SALARY - MIN_SALARY) / SALARY_INCREMENT) + 1
         for i in range(steps):
             ceiling = round(MIN_SALARY + i * SALARY_INCREMENT, 1)
+            quiet = compute_bid_recommendation(
+                pool["Star"], team, pool, prices, self._contested(ceiling),
+                current_price=MIN_SALARY, marginal_value=8.5,
+            )
+            if quiet.expected_stop is None:
+                continue  # nothing advertised, nothing to contradict
+            shown_at_least_once += 1
             at_stop = compute_bid_recommendation(
                 pool["Star"], team, pool, prices, self._contested(ceiling),
-                current_price=round(ceiling + SALARY_INCREMENT, 1),
+                current_price=round(quiet.expected_stop, 1), marginal_value=8.5,
             )
-            if at_stop.stop_status != "passed":
-                contradictions.append((ceiling, at_stop.expected_stop))
+            if at_stop.expected_stop is not None:
+                contradictions.append((ceiling, quiet.expected_stop, at_stop.expected_stop))
         assert not contradictions, (
             f"{len(contradictions)} ceilings still advise a stop the price has "
             f"already reached: {contradictions[:5]}"
+        )
+        assert shown_at_least_once > 100, (
+            f"only {shown_at_least_once} ceilings showed a figure — the sweep "
+            f"has to exercise the live path or it proves nothing"
         )
 
     def test_no_forecast_when_no_bid_is_possible(self):
@@ -466,6 +487,38 @@ class TestBidPanelNumbers:
             f"offered a ${rec.expected_stop}M target while refusing any bid"
         )
         assert rec.stop_status == "unaffordable"
+
+    def test_the_shown_figure_is_always_a_legal_bid(self):
+        """"Should win it" must never name a price the league forbids.
+
+        Reported 2026-08-07 from live testing as "$11.5M for every player".
+        `expected_stop` is `ceiling + SALARY_INCREMENT` and every ceiling
+        reaching here is clamped at MAX_SALARY by physical_max_bid, so the sum
+        overshoots exactly when the ceiling IS the cap — which is the OPENING
+        state of every draft, not an edge: all 11 teams start at
+        physical_max_bid = MAX_SALARY, so the panel advertised an illegal
+        $11.5M on all 704 players at once.
+
+        Swept over every legal ceiling rather than pinned at the cap: a fix
+        that special-cased 11.4 and left 11.3999 to float error would pass a
+        point test.
+        """
+        team, pool, prices = self._setup()
+        illegal = []
+        steps = int((MAX_SALARY - MIN_SALARY) / SALARY_INCREMENT) + 1
+        for i in range(steps):
+            ceiling = round(MIN_SALARY + i * SALARY_INCREMENT, 1)
+            rec = compute_bid_recommendation(
+                pool["Star"], team, pool, prices, self._contested(ceiling),
+                current_price=MIN_SALARY, marginal_value=8.5,
+            )
+            if rec.expected_stop is not None and rec.expected_stop > MAX_SALARY:
+                illegal.append((ceiling, rec.expected_stop))
+        assert not illegal, (
+            f"{len(illegal)} ceilings advertise a bid above the ${MAX_SALARY}M "
+            f"maximum: {illegal[:5]}"
+        )
+
 
     def test_panel_shows_both_numbers(self):
         """A template edit must not silently drop one of them."""
@@ -498,6 +551,7 @@ class TestBidPanelNumbers:
         ("uncontested", "(no rivals left)"),
         ("unaffordable", "(can't bid)"),
         ("passed", "(bidding passed it)"),
+        ("at_cap", "(rivals can reach the max)"),
         # An unrecognized status must not borrow another one's explanation.
         ("some_future_status", "Should win it: &mdash;</span>"),
     ])
@@ -556,6 +610,94 @@ class TestBidPanelNumbers:
             )
             c.post("/reset")
 
+
+class TestTheForecastAtTheCap:
+    """When the ceiling IS MAX_SALARY there is no forecast to make.
+
+    `ceiling + 0.1` is documented as "by construction the price that outbids
+    the strongest opponent". At the cap that construction breaks: there is no
+    legal price above $11.4M, so a rival can match and the winner is decided by
+    who bids it rather than by budget. The forecast does not retire here — it
+    never starts, which is why this is its own stop_status rather than a reuse
+    of "passed" (claims a real price falsified it) or "uncontested" (claims
+    there are no rivals, the opposite of the situation).
+
+    Reuses TestUncontestedBidding's fixture, where physical_max_bid is $4.2M so
+    value_cap stays well under the cap — the point is that the FORECAST is
+    absent, not that value is.
+    """
+
+    def _setup(self):
+        return TestUncontestedBidding()._setup()
+
+    def _contested(self, ceiling: float) -> MarketInfo:
+        return MarketInfo(
+            market_ceiling=ceiling, highest_bidder="AAA", highest_bid=ceiling,
+            second_bidder="BBB", demand_count=2, floor_demand=False,
+        )
+
+    def test_at_the_cap_there_is_no_forecast(self):
+        team, pool, prices = self._setup()
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, self._contested(MAX_SALARY),
+            current_price=MIN_SALARY, marginal_value=8.5,
+        )
+        assert rec.stop_status == "at_cap"
+        assert rec.expected_stop is None, (
+            f"named ${rec.expected_stop}M, which is above the ${MAX_SALARY}M max"
+        )
+
+    def test_one_increment_below_the_cap_still_forecasts(self):
+        """The boundary, from the other side — otherwise the arm could swallow
+        every ceiling and the test above would still pass."""
+        below = round(MAX_SALARY - SALARY_INCREMENT, 1)
+        team, pool, prices = self._setup()
+        rec = compute_bid_recommendation(
+            pool["Star"], team, pool, prices, self._contested(below),
+            current_price=MIN_SALARY, marginal_value=8.5,
+        )
+        assert rec.stop_status == "live"
+        assert rec.expected_stop == pytest.approx(MAX_SALARY, abs=0.01), (
+            "a stop of exactly MAX_SALARY is legal and must still be shown"
+        )
+
+    def test_max_bid_and_verdict_are_untouched_by_the_new_status(self):
+        """The claim that makes this change safe, asserted rather than argued.
+
+        This was a DISPLAY bug: value_cap is min(marginal, physical_max_bid)
+        and physical_max_bid is itself clamped at MAX_SALARY, so
+        value_cap <= MAX_SALARY < expected_stop and the old
+        `min(value_cap, expected_stop)` already returned value_cap. No advice
+        was ever wrong because of it.
+
+        Checked against an independent restatement of the PRE-CHANGE rule
+        (written from the old source) over every legal ceiling and a price
+        sweep — not against the new code's own arithmetic, which would be a
+        tautology. Mutating the new arm to `max_bid = expected_stop` turns this
+        red.
+        """
+        team, pool, prices = self._setup()
+
+        def old_rule(value_cap: float, ceiling: float, price: float) -> float:
+            stop = round(ceiling + SALARY_INCREMENT, 1)
+            return round(value_cap if price >= stop else min(value_cap, stop), 1)
+
+        drifted = []
+        steps = int((MAX_SALARY - MIN_SALARY) / SALARY_INCREMENT) + 1
+        for i in range(steps):
+            ceiling = round(MIN_SALARY + i * SALARY_INCREMENT, 1)
+            for price in (MIN_SALARY, 2.0, 4.0, 8.0, MAX_SALARY):
+                rec = compute_bid_recommendation(
+                    pool["Star"], team, pool, prices, self._contested(ceiling),
+                    current_price=price, marginal_value=8.5,
+                )
+                want = old_rule(rec.value_cap, ceiling, price)
+                if rec.max_bid != pytest.approx(want, abs=0.01):
+                    drifted.append((ceiling, price, rec.max_bid, want))
+        assert not drifted, (
+            f"max_bid changed at {len(drifted)} (ceiling, price) pairs — this "
+            f"was meant to be display-only: {drifted[:5]}"
+        )
 
 class TestCounterfactual:
     def test_counterfactual_produces_both_rosters(self):

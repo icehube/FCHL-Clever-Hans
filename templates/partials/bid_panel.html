@@ -49,6 +49,8 @@
             <span class="tooltip tooltip-bottom" data-tip="No opponent left in the bidding, so there is nothing to forecast — only value binds now">Should win it: &mdash; <span class="opacity-60">(no rivals left)</span></span>
             {% elif bid_advice.stop_status == "unaffordable" %}
             <span class="tooltip tooltip-bottom" data-tip="No roster spot or budget for any bid — a target price would only invite one the engine has already refused">Should win it: &mdash; <span class="opacity-60">(can't bid)</span></span>
+            {% elif bid_advice.stop_status == "at_cap" %}
+            <span class="tooltip tooltip-bottom" data-tip="No opponent is budget-constrained yet, so bidding can run all the way to the ${{ max_salary }}M league maximum and no legal bid guarantees a win. Only value binds. This clears once someone's budget drops below the cap.">Should win it: &mdash; <span class="opacity-60">(rivals can reach the max)</span></span>
             {% elif bid_advice.stop_status == "passed" %}
             <span class="tooltip tooltip-bottom" data-tip="Bidding went past the forecast, so it's been falsified — a real price on the table beats a prediction. Only value binds now.">Should win it: &mdash; <span class="opacity-60">(bidding passed it)</span></span>
             {% else %}

@@ -686,6 +686,9 @@ def _context(request: Request) -> dict:
         "nomination_order": auction_state.nomination_order,
         "current_nominator": auction_state.current_nominator(),
         "my_team": MY_TEAM,
+        # The league's salary cap, so a template quoting it in prose reads the
+        # config rather than carrying its own copy of "11.4" to drift.
+        "max_salary": MAX_SALARY,
         "buyout_indicators": buyout_indicators,
         "market_prices": market_prices,
         "projections": projections,

@@ -564,3 +564,103 @@ class TestTheDataBannerOutlivesAPick:
         )
         original = next(iter(data_loader.loaded_disambiguations))
         assert original in page.locator("#data-warning").inner_text()
+
+
+class TestTheScanSurvivesAnAwkwardName:
+    """One bad dot id abandons the whole scan, and only a browser says so.
+
+    htmx resolves an out-of-band target by building a CSS SELECTOR from the id
+    (`htmx-1.9.10.min.js`, `Ee`: `var t = "#" + ee(i,"id"); …
+    re().querySelectorAll(t)`), and it calls that from a plain forEach with no
+    try/catch. So an id that is not a valid CSS identifier does not merely miss
+    its own target — `querySelectorAll` throws and every remaining OOB swap in
+    the response is abandoned.
+
+    `data/players.csv` carries names with backticks and parentheses, and
+    `_disambiguated_names` adds `(TEAM)`, `(TEAM POS)` and `(#n)` suffixes on
+    top. An endpoint test sees two matching id strings and cannot see the
+    selector being rejected.
+    """
+
+    # Characters the id derivation has to survive. Spaces and hyphens are fine
+    # in an identifier; everything else must be removed or encoded.
+    _NEEDS_WORK = re.compile(r"[^A-Za-z0-9 -]")
+    # The subset the template's historical `replace` chain never contemplated.
+    # `.` and `'` it strips; backticks, parentheses and the `#` that
+    # `_disambiguated_names` can emit it does not.
+    _BEYOND_THE_OLD_STRIP = re.compile(r"[^A-Za-z0-9 .'-]")
+
+    def _awkward_biddable(self) -> str | None:
+        """The hardest-to-encode name in the pool, or None if it is all plain.
+
+        Derived, never named — the pool is replaced before every draft. Sorted
+        so a name the old strip could not fix wins over one it could: picking
+        merely the first `_NEEDS_WORK` match found `J.T. Miller`, whose dots the
+        strip already removed, and the test passed against the live bug.
+        """
+        candidates = [
+            n for n in main.auction_state.available_players if self._NEEDS_WORK.search(n)
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda n: not self._BEYOND_THE_OLD_STRIP.search(n))
+
+    def test_every_dot_resolves_with_an_awkward_name_on_the_roster(
+        self, page, live_server
+    ):
+        victim = self._awkward_biddable()
+        if victim is None:
+            pytest.skip("no pool name needs escaping — nothing to break the scan")
+
+        r = page.request.post(
+            f"{live_server}/assign",
+            form={"player": victim, "team": "BOT", "salary": "1.0"},
+        )
+        assert r.status == 200
+        assert any(
+            p.name == victim for p in main.auction_state.teams["BOT"].all_players
+        ), f"{victim} was not drafted, so the scan has nothing awkward to trip on"
+
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on(
+            "console",
+            lambda m: errors.append(f"{m.type}: {m.text}") if m.type == "error" else None,
+        )
+        _open(page, live_server)
+
+        placeholders = page.eval_on_selector_all("[id^='bo-']", "els => els.map(e => e.id)")
+        assert placeholders, "no dot placeholders rendered at all"
+
+        # Asked of the browser's own selector parser rather than a regex
+        # approximation of it — the consumer is Chrome, so Chrome is the oracle.
+        unusable = page.evaluate(
+            """() => [...document.querySelectorAll("[id^='bo-']")]
+                 .filter(e => {
+                     try { document.querySelectorAll('#' + e.id); return false }
+                     catch (err) { return true }
+                 }).map(e => e.id)"""
+        )
+        assert not unusable, (
+            f"htmx builds its OOB target as '#' + id, and these are not valid "
+            f"selectors: {unusable}"
+        )
+
+        # The Analyzer is a collapsed <details>, so scanning is two clicks for
+        # real — open the disclosure the way the operator does, or the button
+        # is present in the DOM and unclickable.
+        page.click("#buyout-panel summary")
+        scan = "#buyout-panel [hx-get='/buyout-indicators']"
+        page.locator(scan).scroll_into_view_if_needed()
+        with page.expect_response(re.compile(r"/buyout-indicators")) as got:
+            page.click(scan)
+        assert got.value.status == 200
+        # One MILP solve per eligible player, so give the swaps room to land.
+        page.wait_for_timeout(4000)
+
+        unresolved = page.locator(".buyout-light.light-grey").count()
+        assert not errors, f"the scan threw in the browser: {errors[:3]}"
+        assert unresolved == 0, (
+            f"{unresolved} of {len(placeholders)} dots never resolved — one "
+            f"un-escapable id ({victim!r}) aborts every OOB swap after it"
+        )

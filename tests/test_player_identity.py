@@ -21,6 +21,7 @@ pins live numbers is the thing the whole refresh effort is removing.
 """
 
 import csv
+import re
 
 import pytest
 
@@ -287,3 +288,62 @@ class TestTheLiveFileLoadsWholeAndUnambiguous:
         assert not double_listed, (
             f"{double_listed} are on a roster AND still biddable"
         )
+
+
+class TestNamesSurviveBecomingDomIds:
+    """The name is a key on screen too, and that key has stricter rules.
+
+    htmx resolves an out-of-band target as `querySelectorAll("#" + id)`, so a
+    dot id has to be a legal CSS identifier — and the throw escapes htmx's
+    un-guarded forEach, taking every remaining swap in the response with it.
+    Measured in Chrome on 2026-08-07 with `Matt Murray (DAL)` on BOT: 12
+    placeholders, **0** resolved, `htmx:swapError`, and a Scan button that
+    looked like it had simply not finished.
+
+    The live file carries backticks (`Drew O`Connor`) and parentheses (`Tony
+    DeAngelo (NCM)`), and `_disambiguated_names` adds more of both plus a `#`.
+    So this runs against every name the app can render a dot for, not a sample —
+    it is the check that would have caught the backtick, and it keeps meaning
+    something after players.csv is replaced.
+
+    The browser test in tests/test_browser_ui.py asks Chrome's own parser; this
+    is the same claim ~100x faster and over the whole pool.
+    """
+
+    # `bo-` prefixes every id at both call sites, so a slug that starts with a
+    # digit is still fine — assert the whole thing rather than the fragment.
+    LEGAL = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+    @pytest.fixture(scope="class")
+    def every_name(self) -> list[str]:
+        state = data_loader.build_initial_state()
+        names = list(state.available_players)
+        for team in state.teams.values():
+            names.extend(p.name for p in team.all_players)
+        assert len(names) > 100, "suspiciously few names to check"
+        return names
+
+    def test_every_name_yields_a_usable_id(self, every_name):
+        from main import _dom_id
+
+        illegal = sorted(
+            {n for n in every_name if not self.LEGAL.match(f"bo-{_dom_id(n)}")}
+        )
+        assert not illegal, (
+            f"these names produce an id htmx cannot build a selector from: {illegal}"
+        )
+
+    def test_two_players_never_share_an_id(self, every_name):
+        """A lossy id would put the collision back one layer down — two dots
+        fighting over one target, which is the same class of defect the
+        suffixing removed. The digest is what prevents it."""
+        from main import _dom_id
+
+        seen: dict[str, str] = {}
+        clashes = []
+        for name in set(every_name):
+            ident = _dom_id(name)
+            if ident in seen:
+                clashes.append(f"{seen[ident]} / {name} -> {ident}")
+            seen[ident] = name
+        assert not clashes, f"distinct players share a dot id: {clashes}"

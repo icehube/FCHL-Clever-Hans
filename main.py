@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
 import os
+import re
 from datetime import datetime
 
 from contextlib import asynccontextmanager
@@ -281,6 +283,41 @@ app.mount("/nhl_logos", StaticFiles(directory="nhl_logos"), name="nhl_logos")
 templates = Jinja2Templates(directory="templates")
 
 
+def _dom_id(name: str) -> str:
+    """A player name as a DOM id htmx can build a CSS selector from.
+
+    htmx resolves an out-of-band target by SELECTOR, not by getElementById —
+    `htmx-1.9.10.min.js`, function `Ee`: `var t = "#" + ee(i,"id"); …
+    re().querySelectorAll(t)` — and it calls that from a plain forEach with no
+    try/catch. So a character that is illegal in a CSS identifier does not just
+    make one swap miss: `querySelectorAll` throws and every remaining swap in
+    the response is abandoned. Measured in Chrome 2026-08-07 with
+    `Matt Murray (DAL)` on BOT's roster: **12 dot placeholders, 0 resolved**,
+    `htmx:swapError` in the console and a Scan button that looks like it simply
+    never finished.
+
+    `players.csv` really does carry such names — backticks (`Drew O`Connor`)
+    and parentheses (`Tony DeAngelo (NCM)`) — and `_disambiguated_names` adds
+    ` (TEAM)`, ` (TEAM POS)` and ` (#n)` suffixes on top, so the pool holds two
+    of them today. The old inline expression stripped `'` (U+0027) and `.`,
+    which reads as covering apostrophes; the data uses U+0060, so it never
+    matched one.
+
+    The digest is what makes this injective. A slug alone is lossy, and two
+    players colliding on a derived key is precisely the failure the 2026-08-07
+    disambiguation work removed — it must not return one layer down as two
+    dots fighting over a single id.
+    """
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower()
+    return f"{slug}-{hashlib.sha1(name.encode()).hexdigest()[:8]}"
+
+
+# A filter rather than a macro: the placeholder and the out-of-band swap that
+# has to find it live in different templates, and they are only guaranteed to
+# agree if there is one definition rather than two copies of an expression.
+templates.env.filters["dom_id"] = _dom_id
+
+
 buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 
 
@@ -440,19 +477,16 @@ def _recompute_buyout_indicators():
     team = auction_state.teams[MY_TEAM]
     current_pts = milp_solution.total_points if milp_solution and milp_solution.status == "Optimal" else 0
     buyout_indicators = {}
-    # Active roster only, and only what's eligible. Eligible because a dot
-    # beside a player who can't be bought out is worse than no dot: it reads as
-    # a verdict on a decision that isn't available.
+    # Only what's eligible: a dot beside a player who can't be bought out is
+    # worse than no dot, because it reads as a verdict on a decision that isn't
+    # available.
     #
-    # Roster-only is the part that is now just a GAP, not a reason. This used to
-    # say the team table lists no minors, so a solve for one would be thrown
-    # away — team_panel.html has rendered a Minors table since, and the Buyout
-    # Analyzer already offers those players (all_players, since location is
-    # irrelevant to eligibility). So the scan silently under-reports on the
-    # 4 eligible minors BOT holds at reset. Tracked in BACKLOG.md; the work is a
-    # dot column plus widening this to all_players, measured at ~+0.5s on a
-    # ~1.4s scan.
-    for p in (q for q in team.roster_players if q.can_be_bought_out):
+    # `all_players`, matching buyout_panel.html and buyout_dots.html. This was
+    # roster-only until 2026-08-07, which silently under-reported: eligibility
+    # is a property of the contract group alone, so BOT's 4 group-3 players in
+    # the minors ($2.0M, fully on cap) are legal buyouts the Analyzer already
+    # offered while the scan said nothing about them. Costs 4 more solves.
+    for p in (q for q in team.all_players if q.can_be_bought_out):
         try:
             clone = deepcopy(auction_state)
             bt = clone.teams[MY_TEAM]

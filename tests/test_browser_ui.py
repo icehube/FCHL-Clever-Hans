@@ -609,8 +609,17 @@ class TestTheScanSurvivesAnAwkwardName:
         self, page, live_server
     ):
         victim = self._awkward_biddable()
-        if victim is None:
-            pytest.skip("no pool name needs escaping — nothing to break the scan")
+        # Skip rather than settle for a benign name. A pool with nothing beyond
+        # the old strip cannot break the scan this way, and running against
+        # `J.T. Miller` — whose dots the strip already removed — is what let an
+        # earlier draft of this test pass against the live bug. Silent
+        # degradation into a no-op is worse than an honest skip, because the
+        # test keeps reading as coverage.
+        if victim is None or not self._BEYOND_THE_OLD_STRIP.search(victim):
+            pytest.skip(
+                f"no pool name needs escaping beyond `.` and `'` "
+                f"(best candidate: {victim!r}) — nothing here can break the scan"
+            )
 
         r = page.request.post(
             f"{live_server}/assign",

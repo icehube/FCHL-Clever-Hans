@@ -347,9 +347,35 @@ class TestNamesSurviveBecomingDomIds:
 
         assert _dom_id("Matt Murray (DAL)") != _dom_id("Matt Murray DAL")
         assert _dom_id("O`Connor") != _dom_id("O'Connor")
-        # Same name, same id, every render — the placeholder and the swap that
-        # has to find it are built by two different requests.
-        assert _dom_id("Cale Makar") == _dom_id("Cale Makar")
+
+    def test_the_id_is_the_same_in_a_fresh_process(self):
+        """The placeholder and the dot can come from two different processes.
+
+        Startup recovery means the server can be restarted four hours into a
+        draft with the operator's page still open (`tests/test_crash_recovery.py`).
+        The grey placeholders in that page were rendered by the OLD process; the
+        dots arrive from the new one. A digest that is not content-addressed —
+        `hash()`, which Python salts per process — makes every swap miss, which
+        is the bug this filter exists to prevent, reintroduced by another route.
+
+        Checked in a subprocess because calling `_dom_id` twice here proves
+        nothing: a `hash()`-based build returns the same value within one
+        process and a different one in the next.
+        """
+        import subprocess
+        import sys
+
+        from main import _dom_id
+
+        elsewhere = subprocess.run(
+            [sys.executable, "-c", "import main; print(main._dom_id('Cale Makar'))"],
+            capture_output=True, text=True, timeout=120,
+        )
+        assert elsewhere.returncode == 0, elsewhere.stderr[-500:]
+        assert elsewhere.stdout.strip() == _dom_id("Cale Makar"), (
+            "the same name produced two different ids in two processes, so a "
+            "restart mid-draft would leave every dot unfillable"
+        )
 
     def test_two_players_never_share_an_id(self, every_name):
         """The same property over the real pool.

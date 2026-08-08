@@ -237,6 +237,17 @@ class TestUIMatchesEligibility:
             c.post("/reset")
             yield c
 
+    @pytest.fixture(scope="class")
+    def scan(self, client):
+        """One `GET /buyout-indicators`, shared by the tests that read it.
+
+        The scan is 15 MILP solves — 1869ms measured 2026-08-07 — and three
+        tests here want its output. Class-scoped is safe because every test
+        between them is a GET; the only one that mutates BOT's roster runs last
+        and resets after itself.
+        """
+        return client.get("/buyout-indicators")
+
     def test_ineligible_player_gets_no_buyout_dot(self, client):
         """A grey dot on an un-buyoutable player reads as "not analyzed yet".
 
@@ -262,11 +273,10 @@ class TestUIMatchesEligibility:
             f"but the panel renders a buyout indicator for him"
         )
 
-    def test_scan_skips_ineligible_players(self, client):
+    def test_scan_skips_ineligible_players(self, client, scan):
         """Every solve the scan runs must correspond to a real decision."""
         import main
 
-        client.get("/buyout-indicators")
         bot = main.auction_state.teams[MY_TEAM]
         scanned = set(main.buyout_indicators)
 
@@ -276,7 +286,7 @@ class TestUIMatchesEligibility:
         )
         assert scanned, "scan produced nothing at all"
 
-    def test_the_scan_covers_eligible_minors(self, client):
+    def test_the_scan_covers_eligible_minors(self, client, scan):
         """Group 2/3 in the minors is a legal buyout with a full cap hit.
 
         This test used to assert the OPPOSITE — that the scan skips minors —
@@ -294,7 +304,6 @@ class TestUIMatchesEligibility:
         if not eligible_minors:
             pytest.skip("BOT holds no group 2/3 minors in current data")
 
-        client.get("/buyout-indicators")
         missing = eligible_minors - set(main.buyout_indicators)
         assert not missing, f"scan skipped buyout-eligible minors: {sorted(missing)}"
 
@@ -333,7 +342,7 @@ class TestUIMatchesEligibility:
             f"verdict on a move the engine refuses"
         )
 
-    def test_the_scan_fills_every_placeholder_it_finds(self, client):
+    def test_the_scan_fills_every_placeholder_it_finds(self, client, scan):
         """Set equality, BOTH ways — they fail differently and both are silent.
 
         `test_dry_run.py::test_10_buyout_indicators_oob` checks only that no
@@ -347,7 +356,7 @@ class TestUIMatchesEligibility:
         import re as _re
 
         panel = set(_re.findall(r'id="(bo-[^"]+)"', client.get(f"/team-view/{MY_TEAM}").text))
-        dots = set(_re.findall(r'id="(bo-[^"]+)"', client.get("/buyout-indicators").text))
+        dots = set(_re.findall(r'id="(bo-[^"]+)"', scan.text))
         assert panel, "the team panel rendered no dot placeholders at all"
         assert dots == panel, (
             f"placeholders the scan never fills: {sorted(panel - dots)}; "
@@ -361,10 +370,16 @@ class TestUIMatchesEligibility:
         import main
 
         other = next(c for c in main.auction_state.teams if c != MY_TEAM)
-        html = client.get(f"/team-view/{other}").text
-        assert 'class="buyout-light' not in html, (
-            f"{other}'s panel renders buyout dots that can never be filled"
-        )
+        try:
+            html = client.get(f"/team-view/{other}").text
+            assert 'class="buyout-light' not in html, (
+                f"{other}'s panel renders buyout dots that can never be filled"
+            )
+        finally:
+            # `_viewed_team` is a module global that no later test resets until
+            # the next file's function-scoped `client` does — put it back rather
+            # than leave the panel pointed at an opponent.
+            client.get(f"/team-view/{MY_TEAM}")
 
     def test_benched_keeper_can_be_demoted_from_the_ui(self, client):
         """The engine allows it; the button has to exist or nothing changed.

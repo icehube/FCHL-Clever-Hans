@@ -181,7 +181,9 @@ def test_vendored_bundle_is_the_advertised_version(filename: str, marker: str):
 #
 # The patterns are IMPORTED, not restated. Defining them here too would create
 # two copies of the same rule that agree until one is edited — the trap that
-# left the drain filter stale and is still open in BACKLOG.md.
+# left the drain filter stale, and that `compute_marginal_value` was still
+# carrying until 2026-08-07 (see CHANGELOG.md), where a hand-rolled copy of
+# `physical_max_bid`'s formula would have stopped following it silently.
 from trim_daisyui import (  # noqa: E402
     COLOUR_CLASS,
     DYNAMIC_CLASSES,

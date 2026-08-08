@@ -25,3 +25,4 @@ python3 -m venv .venv
 
 - [CLAUDE.md](CLAUDE.md) — full project spec: architecture, endpoints, league rules, design rationale, and coding conventions
 - [BACKLOG.md](BACKLOG.md) — open findings and future work
+- [CHANGELOG.md](CHANGELOG.md) — everything fixed, added or changed, newest first

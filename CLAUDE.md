@@ -282,6 +282,10 @@ After every correction or mistake, update CLAUDE.md or the relevant rules file w
 
 When `/grill`, `/go`, `/simplify`, or any review agent flags an issue that is **not** addressed in the current change (out of scope, judgment-call skip, valid-but-deferred refactor), append it to `BACKLOG.md` at the repo root. Don't drop it on the floor — even if you decide not to act on it now, the user should be able to see what was flagged and triage it later.
 
+**Two files, and the split is what "done" means.** `BACKLOG.md` holds only open work — findings and ideas. `CHANGELOG.md` holds everything fixed, added or changed, newest first, grouped by the date it landed (no version numbers: this project ships straight to `main` and has never cut a release). Resolving a finding means deleting it from `BACKLOG.md` and writing it up in `CHANGELOG.md`, **in the same commit as the fix**. The write-ups are deliberately long — what was actually wrong, what was measured, and what the original entry got wrong, because several findings sat deferred for weeks on a diagnosis that turned out to be incorrect. `### Investigated` is for work that closed with **no code change**; filing a not-a-bug under *Fixed* misrepresents it, and deleting it invites the next person to rediscover the same non-problem. The split happened 2026-08-07, when Resolved was 81% of `BACKLOG.md` and buried the 12 open items it shared the file with.
+
+`tests/test_backlog_refs.py` reads **both** files. It went quiet-green the moment the resolved entries moved out — still passing, checking a fraction of what it had — so `test_both_docs_are_still_being_read` now guards the list itself. Note `CHANGELOG.md` normally contributes zero `file:line` references (resolved entries cite commits), so nothing else would notice if it were dropped.
+
 Format per entry:
 
 ```

@@ -1,4 +1,4 @@
-"""BACKLOG.md's file:line references must point at the code they claim.
+"""BACKLOG.md's and CHANGELOG.md's file:line references must point at the code they claim.
 
 Line numbers drift whenever anything above them changes. On 2026-08-05 a third
 of this file's references pointed at unrelated code, and the re-anchoring pass
@@ -24,7 +24,12 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-BACKLOG = REPO / "BACKLOG.md"
+# Both, and CHANGELOG is not optional. The resolved write-ups moved there on
+# 2026-08-07 — 81% of what BACKLOG.md used to hold — and this module went
+# quiet-green the moment they left, still passing while checking a fraction of
+# what it had. A line number in a changelog entry rots exactly like one in an
+# open finding, and the changelog is what someone reads when they are lost.
+DOCS = [REPO / "BACKLOG.md", REPO / "CHANGELOG.md"]
 
 # Any `path.py:123`, optionally followed by `(symbol)`. Deliberately NOT
 # anchored to the `[source] ` prefix — references buried in an entry's prose
@@ -62,10 +67,17 @@ def _symbol_ranges(source: str) -> dict[str, list[tuple[int, int]]]:
     return ranges
 
 
-def _references() -> list[tuple[str, int, str | None]]:
+def _references() -> list[tuple[str, str, int, str | None]]:
+    """Every (doc, path, line, symbol) across both files.
+
+    The doc name rides along so a failure says WHICH file to re-anchor — with
+    two sources, "main.py:1402 is not in move_to_minors" otherwise sends you
+    grepping.
+    """
     return [
-        (m.group(1), int(m.group(2)), m.group(3))
-        for m in _REF.finditer(BACKLOG.read_text())
+        (doc.name, m.group(1), int(m.group(2)), m.group(3))
+        for doc in DOCS
+        for m in _REF.finditer(doc.read_text())
     ]
 
 
@@ -87,14 +99,37 @@ def test_reference_pattern_still_matches():
     ]
 
 
-@pytest.mark.parametrize("path,line,symbol", _references(), ids=lambda v: str(v))
-def test_reference_resolves(path: str, line: int, symbol: str | None):
+def test_both_docs_are_still_being_read():
+    """The other way this module can go quiet-green.
+
+    `_REF` breaking is guarded above; `DOCS` losing an entry is not, and it is
+    the likelier accident now that there are two files. **CHANGELOG.md
+    contributes zero references today** — resolved write-ups cite commits, not
+    line numbers — so nothing in the parametrized cases would notice if it were
+    dropped from the list. Verified by planting a stale ref in it: with the file
+    listed the suite fails naming CHANGELOG.md, without it the suite passes.
+
+    Checked on existence and size rather than on a reference count, because a
+    count would make this fail the day the changelog happens to cite no lines,
+    which is its normal state.
+    """
+    for doc in DOCS:
+        assert doc.exists(), f"{doc.name} is in DOCS but not on disk"
+        assert len(doc.read_text()) > 500, f"{doc.name} is suspiciously empty"
+    assert {d.name for d in DOCS} == {"BACKLOG.md", "CHANGELOG.md"}, (
+        f"DOCS is {[d.name for d in DOCS]} — open work lives in BACKLOG.md and "
+        f"resolved work in CHANGELOG.md, and references in either one rot"
+    )
+
+
+@pytest.mark.parametrize("doc,path,line,symbol", _references(), ids=lambda v: str(v))
+def test_reference_resolves(doc: str, path: str, line: int, symbol: str | None):
     resolved = _resolve(path)
-    assert resolved is not None, f"BACKLOG cites {path}, which no longer exists"
+    assert resolved is not None, f"{doc} cites {path}, which no longer exists"
 
     source = resolved.read_text()
     total = len(source.splitlines())
-    assert line <= total, f"{path}:{line} is past end of file ({total} lines)"
+    assert line <= total, f"{doc}: {path}:{line} is past end of file ({total} lines)"
 
     if not path.endswith(".py"):
         return  # templates have no symbols to anchor to
@@ -106,19 +141,19 @@ def test_reference_resolves(path: str, line: int, symbol: str | None):
     # written to catch was in range, just pointing at the wrong code. A prose
     # parenthetical would silently opt out of the check that matters.
     assert symbol and all(n.isidentifier() for n in names), (
-        f"{path}:{line} needs its enclosing function in parentheses, e.g. "
+        f"{doc}: {path}:{line} needs its enclosing function in parentheses, e.g. "
         f"{path}:{line} (some_function). Got: {symbol!r}"
     )
 
     ranges = _symbol_ranges(source)
     known = [n for n in names if n in ranges]
-    assert known, f"{path}:{line} names ({symbol}), which no longer exists in the file"
+    assert known, f"{doc}: {path}:{line} names ({symbol}), which no longer exists in the file"
 
     assert any(
         start <= line <= end
         for n in known
         for start, end in ranges[n]
     ), (
-        f"{path}:{line} claims to be in ({symbol}) but that symbol spans "
+        f"{doc}: {path}:{line} claims to be in ({symbol}) but that symbol spans "
         f"{[ranges[n] for n in known]} — re-anchor the entry"
     )

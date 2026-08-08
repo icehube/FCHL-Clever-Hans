@@ -67,8 +67,9 @@ class PlayerOnRoster:
     is_minor: bool = False
     is_bench: bool = False
     # PROVENANCE: was this player on an FCHL team before the auction? Same
-    # meaning "keeper" carries in send_to_minors — not a league rule, and
-    # nothing in the engine branches on it.
+    # meaning "keeper" carries in send_to_minors — not a league rule, but two
+    # things DO read it: recall_from_minors routes on it, and team_panel.html
+    # colours a row green for anyone in acquired_players.
     #
     # It exists because provenance was previously encoded ONLY by which list a
     # player sat in, and `minor_players` is a third list that holds neither. So
@@ -305,14 +306,20 @@ class TeamState:
         """Move an active-roster player to minors. Player must be benched first.
 
         Keepers may go down too. "Keeper" only records that a player was on an
-        FCHL team before the auction — it is provenance, not a league rule, and
-        nothing else in the app branches on it (every other reader just
-        concatenates keepers + acquired). Refusing them used to strand the one
-        legal move a group A-E player has: those can't be bought out, and the
-        minors is where their cap hit goes to zero.
+        FCHL team before the auction — provenance, not a league rule. Refusing
+        them used to strand the one legal move a group A-E player has: those
+        can't be bought out, and the minors is where their cap hit goes to zero.
 
         Provenance survives the trip: `is_keeper` is set on the player, so
         recall_from_minors puts a keeper back where he came from.
+
+        This docstring used to add "and nothing else in the app branches on it
+        (every other reader just concatenates keepers + acquired)". That was
+        false when written — `team_panel.html` had already coloured rows
+        `text-success` off `acquired_players` alone since f440053 — and it is
+        the sentence that justified recalling every player into
+        `acquired_players`, which relabelled demoted keepers as purchases for
+        three months. Provenance IS read, in two places. Don't put it back.
         """
         for source in (self.acquired_players, self.keeper_players):
             i = _index_of(source, player_name)

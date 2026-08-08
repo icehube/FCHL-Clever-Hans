@@ -497,6 +497,33 @@ class TestSnapshotFieldsCannotDrift:
             "one side and not the other is a field undo restores as a default"
         )
 
+    def test_every_roster_player_field_reaches_the_json(self):
+        """The same guard one level down, where the same drift is possible.
+
+        `PlayerOnRoster` is serialized by a pair of hand-written helpers, and
+        until 2026-08-08 nothing checked them: adding a field to the dataclass
+        and forgetting both helpers passed the entire suite (verified with a
+        throwaway `injury_note` field — 79 tests green). Every field on it is
+        draft record — salary, group, is_minor, is_bench — so one dropped in a
+        refactor comes back from `/undo` as a default, silently.
+
+        `is_keeper` is the field that prompted this and it is also the reason
+        the round-trip test alone is not enough: `_team_from_dict` repairs it
+        for the two ACTIVE lists, so a keeper self-heals and only a minor would
+        show the loss. A structural check does not depend on which list the
+        fixture happened to use.
+        """
+        from dataclasses import fields
+
+        from state import _player_on_roster_to_dict
+
+        payload = _player_on_roster_to_dict(_make_player_on_roster("Anyone"))
+        assert {f.name for f in fields(PlayerOnRoster)} == set(payload), (
+            "PlayerOnRoster fields and _player_on_roster_to_dict keys have "
+            "drifted — a field on one side and not the other is draft record "
+            "that /undo and every reload restore as a default"
+        )
+
     @staticmethod
     def _value(obj) -> str:
         """Serialized form of a field, ignoring PRIVATE attributes.

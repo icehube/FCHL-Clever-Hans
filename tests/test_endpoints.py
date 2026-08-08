@@ -1,5 +1,6 @@
 """Tests for main.py: FastAPI endpoints."""
 
+import html
 import re
 from contextlib import contextmanager
 
@@ -826,25 +827,47 @@ class TestBidCheckOnAPlayerItCannotFind:
     *live-auction* field, which is readonly, and never looked at the start form.
     """
 
-    def _missing(self, client) -> str:
-        """A name the pool definitely does not hold.
+    # Characters Jinja's autoescape rewrites, so a raw `name in r.text` is
+    # false for them even when the app is perfectly right.
+    _ESCAPED = re.compile(r"[<>&'\"]")
 
-        Derived rather than invented: appending to a real name keeps it
-        realistic while the containment check makes a future `players.csv`
-        that somehow carries it fail loudly instead of quietly testing the
-        found-player path.
+    def _missing(self, client) -> str:
+        """A name the pool does not hold, preferring one escaping would mangle.
+
+        Derived rather than invented — appending to a real name keeps it
+        realistic, and the containment check makes a `players.csv` that somehow
+        carries it fail loudly instead of quietly testing the found-player path.
+
+        The preference is the load-bearing part. Two live pool names carry
+        apostrophes (`Ryan O'Reilly`, `K'Andre Miller`) and Jinja renders `'` as
+        `&#39;`, so the naive `f'value="{name}"' in r.text` this class was first
+        written with is FALSE for them. It passed only because CSV order happens
+        to put `Connor McDavid` first — a refresh that reordered two rows would
+        have failed the suite on correct behaviour. Take the awkward case on
+        purpose, and sort so the choice does not depend on file order either.
         """
-        real = next(iter(client.get("/state").json()["available_players"]))
-        name = f"{real} Jr."
         pool = client.get("/state").json()["available_players"]
+        awkward = sorted(n for n in pool if self._ESCAPED.search(n))
+        name = f"{(awkward or sorted(pool))[0]} Jr."
         assert name not in pool, f"{name!r} is in the pool — pick another"
         return name
+
+    def _typed_back(self, response) -> str:
+        """What the player input actually holds, with escaping undone.
+
+        Reads the property that matters — "the box still has what I typed" —
+        rather than a substring of the markup, so the assertion is right for
+        every name instead of only the ones that need no escaping.
+        """
+        m = re.search(r'name="player"[^>]*\svalue="([^"]*)"', response.text)
+        assert m is not None, "the form rendered no player input carrying a value"
+        return html.unescape(m.group(1))
 
     def test_it_says_the_player_was_not_found(self, client):
         name = self._missing(client)
         r = client.post("/bid-check", data={"player": name, "bidders": "", "price": "0.5"})
         assert r.status_code == 200
-        assert name in r.text, (
+        assert name in html.unescape(r.text), (
             "the response does not name the player that wasn't found, so the "
             "operator is told nothing about why the box emptied"
         )
@@ -868,15 +891,49 @@ class TestBidCheckOnAPlayerItCannotFind:
     def test_the_typed_name_survives_so_a_typo_can_be_corrected(self, client):
         name = self._missing(client)
         r = client.post("/bid-check", data={"player": name, "bidders": "", "price": "0.5"})
-        assert f'value="{name}"' in r.text, (
-            "the text was dropped, so a one-letter typo costs a full retype "
-            "mid-auction"
+        assert self._typed_back(r) == name, (
+            f"the box came back holding {self._typed_back(r)!r} instead of "
+            f"{name!r}, so a one-letter typo costs a full retype mid-auction"
         )
+
+    def test_a_player_who_leaves_the_pool_mid_bid_still_answers(self, client):
+        """The second way in, and a different shape from a typo.
+
+        Here the field held a real name when the bid started; the player was
+        sold in another tab. The price input's next `/bid-check` used to come
+        back with no `#bid-advice`, so hx-select matched nothing and the panel
+        kept showing advice for a player who was gone — no error, no change,
+        nothing to notice.
+        """
+        import main
+
+        p = max(main.auction_state.available_players.values(),
+                key=lambda q: q.projected_points)
+        live = client.post("/bid-check", data={
+            "player": p.name, "bidders": "BOT,SRL", "price": "3.0"})
+        assert 'id="bid-advice"' in live.text, "precondition: a live bid has advice"
+
+        del main.auction_state.available_players[p.name]
+        gone = client.post("/bid-check", data={
+            "player": p.name, "bidders": "BOT,SRL", "price": "3.1"})
+        assert 'id="bid-advice"' in gone.text, (
+            "no #bid-advice for a player who left the pool, so the price input "
+            "swaps nothing and the panel keeps showing his old advice"
+        )
+        assert p.name in html.unescape(gone.text)
 
     def test_a_quiet_page_carries_no_bid_advice_block(self, client):
         """The other side of reusing the id: it must appear only on the two
-        branches that own it, or `GET /` would hold a stray swap target."""
-        assert 'id="bid-advice"' not in client.get("/").text
+        branches that own it, or `GET /` would hold a stray swap target.
+
+        Anchored on the panel being there at all — an absence assertion with
+        nothing positive beside it goes green on a `GET /` that returned an
+        error page, which is the shape of the three assert-nothing tests this
+        suite carried for months.
+        """
+        page = client.get("/").text
+        assert 'id="bid-panel"' in page, "GET / did not render the bid panel"
+        assert 'id="bid-advice"' not in page
 
 
 class TestTeamView:

@@ -163,12 +163,24 @@
     </div>
 
     {% else %}
+    {# A name /bid-check could not find. It carries id="bid-advice" ON PURPOSE,
+       the same id the verdict block above uses: the two branches are mutually
+       exclusive, so the document still holds exactly one, and this is the only
+       thing that makes the price input's hx-select="#bid-advice" land. Without
+       it that request selected nothing and htmx swapped nothing — a player who
+       left the pool mid-bid left the panel showing stale advice with no hint
+       that it had stopped updating. #}
+    {% if bid_error is defined and bid_error %}
+    <div id="bid-advice" class="alert alert-warning py-2 text-sm mb-2">{{ bid_error }}</div>
+    {% endif %}
     <!-- No auction active: bid advisor form. Bidder grid is intentionally
          omitted until a player is introduced -- pre-toggling teams without a
          player has no actionable meaning. -->
     <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="bid-form">
         <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" placeholder="Player being bid on" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            {# Keep what was typed, so a misspelling is corrected rather than
+               retyped from scratch mid-auction. #}
+            <input type="text" name="player" placeholder="Player being bid on" value="{{ bid_player_text if bid_player_text is defined else '' }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
             <input type="number" name="price" step="0.1" min="0.5" value="0.5" id="bid-price" class="input input-xs input-bordered bg-base-300 w-16">
             <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>

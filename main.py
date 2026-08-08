@@ -805,8 +805,21 @@ async def bid_check(
     """Live bidding: get bid recommendation."""
     p = auction_state.available_players.get(player)
     if p is None:
+        # Say so, and hand back what was typed. This used to return the bare
+        # empty form, which fails silently in BOTH directions the panel is
+        # driven from. The "Start Auction" field is free text (`required` plus a
+        # datalist, not readonly), so a typo lands here and the box simply
+        # emptied — 1178 bytes, no toast, nothing to read. And the price input
+        # carries hx-select="#bid-advice", which found no such id in that
+        # response, so htmx swapped *nothing at all*: a player who left the pool
+        # mid-bid left the panel frozen on stale advice.
         ctx = _context(request)
         ctx["bid_advice"] = None
+        ctx["bid_error"] = (
+            f"No player named “{player}” in the pool — check the spelling, "
+            f"or he may already be drafted."
+        )
+        ctx["bid_player_text"] = player
         return _render(request, "partials/bid_panel.html", ctx)
 
     # Use live ceiling from active bidders if provided

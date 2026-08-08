@@ -808,6 +808,77 @@ class TestPlayerChart:
         assert len(r.text) < 300, f"expected an empty state, got {len(r.text)} bytes"
 
 
+class TestBidCheckOnAPlayerItCannotFind:
+    """A misspelled name must not vanish without a word.
+
+    `/bid-check` used to answer the unknown-player case with the bare empty
+    form, which fails silently in both directions the panel is driven from:
+
+    * The "Start Auction" field is free text — `required` with a datalist, but
+      NOT readonly, so any typo gets here. Its form swaps `#bid-panel`
+      outerHTML, so the response replaced the panel with a blank form: the name
+      you typed disappeared, no toast, 1178 bytes, nothing to read.
+    * The price input carries `hx-select="#bid-advice"`, and that response had
+      no such id, so htmx swapped **nothing at all** — a player who left the
+      pool mid-bid left the panel frozen on advice that had stopped updating.
+
+    Reachability is the part the backlog entry got wrong: it reasoned from the
+    *live-auction* field, which is readonly, and never looked at the start form.
+    """
+
+    def _missing(self, client) -> str:
+        """A name the pool definitely does not hold.
+
+        Derived rather than invented: appending to a real name keeps it
+        realistic while the containment check makes a future `players.csv`
+        that somehow carries it fail loudly instead of quietly testing the
+        found-player path.
+        """
+        real = next(iter(client.get("/state").json()["available_players"]))
+        name = f"{real} Jr."
+        pool = client.get("/state").json()["available_players"]
+        assert name not in pool, f"{name!r} is in the pool — pick another"
+        return name
+
+    def test_it_says_the_player_was_not_found(self, client):
+        name = self._missing(client)
+        r = client.post("/bid-check", data={"player": name, "bidders": "", "price": "0.5"})
+        assert r.status_code == 200
+        assert name in r.text, (
+            "the response does not name the player that wasn't found, so the "
+            "operator is told nothing about why the box emptied"
+        )
+        assert "No player named" in r.text
+
+    def test_it_gives_the_price_input_something_to_swap(self, client):
+        """The load-bearing half.
+
+        Without an `#bid-advice` in this response, htmx's hx-select finds no
+        match and performs no swap — the difference between "the panel shows an
+        error" and "the panel does nothing and looks fine".
+        """
+        name = self._missing(client)
+        r = client.post("/bid-check", data={"player": name, "bidders": "", "price": "0.5"})
+        assert 'id="bid-advice"' in r.text, (
+            "the unknown-player response carries no #bid-advice, so a price "
+            "change on a sold player swaps nothing and the advice goes stale "
+            "with no sign of it"
+        )
+
+    def test_the_typed_name_survives_so_a_typo_can_be_corrected(self, client):
+        name = self._missing(client)
+        r = client.post("/bid-check", data={"player": name, "bidders": "", "price": "0.5"})
+        assert f'value="{name}"' in r.text, (
+            "the text was dropped, so a one-letter typo costs a full retype "
+            "mid-auction"
+        )
+
+    def test_a_quiet_page_carries_no_bid_advice_block(self, client):
+        """The other side of reusing the id: it must appear only on the two
+        branches that own it, or `GET /` would hold a stray swap target."""
+        assert 'id="bid-advice"' not in client.get("/").text
+
+
 class TestTeamView:
     """The success path of /team-view renders partials/team_detail.html, which
     imports the player_label macro. test_edge_cases.test_team_view_nonexistent

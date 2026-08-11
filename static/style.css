@@ -1,13 +1,43 @@
 /* FCHL Auction Manager — Tokyo Night theme overrides for DaisyUI */
 
-/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop */
-.auction-grid { display: grid; grid-template-columns: 1fr; }
+/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop.
+
+   minmax(0, 1fr), NEVER a bare `1fr`. `1fr` is shorthand for minmax(AUTO, 1fr),
+   and per css-grid §6.6 a grid item takes a CONTENT-BASED automatic minimum
+   whenever it spans a track whose MIN sizing function is `auto`. So the widest
+   panel silently sets its own column's floor and the other two divide whatever
+   is left. Measured in Chrome at 1280px, before the fix: tracks came out
+   292 / 991 / 585, the grid's content box was 1904 against a 1280 client box,
+   and #team-panel began at x=1310 — the entire panel carrying Cap Used,
+   Remaining, Max Bid, the roster and the buyout dots was off-screen, on the
+   width the draft is actually run at.
+
+   Nothing looked wrong because all_panels.html's inline `overflow-y: auto`
+   forces this element's `overflow-x` to compute to `auto` too (CSS Overflow
+   §3.2), so 624px hid behind the GRID's scrollbar and no PAGE scrollbar ever
+   appeared. Do not "fix" that with `overflow-x: hidden` — that makes the team
+   panel unreachable rather than merely off-screen.
+
+   The 990 was #league-state's 13-column table, NOT #bid-limits: bid_limits'
+   table already sits in a .scroll-container and its min-content is 544. A
+   `min-width: 0` on the .area-* children would be a redundant second source of
+   truth — §6.6 keys on the TRACK's min sizing function, not on the item (that
+   is the flexbox rule, §4.5). Note every Tailwind grid utility in this app
+   already emits this: `grid-cols-3` is `repeat(3, minmax(0, 1fr))`.
+   .auction-grid was the one hand-written grid that did not.
+
+   Zeroing the track floor is necessary but NOT sufficient: it shrinks the item
+   box and does nothing to the item's DESCENDANTS, which keep their min-content
+   and have `overflow: visible`. Measured with minmax injected and no wrappers,
+   the league table still painted out to x=1405 across #team-panel at 856-1271.
+   Hence .table-scroll-x below — the two are one change. */
+.auction-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 768px) {
-    .auction-grid { grid-template-columns: 1fr 1fr; }
+    .auction-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .area-team { grid-column: span 2; }
 }
 @media (min-width: 1024px) {
-    .auction-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .auction-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .area-team { grid-column: span 1; }
 }
 
@@ -26,6 +56,26 @@
     --border: #414868;
     --input-bg: #16161e;
 }
+
+/* A table too wide for its column scrolls ITSELF, rather than painting over the
+   panel next door. Required by the grid fix above: a zeroed track floor lets
+   the column shrink, but the table inside keeps its min-content, and with
+   `overflow: visible` it renders straight across its neighbour — under
+   #team-panel's opaque card, since non-positioned backgrounds paint in tree
+   order and the team panel comes later. That is strictly worse than the bug it
+   replaces: off-screen-but-scrollable becomes covered-with-no-scrollbar.
+
+   Deliberately NOT .scroll-container: these tables are short and want neither
+   its min(500px, 45vh) cap nor its sticky thead. One axis is enough —
+   `overflow-x: auto` forces `overflow-y` to `auto` as well (CSS Overflow §3.2),
+   which is also why .scroll-container below has never needed an `overflow-x` of
+   its own. It computes to `auto` already; a 2026-08-08 backlog entry proposed
+   adding one and it would have been a literal no-op. Verified in Chrome:
+   getComputedStyle('#bid-limits .scroll-container').overflowX === 'auto'
+   BEFORE any change. It had simply never had anything to scroll, because it
+   inherited a 991px track — it starts scrolling on its own once the tracks are
+   equal, with no CSS change at all. */
+.table-scroll-x { overflow-x: auto; }
 
 /* Scroll container for long tables */
 .scroll-container {
@@ -122,9 +172,50 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 /* The stat grid's first tile is the one that sits hard against the panel's
    left edge in every column count (3, 4 and 7 all start a row with it), and at
    the 768px breakpoint the tiles narrow to ~191px — too narrow for a centred
-   bubble to clear the edge even at 15rem. The later tiles stay centred; they
-   have room, and anchoring them would push the last one off the right. */
+   bubble to clear the edge even at 15rem. */
 .team-stats > .tooltip[data-tip]:first-child::before { left: 0; transform: translateX(0); }
+
+/* BOTH edge columns need anchoring, and WHICH children those are depends on the
+   column count — so every count the stat grid uses gets its own band. The grid
+   is `grid-cols-3 sm:grid-cols-4 md:grid-cols-7 lg:grid-cols-3`, i.e. 3 across
+   below 640, 4 from 640, 7 from 768, and 3 again from 1024.
+
+   This is load-bearing for LAYOUT, not only for legibility. Measured at 1280
+   with 3 tiles across: the tiles are 117px and fit fine, but .team-stats read
+   379 client against 446 scroll — and suppressing just these pseudo-elements
+   took it to 379/379. The bubbles were the ENTIRE remaining grid overflow after
+   the track fix; a tooltip is why #team-panel would not fit its column.
+
+   Two things the previous, first-child-only version got wrong:
+
+   - It said anchoring the later tiles "would push the last one off the right".
+     True of a LEFT anchor; the fix is to anchor the last column's RIGHT edge to
+     the tile's right edge, which is what keeps it in.
+   - It only ever anchored tile 1, so any tile that begins a LATER row was
+     centred against the panel's left edge and overflowed leftwards. Measured
+     before this rule: at 640 and 700px the Max Bid bubble (tile 5 of 6, first
+     in row 2 of a 4-across grid) spanned x=-22 to 248 — off the left of the
+     viewport entirely.
+
+   nth-child on the column, never :last-child: with 6 tiles in 3 columns the
+   last one sits at the LEFT edge of its row, so a blanket right-anchor on
+   :last-child pushes it off the opposite side. */
+@media (max-width: 639px) {
+    .team-stats > .tooltip[data-tip]:nth-child(3n+1)::before { left: 0; right: auto; transform: translateX(0); }
+    .team-stats > .tooltip[data-tip]:nth-child(3n)::before { left: auto; right: 0; transform: translateX(0); }
+}
+@media (min-width: 640px) and (max-width: 767px) {
+    .team-stats > .tooltip[data-tip]:nth-child(4n+1)::before { left: 0; right: auto; transform: translateX(0); }
+    .team-stats > .tooltip[data-tip]:nth-child(4n)::before { left: auto; right: 0; transform: translateX(0); }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+    .team-stats > .tooltip[data-tip]:nth-child(7n+1)::before { left: 0; right: auto; transform: translateX(0); }
+    .team-stats > .tooltip[data-tip]:nth-child(7n)::before { left: auto; right: 0; transform: translateX(0); }
+}
+@media (min-width: 1024px) {
+    .team-stats > .tooltip[data-tip]:nth-child(3n+1)::before { left: 0; right: auto; transform: translateX(0); }
+    .team-stats > .tooltip[data-tip]:nth-child(3n)::before { left: auto; right: 0; transform: translateX(0); }
+}
 
 /* Collapsible panel chevron */
 .collapse-chevron {
@@ -158,7 +249,25 @@ summary::-webkit-details-marker { display: none; }
    400-unit viewBox, so labels scale up with the panel. 8 keeps them under
    the 12px legend on a wide panel. */
 .price-chart text { font-size: 8px; }
-.chart-meta { font-size: 0.8125rem; color: var(--text-muted); margin: 4px 0; }
+.chart-meta { font-size: 0.8125rem; color: var(--text-muted); margin: 4px 0; position: relative; }
+/* The Sigma bubble is anchored to the META LINE, not to its trigger, because no
+   fixed anchor on the trigger can work: this line wraps, so the trigger sits
+   239px into the panel at 375 and 1280 but only 27px in at 1024, where the
+   players column is at its narrowest (329px). Measured: a centred 270px bubble
+   spans -68..202 there — off the left of the grid's content box entirely, so
+   unreachable rather than merely ugly. Left-anchoring fixes 1024 and breaks the
+   other two (239..509 in a 357px panel); right-anchoring does the reverse.
+   Anchoring to `.chart-meta` with max-width:100% makes the bubble exactly the
+   line's width at every breakpoint, so it cannot overflow at any wrap point.
+   The trigger goes `position: static` to hand the containing block to
+   .chart-meta; that moves the arrow too, so it is dropped — a bubble spanning
+   the whole line has no single thing to point at, and .bid-details already sets
+   the precedent that an anchored bubble keeps its text and loses its aim. */
+.chart-meta > .tooltip[data-tip] { position: static; }
+.chart-meta > .tooltip[data-tip]::before {
+    left: 0; right: auto; transform: translateX(0); max-width: 100%;
+}
+.chart-meta > .tooltip[data-tip]::after { display: none; }
 .chart-legend { display: flex; gap: 12px; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
 .chart-leg { display: flex; gap: 4px; align-items: center; }
 

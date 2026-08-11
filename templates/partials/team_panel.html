@@ -11,7 +11,13 @@
 
     {# Custom grid (not DaisyUI .stats) — DaisyUI's .stat has min-width: 16rem
        which forces horizontal scroll with 6-7 tiles. Grid wraps cleanly. #}
-    <div class="team-stats grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-1 bg-base-300 rounded-md p-2 mb-2">
+    {# 7 across only where this panel spans the full width (768-1023px). At
+       >=1024 it is one third of the grid (~415px at 1280, ~329px at 1024) and 7
+       tiles do not fit: measured 379 client against 429 content at 1280 and 293
+       against 362 at 1024 — the labels painted outside their tiles. It
+       overflowed by 13px even at the old 585px width, so this was already
+       broken before the grid fix, just less. #}
+    <div class="team-stats grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 lg:grid-cols-3 gap-1 bg-base-300 rounded-md p-2 mb-2">
         <div class="tooltip tooltip-bottom" data-tip="Total salary committed: keeper + acquired actives + minors that count on cap, plus buyout penalties">
             <div class="text-xs opacity-60">Cap Used</div>
             <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.total_salary) }}M</div>
@@ -73,6 +79,11 @@
     {% set _ = combined.append({'name': p.name, 'position': p.position, 'group': p.group, 'nhl_team': p.nhl_team, 'salary': market_prices.get(p.name, 0.5) if market_prices else 0.5, 'projected_points': p.projected_points, 'is_bench': false, 'is_target': true, 'is_acquired': false, 'pos_rank': pos_order.get(p.position, 9)}) %}
     {% endfor %}
     <h3 class="font-semibold text-sm mt-2 mb-1">Roster</h3>
+    {# min-content 549px against a ~415px column, mostly the Actions cell: a
+       nowrap flex row of Bench + the salary form + ↓ Minors. Scrolls itself
+       rather than painting over whatever sits to its right — see
+       .table-scroll-x in style.css. #}
+    <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
         <thead>
             <tr>
@@ -141,9 +152,11 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
 
     {% if viewed_team.minor_players %}
     <h3 class="font-semibold text-sm mt-3 mb-1 opacity-70">Minors ({{ viewed_team.minor_players|length }})</h3>
+    <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
         {# The buyout dot column matches the active-roster table above: group
            2/3 minors are legal buyouts whose salary is fully on cap, so the
@@ -173,6 +186,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
     {% endif %}
 
     <div class="divider my-1"></div>

@@ -272,6 +272,99 @@ class TestLayoutAndToasts:
         assert all(a is not None for a in areas), "a grid area did not render"
         return {round(a["x"]) for a in areas}
 
+    # Every width the 3-column layout can be run at: 1024 is the tightest
+    # (329px tracks), 1280 is the draft laptop, 1600 the top of that range.
+    CONTAINMENT_WIDTHS = (1024, 1280, 1600)
+
+    CONTAINMENT_PROBE = """() => {
+      const g = document.querySelector('.auction-grid');
+      const gr = g.getBoundingClientRect();
+      const clientLeft = gr.left + g.clientLeft;
+      const spill = [];
+      for (const c of g.querySelectorAll('section.card'))
+        if (c.scrollWidth > c.clientWidth + 1 &&
+            getComputedStyle(c).overflowX === 'visible')
+          spill.push((c.id ? '#' + c.id : c.tagName) +
+                     ' content ' + c.scrollWidth + ' in ' + c.clientWidth);
+      const areas = {};
+      for (const cls of ['area-auction', 'area-players', 'area-team']) {
+        const r = document.querySelector('.' + cls).getBoundingClientRect();
+        areas[cls] = {left: Math.round(r.left), right: Math.round(r.right)};
+      }
+      return {
+        gridScrollW: g.scrollWidth, gridClientW: g.clientWidth,
+        gridClientLeft: Math.round(clientLeft),
+        gridClientRight: Math.round(clientLeft + g.clientWidth),
+        tracks: getComputedStyle(g).gridTemplateColumns
+                  .split(' ').map(t => parseFloat(t)),
+        pageScrollW: document.scrollingElement.scrollWidth,
+        innerWidth: window.innerWidth,
+        areas, spill,
+      };
+    }"""
+
+    def test_the_grid_never_overflows_its_own_width(self, browser, live_server):
+        """#team-panel was entirely off-screen on the draft laptop until 2026-08-11.
+
+        `.auction-grid` used bare `1fr` tracks, i.e. `minmax(AUTO, 1fr)`, so per
+        css-grid §6.6 each item took a content-based automatic minimum and the
+        widest panel set its own column's floor. Measured at 1280: tracks
+        292/991/585, grid content 1904 against a 1280 client box, `.area-team`
+        starting at x=1310. Cap Used, Remaining, Max Bid, the roster and the
+        buyout dots were all off-screen while bidding.
+
+        It was invisible because `all_panels.html`'s inline `overflow-y: auto`
+        forces `overflow-x` to `auto` too, so the overflow went behind the GRID's
+        scrollbar and no page scrollbar ever appeared — and because
+        `test_the_layout_responds_to_width` above only counts DISTINCT column x
+        values, which `{9, 311, 1310}` satisfies perfectly. Three columns is not
+        the same claim as three columns you can see.
+        """
+        for width in self.CONTAINMENT_WIDTHS:
+            context = browser.new_context(viewport={"width": width, "height": 900})
+            pg = context.new_page()
+            pg.request.post(f"{live_server}/reset")
+            _open(pg, live_server)
+            d = pg.evaluate(self.CONTAINMENT_PROBE)
+
+            assert d["gridScrollW"] <= d["gridClientW"] + 1, (
+                f"{width}px: the grid overflows itself by "
+                f"{d['gridScrollW'] - d['gridClientW']}px "
+                f"({d['gridScrollW']} content in {d['gridClientW']}) — panels "
+                f"that cannot scroll to their own content: {d['spill'] or 'none'}"
+            )
+            for cls, r in d["areas"].items():
+                assert r["left"] >= d["gridClientLeft"] - 1, (
+                    f"{width}px: .{cls} starts at x={r['left']}, left of the "
+                    f"grid's content box at {d['gridClientLeft']}"
+                )
+                assert r["right"] <= d["gridClientRight"] + 1, (
+                    f"{width}px: .{cls} ends at x={r['right']}, past the grid's "
+                    f"content box at {d['gridClientRight']} — it is off-screen"
+                )
+            # Not "let the body scroll instead", which is what deleting the
+            # wrapper's inline overflow-y would silently turn this into.
+            assert d["pageScrollW"] <= d["innerWidth"] + 1, (
+                f"{width}px: the PAGE now scrolls horizontally "
+                f"({d['pageScrollW']} > {d['innerWidth']})"
+            )
+            # One assertion, both failure directions: a hogged track (292/1885 =
+            # 0.155 before the fix) and a future collapse to nothing. 0.25 not
+            # 0.33 so a deliberate `1fr 1.4fr 1fr` later is not a false failure.
+            tracks = d["tracks"]
+            assert len(tracks) == 3, f"{width}px: expected 3 tracks, got {tracks}"
+            assert min(tracks) >= 0.25 * sum(tracks), (
+                f"{width}px: one column is hogging the row — tracks {tracks}"
+            )
+            # The invariant that survives the next wide column someone adds to
+            # either table: a panel whose content overflows must be able to
+            # scroll to it. Fails if a .table-scroll-x wrapper is forgotten.
+            assert not d["spill"], (
+                f"{width}px: content overflows a panel that cannot scroll, so it "
+                f"paints over its neighbour: {d['spill']}"
+            )
+            context.close()
+
     def test_the_layout_responds_to_width(self, page, live_server):
         """The breakpoints, shipped and never once looked at.
 
@@ -279,6 +372,11 @@ class TestLayoutAndToasts:
         even with every `@media` rule deleted — verified by mutation: removing
         both queries destroys the 3-column desktop layout the draft is actually
         run in, and a stacked-only assertion notices nothing.
+
+        What this CANNOT see is containment: it compares only the count of
+        distinct column x values, so it passed for months while `.area-team` sat
+        at x=1310 with the viewport 1280 wide. That is
+        `test_the_grid_never_overflows_its_own_width` above.
         """
         page.set_viewport_size({"width": 420, "height": 900})
         _open(page, live_server)
@@ -728,19 +826,34 @@ class TestTooltipsStayInsideTheirPanel:
     position only exists once Chrome has laid the page out and resolved the
     pseudo-element's box.
 
-    **Measured in grid-content coordinates, not viewport coordinates.** The
-    panels live inside `.auction-grid`, which is `overflow-y: auto` — and per
-    CSS a non-visible overflow-y forces `overflow-x` to compute as `auto` too,
-    so the grid scrolls horizontally and a panel can sit legitimately outside
-    the viewport (measured 2026-08-08: at 1280px the grid's content is 2030px
-    wide and `.area-team` starts at x=1310). Judging bubbles against
-    `innerWidth` therefore flagged six correctly-placed tooltips and would have
-    sent the fix chasing a layout problem instead — that overflow is real, but
-    it is its own finding in BACKLOG.md, not this one.
+    **Measured against each bubble's own nearest SCROLLING ANCESTOR**, which is
+    what "can the operator read this" actually depends on. Until 2026-08-11 this
+    measured everything against `.auction-grid` in grid-content coordinates,
+    bounded by `g.scrollWidth` — written that way because the grid overflowed
+    horizontally by 624px, so a panel could sit legitimately outside the
+    viewport. That overflow was a real bug (the team panel was off-screen on the
+    draft laptop) and fixing it made this test's old bound both too tight and
+    wrong in kind:
+
+    - Too tight: `scrollWidth` collapsed to `clientWidth`, removing ~665px of
+      slack at 375px. The suite had been resting on the layout bug — a 15rem
+      bubble in a ~342px panel passed only because the League State table
+      inflated the bound.
+    - Wrong in kind: the fix gives the League State and roster tables their own
+      `.table-scroll-x` scrollers, so a `th` bubble 700px into a 415px scroller
+      is perfectly reachable — a FALSE offender under any grid-anchored bound.
+
+    So there are now several scrollers, and each bubble is judged inside the one
+    it lives in. The extra bound `w <= clientWidth` is the honest version of
+    what the old one approximated: a bubble wider than the box containing it can
+    never be read whole, wherever it is anchored. Grid containment itself is no
+    longer this test's job — `test_the_grid_never_overflows_its_own_width` owns
+    it.
 
     Pseudo-elements have no `getBoundingClientRect`, but their box is exactly
-    computable from the resolved `left`, the transform matrix and the trigger's
-    own rect, which is what makes this an assertion rather than a screenshot.
+    computable from the resolved `left`/`right`, the transform matrix and the
+    trigger's own rect, which is what makes this an assertion rather than a
+    screenshot.
     """
 
     # Every breakpoint in style.css (1-col, 2-col, 3-col) plus the edges either
@@ -750,24 +863,55 @@ class TestTooltipsStayInsideTheirPanel:
     WIDTHS = (375, 640, 700, 800, 1024, 1280, 1920)
 
     PROBE = """() => {
-      const g = document.querySelector('.auction-grid');
-      const gr = g.getBoundingClientRect();
-      const ox = -gr.left + g.scrollLeft;      // viewport px -> grid content px
+      // The box a bubble must stay inside is the nearest ancestor that can
+      // scroll, not the grid: since 2026-08-11 the league table and the roster
+      // each have their own .table-scroll-x, and a bubble deep inside one is
+      // reachable by scrolling it.
+      const scrollerOf = el => {
+        for (let p = el.parentElement; p; p = p.parentElement)
+          if (getComputedStyle(p).overflowX !== 'visible') return p;
+        return document.scrollingElement;
+      };
+      const name = el => el.id ? '#' + el.id
+        : (el.className || '').toString().trim().split(/\\s+/)[0] || el.tagName.toLowerCase();
+      // An absolutely positioned box is offset from the PADDING BOX of its
+      // nearest positioned ancestor. Usually that is the trigger itself
+      // (DaisyUI makes .tooltip position:relative), but .chart-meta hands the
+      // containing block to the line instead, so this must be derived rather
+      // than assumed — a probe that assumed the trigger reported a
+      // correctly-placed bubble as 312px wide at x=244.
+      const cbOf = el => {
+        for (let p = el; p; p = p.parentElement)
+          if (getComputedStyle(p).position !== 'static') return p;
+        return document.documentElement;
+      };
       const out = [];
       for (const el of document.querySelectorAll('.tooltip[data-tip]')) {
         el.classList.add('tooltip-open');      // vendor CSS keeps it opacity:0
         const cs = getComputedStyle(el, '::before');
-        const w = parseFloat(cs.width), l = parseFloat(cs.left);
+        const w = parseFloat(cs.width);
+        const cb = cbOf(el);
+        const cbr = cb.getBoundingClientRect();
+        const r = {left: cbr.left + cb.clientLeft, width: cb.clientWidth};
+        // Anchored bubbles use `right: 0; left: auto` (the .team-stats rules in
+        // style.css), so `left` resolves to `auto` for them and has to be
+        // derived from `right` against the containing block.
+        const cl = parseFloat(cs.left), cr = parseFloat(cs.right);
+        const rel = !isNaN(cl) ? cl : (!isNaN(cr) ? r.width - cr - w : NaN);
         const m = new DOMMatrixReadOnly(cs.transform === 'none' ? '' : cs.transform);
-        const r = el.getBoundingClientRect();
         el.classList.remove('tooltip-open');
-        const left = r.left + l + m.m41 + ox;
-        out.push({widthAuto: isNaN(w) || isNaN(l),
+        const s = scrollerOf(el);
+        const sr = s.getBoundingClientRect();
+        const ox = -(sr.left + s.clientLeft) + s.scrollLeft;
+        const left = r.left + rel + m.m41 + ox;
+        out.push({widthAuto: isNaN(w) || isNaN(rel),
                   text: el.textContent.trim().replace(/\\s+/g, ' ').slice(0, 30),
                   tip: el.getAttribute('data-tip') || '',
-                  left: Math.round(left), right: Math.round(left + w)});
+                  left: Math.round(left), right: Math.round(left + w),
+                  width: Math.round(w),
+                  box: name(s), boxContent: s.scrollWidth, boxClient: s.clientWidth});
       }
-      return {rows: out, contentW: g.scrollWidth};
+      return {rows: out};
     }"""
 
     def test_no_tooltip_renders_outside_the_scrollable_content(
@@ -791,16 +935,26 @@ class TestTooltipsStayInsideTheirPanel:
             counted = max(counted, len(data["rows"]))
             seen.update(r["tip"] for r in data["rows"])
             for row in data["rows"]:
-                # `auto` means the bubble was never laid out, which would make
-                # every comparison below vacuously true.
+                # `auto` on both sides means the bubble was never laid out,
+                # which would make every comparison below vacuously true.
                 assert not row["widthAuto"], (
                     f"{width}px: could not resolve a bubble box for "
                     f"{row['text']!r} — this measurement is not viable"
                 )
-                if row["left"] < 0 or row["right"] > data["contentW"]:
+                if row["left"] < 0 or row["right"] > row["boxContent"]:
                     offenders.append(
                         f"{width}px {row['text']!r} spans "
-                        f"[{row['left']},{row['right']}] of 0..{data['contentW']}"
+                        f"[{row['left']},{row['right']}] of "
+                        f"0..{row['boxContent']} in {row['box']}"
+                    )
+                # A bubble wider than the box it lives in cannot be read whole
+                # at any anchoring, so no amount of `left`/`right` fixes it —
+                # only a narrower max-width will.
+                elif row["width"] > row["boxClient"]:
+                    offenders.append(
+                        f"{width}px {row['text']!r} is {row['width']}px wide "
+                        f"inside {row['box']}, which is only "
+                        f"{row['boxClient']}px — unreadable at any anchor"
                     )
             context.close()
 

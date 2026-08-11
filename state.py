@@ -404,7 +404,19 @@ class TransactionRecord:
     model_price: float
     market_price: float
     timestamp: str
-    transaction_type: str  # "draft", "trade_give", "trade_receive", "buyout"
+    # The real vocabulary, verified against every _log_transaction call site:
+    # "draft" | "trade_out" | "trade_in" | "trade" | "buyout". This said
+    # "trade_give"/"trade_receive" until 2026-08-11 — two values the code has
+    # never emitted — and a first draft of /undo's view mirror was reasoned
+    # against it. Those are the LOCAL VARIABLE names in /trade-execute
+    # (main.py, `trade_give = last_trade_eval.give`), which is presumably where
+    # the wrong pair came from: the writer read the code that builds the trade
+    # rather than the strings it logs. Anything branching on this must
+    # ALLOWLIST, because
+    # /trade-between (the "trade" writer) puts f"{source}→{dest}" in team_code,
+    # so that field is not always a team code. transaction_log.html carries the
+    # same list; the two move together.
+    transaction_type: str
 
 
 @dataclass

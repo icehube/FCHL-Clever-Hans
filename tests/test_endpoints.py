@@ -587,11 +587,16 @@ class TestViewedTeamSurvivesEdits:
         assert toast_of(r).get("type") in ("success", "warning"), toast_of(r)
         assert self._panel_team(r.text) == "SRL"
 
-    def test_assign_returns_to_my_team(self, client):
-        """Owner decision 2026-08-07: a draft action resets the view.
+    def test_assign_swaps_to_the_buyer(self, client):
+        """Owner decision 2026-08-08, amending 2026-08-07.
 
-        Not a shortcoming of the fix — reading SRL's Cap Used as your own right
-        after a pick lands is the failure mode a sticky view invites.
+        The original rule reset to BOT on every pick, "because reading an
+        opponent's Cap Used as your own right after a pick lands is worse than
+        re-opening their roster". That only ever bit on YOUR OWN pick — the
+        moment you glance at the header — and that case still resets, which
+        TestTheViewSticks::test_assign_returns_the_view_to_my_team covers. Here
+        the buyer is MAC: nothing of BOT's moved, and the roster that just went
+        stale is theirs.
         """
         import main
         client.post("/toggle-bench", data={
@@ -603,15 +608,24 @@ class TestViewedTeamSurvivesEdits:
             "player": name, "team": "MAC", "salary": "1.0",
         })
         assert r.status_code == 200
-        assert self._panel_team(r.text) == "BOT"
+        assert self._panel_team(r.text) == "MAC"
 
-    def test_undo_returns_to_my_team(self, client):
+    def test_undoing_an_opponents_roster_edit_keeps_them_on_screen(self, client):
+        """The 2026-08-07 finding: /undo used to reset the view unconditionally.
+
+        Opening SRL first is what makes this able to fail. The version before
+        2026-08-11 asserted "BOT" without it — and with the view never moved off
+        BOT, "the endpoint left it alone" and "the endpoint reset it to BOT" are
+        the same answer, so it passed against both the bug and the fix. It was
+        testing the autouse `default_viewed_team` fixture.
+        """
+        client.get("/team-view/SRL")
         client.post("/toggle-bench", data={
             "team_code": "SRL", "player_name": self._victim("SRL").name,
         })
         r = client.post("/undo")
         assert r.status_code == 200
-        assert self._panel_team(r.text) == "BOT"
+        assert self._panel_team(r.text) == "SRL"
 
     def test_an_unknown_team_code_falls_back_to_my_team(self, client):
         """A bad code renders BOT's panel rather than 500ing.
@@ -1472,10 +1486,12 @@ class TestTheViewSticks:
         assert self._panel_team(r.text) == "SRL"
 
     def test_assign_returns_the_view_to_my_team(self, client, viewing_srl):
-        """Owner decision 2026-08-07, now pinned rather than assumed.
+        """Your OWN pick still resets to BOT — the half 2026-08-08 preserved.
 
         Reading an opponent's Cap Used as your own right after a pick lands is
-        worse than having to re-open their roster.
+        worse than having to re-open their roster. That is the whole of the
+        2026-08-07 reasoning, and it is about the pick being YOURS; the
+        opponent-pick half is the test below.
         """
         import main
 
@@ -1485,6 +1501,149 @@ class TestTheViewSticks:
         })
         assert self._panel_team(r.text) == "BOT"
         client.post("/undo")
+
+    def test_an_opponents_pick_swaps_the_panel_to_them(self, client, viewing_srl):
+        """Owner decision 2026-08-08: the view follows the buyer.
+
+        Viewing SRL and assigning to MAC has to land on MAC, not on either the
+        team you were reading or your own — so this distinguishes the new rule
+        from both the old one and a do-nothing.
+        """
+        import main
+
+        player = next(iter(main.auction_state.available_players))
+        r = client.post("/assign", data={
+            "player": player, "team": "MAC", "salary": "1.0",
+        })
+        assert self._panel_team(r.text) == "MAC"
+
+    def test_undoing_an_opponents_pick_shows_them(self, client, viewing_srl):
+        """/undo mirrors the view policy of the action it reverted.
+
+        The interposed /team-view/GVR is what makes this able to fail: the
+        assign already left the view on MAC, so without moving it away first,
+        "pointed at the reverted pick's buyer" and "left alone" agree.
+        """
+        import main
+
+        player = next(iter(main.auction_state.available_players))
+        assign(client, player, "MAC", 1.0)
+        client.get("/team-view/GVR")
+        r = client.post("/undo")
+        assert self._panel_team(r.text) == "MAC"
+
+    def test_undoing_a_trade_between_two_teams_leaves_the_view_alone(
+        self, client, viewing_srl
+    ):
+        """A trade moves two rosters, so there is no single team to point at.
+
+        What this DOES catch: an unconditional reset (the pre-2026-08-11 bug),
+        and a denylist that let "trade" through while `_view_team` had no guard —
+        /trade-between logs `team_code` as f"{source}→{dest}", so the view would
+        become "SRL→MAC" and `_context`'s silent fallback would render BOT.
+
+        What it does NOT catch, deliberately recorded because the first draft of
+        this docstring claimed otherwise: widening the allowlist to include
+        "trade" on its own. `_view_team("SRL→MAC")` is rejected by the guard, so
+        the view stays GVR and this still passes. The allowlist and the guard are
+        belt-and-braces for each other here; the test below is the one that pins
+        the allowlist alone, because /trade-execute logs REAL team codes.
+        """
+        import main
+
+        victim = main.auction_state.teams["SRL"].roster_players[0].name
+        r = client.post("/trade-between", data={
+            "team_a": "SRL", "team_b": "MAC",
+            "players_from_a": victim, "players_from_b": "",
+        })
+        assert toast_of(r).get("type") in ("success", "warning"), toast_of(r)
+        client.get("/team-view/GVR")
+        r = client.post("/undo")
+        assert "Undid trade" in toast_of(r)["message"], toast_of(r)
+        assert self._panel_team(r.text) == "GVR"
+
+    def test_undoing_a_trade_execute_leaves_the_view_alone(self, client, viewing_srl):
+        """The case that pins the ALLOWLIST rather than the guard.
+
+        /trade-execute logs `trade_out`/`trade_in` with real team codes, so
+        allowlisting either one moves the view to a live team and this goes red —
+        which is exactly what the /trade-between case above cannot detect. With a
+        `source_team` the last record written is a `trade_out` for that opponent,
+        so the wrong behaviour would land on a THIRD team, not on BOT.
+        """
+        import main
+
+        mine = main.auction_state.teams["BOT"].roster_players[0]
+        source = next(c for c, t in main.auction_state.teams.items()
+                      if c not in ("BOT", "GVR") and t.roster_players)
+        incoming = main.auction_state.teams[source].roster_players[0]
+
+        client.post("/trade-evaluate", data={
+            "give_player": [mine.name],
+            "source_team": source,
+            "receive_player": [json.dumps({
+                "name": incoming.name,
+                "position": incoming.position,
+                "salary": incoming.salary,
+                "projected_points": incoming.projected_points,
+            })],
+        })
+        assert main.last_trade_eval is not None, "the trade form proposed nothing"
+        r = client.post("/trade-execute",
+                        data={"trade_id": main.last_trade_eval.trade_id})
+        assert toast_of(r).get("type") != "error", toast_of(r)
+
+        client.get("/team-view/GVR")
+        r = client.post("/undo")
+        assert "Undid trade_" in toast_of(r)["message"], toast_of(r)
+        assert self._panel_team(r.text) == "GVR"
+
+    def test_undoing_a_buyout_shows_my_team(self, client, viewing_srl):
+        """A buyout can only ever touch BOT, so its reversal belongs on BOT.
+
+        Worth its own case rather than folding into the draft one: the Penalties
+        tile is conditional on `viewed_team.penalties > 0`, so undoing a buyout
+        makes a tile appear or vanish on YOUR panel. Watching nothing change on
+        SRL while ~half a salary moves on your own cap is the mismatch between
+        an action and its undo that the 2026-08-07 finding was about.
+        """
+        victim = a_buyout_candidate().name
+        r = client.post("/buyout", data={"player": victim})
+        assert toast_of(r).get("type") == "success", toast_of(r)
+        client.get("/team-view/SRL")
+        r = client.post("/undo")
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_nothing_to_undo_leaves_the_view_alone(self, client, viewing_srl):
+        """No action reverted means no view policy to mirror.
+
+        Relies on the function-scoped `client` from conftest.py leaving the
+        snapshot chain empty — with a chain carried over, /undo would pop
+        somebody else's snapshot and this would be a test of that instead.
+        """
+        r = client.post("/undo")
+        assert toast_of(r)["message"] == "Nothing to undo", toast_of(r)
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_the_view_is_always_a_live_team_code(self, client, viewing_srl):
+        """`_view_team` validates, so the global can never hold a dead code.
+
+        Called directly, and the docstring says so rather than dressing this as
+        an endpoint test: no HTTP path can reach it with a bad code today
+        (/assign validates the buyer at the top, and the only other callers pass
+        MY_TEAM or an allowlisted log field). The guard exists because
+        `_context`'s `teams.get(_viewed_team, team)` fallback is SILENT — a dead
+        code would render BOT's roster and BOT's Scan gate from the same
+        fallback object, looking entirely normal while every later /team-view
+        no-op'd on top of the garbage.
+        """
+        import main
+
+        assert main._viewed_team == "SRL"
+        main._view_team("FAKE")
+        assert main._viewed_team == "SRL", "a dead code must change nothing"
+        main._view_team("SRL→MAC")  # /trade-between's team_code shape
+        assert main._viewed_team == "SRL"
 
     def test_a_rejected_assign_does_not_move_the_view(self, client, viewing_srl):
         """A pick that never happened is not a draft action."""
@@ -1587,6 +1746,31 @@ class TestBuyoutScanIsOfferedOnlyWhereItWorks:
         make the fragment swap itself over itself on every pick.
         """
         assert "hx-swap-oob" not in self._scan_fragment(client.get("/").text)
+
+    def test_an_opponents_pick_takes_the_scan_button_with_it(self, client):
+        """The one new claim the 2026-08-11 view change makes about /assign.
+
+        An opponent's pick now swaps the team panel to them, and `/assign`
+        answers with the whole of all_panels.html — so the panel and the Scan
+        gate re-render from ONE context in ONE response and cannot disagree.
+        That is what makes the OOB dance `/team-view` needs unnecessary here.
+        Asserted on the assign response itself, not on a following GET /, because
+        a response that was briefly inconsistent is exactly the bug.
+        """
+        import main
+
+        player = next(iter(main.auction_state.available_players))
+        r = assign(client, player, "SRL", 1.0)
+
+        panel = section_of(r.text, "team-panel")
+        assert "(SRL)" in panel, "the pick should have swapped the panel to SRL"
+        assert 'id="bo-' not in panel, "an opponent's dots can never be filled"
+
+        scan = self._scan_fragment(r.text)
+        assert "/buyout-indicators" not in scan, (
+            "the Scan button outlived the swap — its 11 OOB swaps would all miss"
+        )
+        assert "hx-swap-oob" not in scan, "a full #app swap has nothing to OOB into"
 
 
 class TestARecalledKeeperIsNotColouredAsAPurchase:

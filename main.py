@@ -626,16 +626,30 @@ def _render(request: Request, template: str, extra: dict | None = None) -> HTMLR
     return templates.TemplateResponse(request, template, ctx)
 
 
-def _view_my_team() -> None:
-    """Return the team panel to BOT.
+def _view_team(code: str) -> None:
+    """Point the team panel at `code`. An unknown code changes nothing.
 
-    Owner decision 2026-08-07: draft actions reset the view, because reading an
-    opponent's Cap Used as your own right after a pick lands is worse than
-    having to re-open their roster. Called by /assign, /undo and /buyout, and by
-    the two endpoints that replace the world outright (/reset, /load-scenario).
+    Owner decision 2026-08-08, amending 2026-08-07: the view follows whichever
+    roster the action changed. /assign passes the BUYER — on your own pick that
+    is still BOT, which is the only case the original reasoning ("reading an
+    opponent's Cap Used as your own right after a pick lands") was ever about.
+    On an opponent's pick nothing of yours moved and the panel that just went
+    stale is theirs. /buyout passes MY_TEAM because execute_buyout can only
+    touch BOT; /reset and /load-scenario because they replace the world; /undo
+    passes the team named by the record it reverted.
+
+    It VALIDATES rather than leaning on _context's `teams.get(_viewed_team,
+    team)` fallback, so `_viewed_team` is always a live team code. That fallback
+    is silent, and it renders BOT's roster *and* BOT's Scan gate from the same
+    object — so a dead code would look completely normal on screen while every
+    later /team-view no-op'd on top of the garbage. It also gives both writers
+    of the global one contract, the same "an unknown code changes nothing" rule
+    GET /team-view/FAKE follows. The transaction log is a real source of
+    non-team-code strings: /trade-between logs team_code as f"{source}→{dest}".
     """
     global _viewed_team
-    _viewed_team = MY_TEAM
+    if code in auction_state.teams:
+        _viewed_team = code
 
 
 def _context(request: Request) -> dict:
@@ -834,10 +848,13 @@ async def assign_player(
         auction_state.advance_nomination()
     _recompute()
     _save_state()
-    # Only on the success path. A rejected assign is not a draft action — the
-    # error branches above return without touching the view, so a typo'd team
-    # code no longer costs you the roster you were auditing.
-    _view_my_team()
+    # The view follows the sale. On your own pick that is BOT, unchanged since
+    # 2026-08-07; on an opponent's it is theirs, because nothing of yours moved
+    # and the roster that just went stale is the one worth looking at (owner
+    # decision 2026-08-08). Success path only — a rejected assign is not a draft
+    # action, and the error branches above return without touching the view, so
+    # a typo'd team code does not cost you the roster you were auditing.
+    _view_team(team)
     # Should essentially never fire: the league's commissioner software refuses
     # bids a team cannot afford. Kept because it costs one pass over a roster
     # next to a MILP solve, and leaving the busiest endpoint the silent one
@@ -1121,7 +1138,7 @@ async def buyout(request: Request, player: str = Form(...)):
 
     _recompute()
     _save_state()
-    _view_my_team()
+    _view_team(MY_TEAM)  # execute_buyout is BOT-only, so your cap is what moved
     return _toast(
         _render(request, "partials/all_panels.html"),
         f"Bought out {player}", "success",
@@ -1170,14 +1187,34 @@ async def undo(request: Request):
             f"Undid {t.transaction_type}: {t.player_name} → "
             f"{t.team_code} (${t.salary:.1f}M)"
         )
+        # Mirror the view policy of the action reverted, off the record the
+        # message above already read — no state-layer change, which is what
+        # kept this deferred. ALLOWLIST, never a denylist: the real types are
+        # draft / trade_out / trade_in / trade / buyout, and /trade-between logs
+        # team_code as "SRL→MAC", so a denylist that missed one string would
+        # point the view at something that is not a team code at all. A
+        # buyout's team_code IS MY_TEAM, so one branch covers both.
+        if t.transaction_type in ("draft", "buyout"):
+            _view_team(t.team_code)
     elif len(auction_state.change_log) < len(pre_chg):
         message = f"Undid: {pre_chg[-1].description}"
+        # View untouched on purpose, matching the roster-edit endpoints, which
+        # do not touch it either. Every one of those controls renders inside
+        # team_panel.html, so you cannot click Bench for a roster that is not on
+        # screen — staying put IS showing the team whose edit just came back.
+        # Undoing an opponent's roster edit no longer throws you home.
+        #
+        # Not mirrored off pre_chg[-1].team_code even though ChangeRecord has
+        # one: "team-done" is a ChangeRecord kind, so mirroring would swap the
+        # panel to an uninvolved third team — exactly what the 2026-08-07 fix
+        # removed from the forward path. The gap that accepts: edit an opponent,
+        # navigate away, then Ctrl+Z, and the view stays where you last put it.
+        # Your /team-view click is newer information than the log.
 
     global model_prices
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    _view_my_team()
     return _toast(
         _render(request, "partials/all_panels.html"), message, "info",
     )
@@ -1204,7 +1241,7 @@ async def reset(request: Request):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    _view_my_team()  # new world; a view into the old one means nothing
+    _view_team(MY_TEAM)  # new world; a view into the old one means nothing
     return _render(request, "partials/all_panels.html")
 
 
@@ -1230,7 +1267,7 @@ async def load_scenario(request: Request, name: str = Form(...)):
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
-    _view_my_team()  # ditto — the unknown-scenario branch above leaves it alone
+    _view_team(MY_TEAM)  # ditto — the unknown-scenario branch leaves it alone
     return _toast(
         _render(request, "partials/all_panels.html"),
         f"Loaded scenario: {name}", "success",

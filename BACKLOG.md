@@ -16,15 +16,24 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
-Last triaged 2026-08-07. Three entries were swept and closed that day (see
-[CHANGELOG.md](CHANGELOG.md)) and a live testing pass added the
-`[owner-testing]` entries below — each of those was reproduced against the
-running app before being written down, so they record a mechanism rather than a
-symptom. No entries are waiting on a manual check.
+Last triaged 2026-08-11, when the `main.py (undo)` view finding closed together
+with the opponent-pick view swap from the testing-pass section below (see
+[CHANGELOG.md](CHANGELOG.md)). Before that, 2026-08-07 swept three entries and a
+live testing pass added the `[owner-testing]` entries — each of those was
+reproduced against the running app before being written down, so they record a
+mechanism rather than a symptom. No entries are waiting on a manual check.
+
+**Two of the entries below carry a deferral reason that has already been
+disproved once.** The 2026-08-11 pair were both deferred on a diagnosis that
+turned out to be wrong — one claimed a `state.py` change was needed when the
+information was already local to the endpoint, the other claimed `/assign`
+needed an out-of-band response when it has always returned `all_panels.html` by
+design. Re-check the mechanism before trusting "deferred because X" here; the
+prose is a hypothesis, not a measurement, unless it says what was measured.
 
 ### engine/market
 
-- [2026-08-08] [owner-testing] main.py:641 (_context) — **the League State "Proj" column is still computed two ways**, now labelled rather than reconciled. BOT's is `milp_solution.total_points`, a real MILP optimum under BOT's actual budget; every opponent's is `current + starter_slots × mean(points of the top slots×3 affordable players)`, a heuristic that deliberately costs no solve — 11 extra MILPs per action is what it avoids. The 2026-08-08 tooltip says so, which was the operator's question, and measurement supported labelling over changing it: BOT reads 1257 by MILP against 1262 by the opponents' rule on a fresh state, **5 points apart with the same rank either way**. Left open because the gap is not stable — the heuristic filters on per-player affordability (`market_price <= physical_max_bid`) and never checks that the team can afford the *whole set*, so a team with 10 spots and $10.5M counts every player under $6.0M as affordable and projects ten of them. Re-measure late in a real draft; if opponents read visibly optimistic there, the fix is a cheap greedy budget-aware fill for both sides
+- [2026-08-08] [owner-testing] main.py:655 (_context) — **the League State "Proj" column is still computed two ways**, now labelled rather than reconciled. BOT's is `milp_solution.total_points`, a real MILP optimum under BOT's actual budget; every opponent's is `current + starter_slots × mean(points of the top slots×3 affordable players)`, a heuristic that deliberately costs no solve — 11 extra MILPs per action is what it avoids. The 2026-08-08 tooltip says so, which was the operator's question, and measurement supported labelling over changing it: BOT reads 1257 by MILP against 1262 by the opponents' rule on a fresh state, **5 points apart with the same rank either way**. Left open because the gap is not stable — the heuristic filters on per-player affordability (`market_price <= physical_max_bid`) and never checks that the team can afford the *whole set*, so a team with 10 spots and $10.5M counts every player under $6.0M as affordable and projects ten of them. Re-measure late in a real draft; if opponents read visibly optimistic there, the fix is a cheap greedy budget-aware fill for both sides
 - [2026-07-05] [review] optimizer.py:247 (solve_optimal_roster) — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in auction_control.html so it's no longer silent; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — deferred, and **probably not worth building**: measured 2026-08-06, position slack on the live pool is F +333 / D +197 / G +53 against league-wide open needs, so the pool-too-small trigger is unreachable, and the budget-too-tight trigger is the commissioner-prevented case closed below. Left open only because a future pool could be thinner; re-measure before building anything
 
 
@@ -35,13 +44,12 @@ symptom. No entries are waiting on a manual check.
 - [2026-08-08] [grill] templates/partials/bid_limits.html:41 — **8 of the 20 `data-tip` tooltips are never placement-checked**, so the 2026-08-08 CSS block's guarantee is narrower than it reads. `TestTooltipsStayInsideTheirPanel` measures whatever the page renders in one state (fresh reset + live bid) and that is ~12: the five `stop_status` branches are mutually exclusive so only one is ever on screen, the Penalty tile needs `penalties > 0`, and this line — the only `tooltip-left` in the app — renders only when the market ceiling caps a model price, which never happens on a fresh state because every team starts at `MAX_SALARY`. **Not a regression risk from that change**: the global rule is `max-width`, which can only make a bubble narrower and therefore reduce horizontal overflow. The one real exposure is vertical — narrower means taller, and this tooltip is the only one living inside a `.scroll-container` (`overflow-y: auto`, `templates/partials/bid_limits.html:14`), which clips. Deferred: covering the rest means driving the page into four more states for a cosmetic property, and the honest cheap step is to re-run the measurement harness against a mid-draft scenario once `POST /load-scenario` grows one where the ceiling binds
 - [2026-08-08] [browser] templates/partials/all_panels.html:1 — **the three-column layout needs a 1920px window; below that the team panel is off-screen behind a horizontal scrollbar.** Found while measuring tooltip positions, which is why it had not been noticed: `.auction-grid` is `overflow-y: auto`, and per CSS a non-`visible` `overflow-y` forces `overflow-x` to compute as `auto` too, so the grid scrolls sideways instead of the page — no page scrollbar appears and nothing looks wrong. Measured in Chrome 2026-08-08 at a fresh state: at **1280px the grid's content is 1903px** (623px of hidden overflow) and `.area-team` starts at x=1310, i.e. `#team-panel` — Cap Used, Remaining, Max Bid, the roster, the buyout dots — is entirely off-screen until you scroll. Fits exactly at 1920 and at 2560, which is presumably why the draft machine has never shown it. The forcing element is `#bid-limits`, whose min-content is **990px**: a grid track is `minmax(auto, 1fr)`, so the wide players table sets the column's floor and the other two get whatever is left. Standard fix is `min-width: 0` on the tracks plus `overflow-x: auto` on that table's `.scroll-container` (it only sets `overflow-y` today) — deferred: it is a real layout change to the panel that carries every pick, and it wants checking on the actual draft-day screen first, since on a 1920 display nothing is currently wrong
 - [2026-08-06] [owner] static/vendor/tailwindcss-play-3.4.17.js — Tailwind's Play bundle JITs utility classes in the browser on every page load; a real build would ship a fraction of the CSS with no runtime cost — deferred: needs node + npm + the daisyui plugin and a rebuild on every template edit, and it is *riskier* here, because `static/shortcuts.js` builds class names at runtime (`'alert-' + type`) which a source-scanning build cannot see. That case survives today only because DaisyUI's prebuilt CSS carries every `alert-*` variant. Revisit only if page load becomes a real complaint
-- [2026-08-07] [browser] main.py (undo) — `/undo` calls `_view_my_team()`, so undoing a *roster edit on an opponent* throws the panel back to BOT. Observed in Chrome: view SRL, bench a player, Ctrl+Z, and you are looking at your own team. This is the 2026-08-07 owner decision working as written (draft actions reset the view, and undo can revert an `/assign` where returning to BOT is right), but the decision was made about draft actions and undo is now the one endpoint that is *both* — it reverts whichever kind of action came last. Deferred: the fix is to reset only when the undone action was a draft action, which means `restore_snapshot` reporting what it undid, and that is a state-layer change to serve a view concern. Raise it only if it bites during a real audit
 - [2026-08-06] [owner] main.py (_counterfactual) — the auto-shown counterfactual is computed at the MARKET price, not the live bid, so it does not sharpen as bidding climbs. That is what makes it cacheable: re-solving per $0.1M increment costs ~200ms and would put a response back inside the Assign mousedown/mouseup window. If it reads as stale in a real draft the follow-up is a manual "recompute at this price" button, never an automatic one — deferred pending draft-day experience
 
 ### code quality
 
 - [2026-08-07] [grill] main.py:288 (lifespan) — if the `.corrupt` rename itself fails, the `except OSError` logs and carries on, and the next `_save_state` then rotates the unusable current file over the good backup — precisely the destruction the rename exists to prevent. Deferred: it needs a state dir that can be read but not written to (permissions, read-only mount, full disk), where saving the draft is already broken and the operator has a louder problem; the log names the file. Revisit only if the recovery ladder grows a second on-disk step
-- [2026-08-06] [grill] main.py:641 (_context) — every endpoint builds the full context (~8.5ms, including a 704-row `bid_limits` list for the available-players table) regardless of how small a fragment it renders. `/bid-check`, `/nominate` and now `/explain?inline=1` reference a handful of its 16 keys and none touches `bid_limits`. `/explain` made this sharper on 2026-08-06: it fires on every bidder toggle and its warm response is ~9ms, essentially all of it this context build for a fragment that uses three keys. Pre-existing — the old whole-panel `auction_control.html` didn't use it either — but the 2026-08-06 panel split made fragments narrower and the waste correspondingly larger. Deferred: small next to the binary search over MILP solves that dominates `/bid-check`, and fixing it properly means a per-panel context builder, which is a cross-endpoint refactor
+- [2026-08-06] [grill] main.py:655 (_context) — every endpoint builds the full context (~8.5ms, including a 704-row `bid_limits` list for the available-players table) regardless of how small a fragment it renders. `/bid-check`, `/nominate` and now `/explain?inline=1` reference a handful of its 16 keys and none touches `bid_limits`. `/explain` made this sharper on 2026-08-06: it fires on every bidder toggle and its warm response is ~9ms, essentially all of it this context build for a fragment that uses three keys. Pre-existing — the old whole-panel `auction_control.html` didn't use it either — but the 2026-08-06 panel split made fragments narrower and the waste correspondingly larger. Deferred: small next to the binary search over MILP solves that dominates `/bid-check`, and fixing it properly means a per-panel context builder, which is a cross-endpoint refactor
 - [2026-08-07] [simplify] main.py — many endpoints repeat `capture_snapshot → try → except ValueError → _toast(str(e)) → commit_snapshot`; could be extracted to a shared helper or context manager — out of scope for behavioral changes. The *ordering* half of this was fixed 2026-08-07 (see Resolved); what is left is the boilerplate, which is now four lines rather than three and correspondingly more worth extracting
 - [2026-08-07] [grill] tests/test_endpoints.py (TestPlayerChart) — `test_player_chart_valid` and `test_the_chart_body_carries_no_mount_id` both `GET /player-chart/Steven Stamkos`, a hard-coded name, against the CLAUDE.md rule. `/player-chart/<gone>` answers 200 with an empty state, so a refresh that drops him turns both into assertions about a page with no chart — `"Price Model" in r.text` would fail loudly, but `'id="player-chart-container"' not in r.text` would pass forever. Deferred: noticed while adding the unknown-player bid-check tests next door, unrelated to that change; the fix is a one-line derivation from the pool
 
@@ -76,30 +84,11 @@ From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items 
 ### From the 2026-08-07 testing pass
 
 Cockpit ergonomics from a live run-through, source tag `[owner-testing]`. These
-are wants, not defects — the five things that were actually *broken* are under
+are wants, not defects — the things that were actually *broken* are under
 **Open findings** above, and they should be fixed first. No `file:line` here,
-because nothing is wrong at one; the file names are orientation only.
-
-**Amends a documented decision — read this before implementing it:**
-
-- **On an opponent's pick, swap the team panel to that team; on your own, keep
-  returning to BOT.** Owner decision 2026-08-08, narrowing the original request
-  ("swap to whichever team just drafted"). It amends rather than reverses the
-  2026-08-07 decision at `CLAUDE.md:119`, where `/assign` calls `_view_my_team()`
-  unconditionally *"because reading an opponent's Cap Used as yours right after a
-  pick lands is worse than re-opening their roster."* That reasoning only ever
-  bit on **your own** pick — the moment you are most likely to glance at the
-  header — and your own pick is exactly the case this keeps. So: `_view_my_team()`
-  on a BOT assign, view-the-buyer on an opponent assign, success path only (a
-  rejected assign is still not a draft action). **Amend that CLAUDE.md bullet in
-  the same commit**, and expect `TestTheViewSticks` and the `/assign` reset tests
-  to change with it rather than be worked around. Two things to settle while
-  building it: `/undo` also calls `_view_my_team()` and can revert either kind of
-  assign, which is the open `main.py (undo)` finding under **frontend/UX** — this
-  makes that one worth fixing at the same time, since both need `restore_snapshot`
-  to say what it undid; and `/assign` must still return the panel OOB the way
-  `/team-view` does (`team_view_response.html`), never `all_panels.html`, or the
-  swap destroys the bidding session.
+because nothing is wrong at one; the file names are orientation only. (This said
+"the five things" until 2026-08-11; a count in prose goes stale on the first
+entry that closes, and one had already closed by then.)
 
 **Nomination panel**
 

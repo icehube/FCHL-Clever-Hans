@@ -8,7 +8,14 @@ from contextlib import contextmanager
 import pytest
 
 from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
-from tests.helpers import a_buyout_candidate, assign, section_of, squeeze, toast_of
+from tests.helpers import (
+    a_buyout_candidate,
+    a_roster_player,
+    assign,
+    section_of,
+    squeeze,
+    toast_of,
+)
 
 
 @contextmanager
@@ -528,21 +535,17 @@ class TestViewedTeamSurvivesEdits:
         assert m, f"team panel has no identifiable header: {panel[:300]}"
         return m.group(1)
 
-    def _victim(self, code: str):
-        import main
-        return main.auction_state.teams[code].roster_players[0]
-
     def test_toggle_bench_stays_on_the_edited_team(self, client):
         client.get("/team-view/SRL")
         r = client.post("/toggle-bench", data={
-            "team_code": "SRL", "player_name": self._victim("SRL").name,
+            "team_code": "SRL", "player_name": a_roster_player("SRL").name,
         })
         assert r.status_code == 200
         assert self._panel_team(r.text) == "SRL"
 
     def test_adjust_salary_stays_on_the_edited_team(self, client):
         client.get("/team-view/SRL")
-        p = self._victim("SRL")
+        p = a_roster_player("SRL")
         r = client.post("/adjust-salary", data={
             "team_code": "SRL", "player_name": p.name, "new_salary": str(p.salary),
         })
@@ -551,7 +554,7 @@ class TestViewedTeamSurvivesEdits:
 
     def test_move_to_minors_stays_on_the_edited_team(self, client):
         client.get("/team-view/SRL")
-        p = self._victim("SRL")
+        p = a_roster_player("SRL")
         # Benched is the precondition for the ↓ Minors control (team_panel.html)
         client.post("/toggle-bench", data={"team_code": "SRL", "player_name": p.name})
         r = client.post("/move-to-minors", data={
@@ -563,7 +566,7 @@ class TestViewedTeamSurvivesEdits:
     def test_move_to_roster_stays_on_the_edited_team(self, client):
         import main
         client.get("/team-view/SRL")
-        p = self._victim("SRL")
+        p = a_roster_player("SRL")
         client.post("/toggle-bench", data={"team_code": "SRL", "player_name": p.name})
         client.post("/move-to-minors", data={"team_code": "SRL", "player_name": p.name})
         assert any(m.name == p.name for m in main.auction_state.teams["SRL"].minor_players)
@@ -580,7 +583,7 @@ class TestViewedTeamSurvivesEdits:
         client.get("/team-view/SRL")
         r = client.post("/trade-between", data={
             "team_a": "SRL", "team_b": "MAC",
-            "players_from_a": self._victim("SRL").name,
+            "players_from_a": a_roster_player("SRL").name,
             "players_from_b": "",
         })
         assert r.status_code == 200
@@ -600,7 +603,7 @@ class TestViewedTeamSurvivesEdits:
         """
         import main
         client.post("/toggle-bench", data={
-            "team_code": "SRL", "player_name": self._victim("SRL").name,
+            "team_code": "SRL", "player_name": a_roster_player("SRL").name,
         })
         name = max(main.auction_state.available_players.values(),
                    key=lambda p: p.projected_points).name
@@ -621,7 +624,7 @@ class TestViewedTeamSurvivesEdits:
         """
         client.get("/team-view/SRL")
         client.post("/toggle-bench", data={
-            "team_code": "SRL", "player_name": self._victim("SRL").name,
+            "team_code": "SRL", "player_name": a_roster_player("SRL").name,
         })
         r = client.post("/undo")
         assert r.status_code == 200
@@ -1596,6 +1599,52 @@ class TestTheViewSticks:
         client.get("/team-view/GVR")
         r = client.post("/undo")
         assert "Undid trade_" in toast_of(r)["message"], toast_of(r)
+        assert self._panel_team(r.text) == "GVR"
+
+    def test_undoing_a_team_done_toggle_leaves_the_view_alone(
+        self, client, viewing_srl
+    ):
+        """The case the /undo change-log comment argues from, finally pinned.
+
+        `team-done` is a `ChangeRecord` kind, and unlike every roster edit it is
+        posted from `league_state.html` — so its `team_code` can name a team you
+        are NOT looking at. That makes it the one construction that tells
+        "mirror pre_chg[-1].team_code" apart from "leave the view alone": here
+        the record says GVR while the panel says SRL, and mirroring would swap
+        you to an uninvolved third team, exactly what the 2026-08-07 fix removed
+        from the forward path.
+
+        Added during a 2026-08-11 grill, which measured that mirroring the change
+        log passed the ENTIRE suite (667 tests) — the six-line comment forbidding
+        it was the only thing standing behind the behaviour.
+        """
+        client.post("/team-done", data={"team_code": "GVR"})
+        r = client.post("/undo")
+        assert "GVR" in toast_of(r)["message"], toast_of(r)
+        assert self._panel_team(r.text) == "SRL", (
+            "undo mirrored a team-done onto the panel — GVR was never on screen"
+        )
+        assert client.get("/state").json()["teams"]["GVR"]["is_done"] is False, (
+            "the toggle itself did not revert, so this proved nothing"
+        )
+
+    def test_undoing_an_edit_you_navigated_away_from_stays_put(
+        self, client, viewing_srl
+    ):
+        """The accepted gap, pinned so it stays a decision rather than a drift.
+
+        Edit an opponent, open somebody else, then Ctrl+Z: the view stays where
+        you last put it. Your /team-view click is newer information than the log.
+        Mirroring the change log would send you back to SRL instead — the other
+        mutant the test above catches, from the opposite direction.
+        """
+        victim = a_roster_player("SRL").name
+        client.post("/toggle-bench", data={
+            "team_code": "SRL", "player_name": victim,
+        })
+        client.get("/team-view/GVR")
+        r = client.post("/undo")
+        assert "Undid:" in toast_of(r)["message"], toast_of(r)
         assert self._panel_team(r.text) == "GVR"
 
     def test_undoing_a_buyout_shows_my_team(self, client, viewing_srl):

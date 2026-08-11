@@ -73,6 +73,26 @@ def assign(client: Any, player: str, team: str, salary: float) -> Any:
     return response
 
 
+def a_roster_player(code: str):
+    """The first player on `code`'s ACTIVE roster — a target for a roster edit.
+
+    Derived rather than named, per the CLAUDE.md rule: `players.csv` is replaced
+    before every draft, so a literal silently stops matching. Lives here because
+    two classes in `test_endpoints.py` had grown identical private copies of it
+    (`_victim`) by 2026-08-11, and a second copy is how a fix lands in one and
+    misses the other — the same path `squeeze` took to three copies.
+
+    Active roster on purpose: benched and minor-league players are reachable
+    through `all_players`, but the Bench / Adjust / ↓ Minors controls a roster
+    edit test is aiming at render against this list.
+    """
+    import main
+
+    players = main.auction_state.teams[code].roster_players
+    assert players, f"{code} has an empty active roster — the fixture is wrong"
+    return players[0]
+
+
 def a_buyout_candidate(state=None):
     """BOT's worst money-per-point player that may legally be bought out.
 

@@ -281,7 +281,8 @@ class TestLayoutAndToasts:
       const gr = g.getBoundingClientRect();
       const clientLeft = gr.left + g.clientLeft;
       const spill = [];
-      for (const c of g.querySelectorAll('section.card'))
+      const cards = g.querySelectorAll('section.card');
+      for (const c of cards)
         if (c.scrollWidth > c.clientWidth + 1 &&
             getComputedStyle(c).overflowX === 'visible')
           spill.push((c.id ? '#' + c.id : c.tagName) +
@@ -299,6 +300,7 @@ class TestLayoutAndToasts:
                   .split(' ').map(t => parseFloat(t)),
         pageScrollW: document.scrollingElement.scrollWidth,
         innerWidth: window.innerWidth,
+        cardsSeen: cards.length,
         areas, spill,
       };
     }"""
@@ -355,6 +357,18 @@ class TestLayoutAndToasts:
             assert len(tracks) == 3, f"{width}px: expected 3 tracks, got {tracks}"
             assert min(tracks) >= 0.25 * sum(tracks), (
                 f"{width}px: one column is hogging the row — tracks {tracks}"
+            )
+            # `spill` is built by iterating a selector, so an empty result means
+            # EITHER nothing overflows or the selector matched nothing — and the
+            # second reads exactly like the first. Nine `section.card` partials
+            # render unconditionally inside the grid, so 8 leaves room to delete
+            # one panel while still catching a rename to `div.card`. The `areas`
+            # loop above needs no equivalent: `querySelector` returns null there
+            # and the probe throws, which is loud.
+            assert d["cardsSeen"] >= 8, (
+                f"{width}px: only {d['cardsSeen']} section.card panels found in "
+                f"the grid — the spill check below iterates that selector, so it "
+                f"would pass while measuring almost nothing"
             )
             # The invariant that survives the next wide column someone adds to
             # either table: a panel whose content overflows must be able to

@@ -260,9 +260,13 @@ summary::-webkit-details-marker { display: none; }
    Anchoring to `.chart-meta` with max-width:100% makes the bubble exactly the
    line's width at every breakpoint, so it cannot overflow at any wrap point.
    The trigger goes `position: static` to hand the containing block to
-   .chart-meta; that moves the arrow too, so it is dropped — a bubble spanning
-   the whole line has no single thing to point at, and .bid-details already sets
-   the precedent that an anchored bubble keeps its text and loses its aim. */
+   .chart-meta, and that moves the ARROW too — it would resolve against the line
+   rather than the word, landing mid-sentence on whatever text happens to sit
+   there. So it is dropped: an arrow pointing at the wrong word is worse than no
+   arrow, and a bubble spanning the whole line has no single word to point at
+   anyway. This is the ONE exception to the rule above, not a new default —
+   .bid-details keeps its `:after` centred on its trigger and must go on doing
+   so, because there the trigger is still the containing block. */
 .chart-meta > .tooltip[data-tip] { position: static; }
 .chart-meta > .tooltip[data-tip]::before {
     left: 0; right: auto; transform: translateX(0); max-width: 100%;

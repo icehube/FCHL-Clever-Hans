@@ -169,12 +169,6 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
    the thing it explains, even when the bubble is anchored. */
 .tooltip[data-tip]::before { max-width: 15rem; }
 .bid-details > .tooltip[data-tip]::before { left: 0; transform: translateX(0); }
-/* The stat grid's first tile is the one that sits hard against the panel's
-   left edge in every column count (3, 4 and 7 all start a row with it), and at
-   the 768px breakpoint the tiles narrow to ~191px — too narrow for a centred
-   bubble to clear the edge even at 15rem. */
-.team-stats > .tooltip[data-tip]:first-child::before { left: 0; transform: translateX(0); }
-
 /* BOTH edge columns need anchoring, and WHICH children those are depends on the
    column count — so every count the stat grid uses gets its own band. The grid
    is `grid-cols-3 sm:grid-cols-4 md:grid-cols-7 lg:grid-cols-3`, i.e. 3 across
@@ -199,7 +193,15 @@ tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }
 
    nth-child on the column, never :last-child: with 6 tiles in 3 columns the
    last one sits at the LEFT edge of its row, so a blanket right-anchor on
-   :last-child pushes it off the opposite side. */
+   :last-child pushes it off the opposite side.
+
+   These four bands PARTITION every width (<=639, 640-767, 768-1023, >=1024) and
+   each anchors `:nth-child(Nn+1)`, which always includes child 1 — so the
+   standalone `:first-child` rule that used to sit here was dead the moment they
+   landed, and a second statement of the same fact. Deleted 2026-08-12. The one
+   measurement worth keeping from it: at the 768px breakpoint the tiles narrow to
+   ~191px, too narrow for a centred bubble to clear the edge even at the 15rem
+   cap above — which is why anchoring is needed at all and not just a cap. */
 @media (max-width: 639px) {
     .team-stats > .tooltip[data-tip]:nth-child(3n+1)::before { left: 0; right: auto; transform: translateX(0); }
     .team-stats > .tooltip[data-tip]:nth-child(3n)::before { left: auto; right: 0; transform: translateX(0); }

@@ -1796,6 +1796,47 @@ class TestTheViewSticks:
         r = client.post("/reset")
         assert self._panel_team(r.text) == "BOT"
 
+    def test_a_buyout_shows_my_team(self, client, viewing_srl):
+        """`execute_buyout` is BOT-only, so your cap is the only thing that moved.
+
+        The undo side of this was already covered; the forward side was not, and
+        `test_undoing_a_buyout_shows_my_team` reopening SRL after the buyout
+        *implied* this without asserting it.
+        """
+        r = client.post("/buyout", data={"player": a_buyout_candidate().name})
+        assert toast_of(r).get("type") == "success", toast_of(r)
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_a_failed_buyout_does_not_move_the_view(self, client, viewing_srl):
+        """The error branch returns before `_view_team`, and must keep doing so.
+
+        A refusal is not an operation on your roster, so it has nothing to show
+        you about it.
+        """
+        r = client.post("/buyout", data={"player": "Nobody At All"})
+        assert toast_of(r).get("type") == "error", toast_of(r)
+        assert self._panel_team(r.text) == "SRL"
+
+    def test_loading_a_scenario_shows_my_team(self, client, viewing_srl):
+        """A scenario replaces the world, so a view into the old one means nothing."""
+        import scenarios
+
+        name = sorted(scenarios.SCENARIOS)[0]
+        r = client.post("/load-scenario", data={"name": name})
+        assert toast_of(r).get("type") == "success", toast_of(r)
+        assert self._panel_team(r.text) == "BOT"
+
+    def test_an_unknown_scenario_leaves_the_view_alone(self, client, viewing_srl):
+        """Nothing was replaced, so there is nothing to point the panel at.
+
+        This is the half that pins the comment on `/load-scenario`'s
+        `_view_team` call: move it above the `except KeyError` return and it
+        starts snapping the panel back on a request that changed nothing.
+        """
+        r = client.post("/load-scenario", data={"name": "not-a-scenario"})
+        assert toast_of(r).get("type") == "error", toast_of(r)
+        assert self._panel_team(r.text) == "SRL"
+
     def test_the_view_never_reaches_the_state_file(self, client, viewing_srl):
         """It is UI state, so it must not serialize or ride the undo chain.
 

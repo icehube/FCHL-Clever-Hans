@@ -16,7 +16,7 @@ at the running dev server": a measurement run must not be able to touch a draft.
 Usage:
     .venv/bin/python -m tests.measure_layout                    # default widths
     .venv/bin/python -m tests.measure_layout --widths 1280
-    .venv/bin/python -m tests.measure_layout --whatif           # + minmax(0,1fr)
+    .venv/bin/python -m tests.measure_layout --whatif           # + reproduce the bug
 """
 
 import argparse
@@ -36,6 +36,13 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 # Everything whose width could plausibly force a column. Order matters only for
 # reading the report; the attribution pass sorts by min-content.
+#
+# DESCENDANT selectors for the tables, never `>`. This list carried
+# `#league-state > table` until 2026-08-13, and the .table-scroll-x wrapper added
+# by the very fix this instrument was written to investigate broke that match —
+# so the report printed "(absent)" for the 955px table that caused the bug, and
+# min_contents() dropped it silently. A wrapper is exactly the kind of thing a
+# layout fix adds, so a child combinator here is a selector designed to rot.
 TARGETS = [
     ".auction-grid",
     ".area-auction",
@@ -44,14 +51,16 @@ TARGETS = [
     "#bid-limits",
     "#bid-limits .flex.items-center.gap-4",
     "#bid-limits .scroll-container",
-    "#bid-limits .scroll-container > table",
+    "#bid-limits .scroll-container table",
     "#league-state",
-    "#league-state > table",
+    "#league-state .table-scroll-x",
+    "#league-state table",
     "#team-panel",
     "#team-panel .team-stats",
+    "#team-panel .table-scroll-x",
     "#team-panel table",
     "#bid-panel",
-    "#transaction-log .scroll-container > table",
+    "#transaction-log .scroll-container table",
 ]
 
 PROBE = """
@@ -193,7 +202,7 @@ def main_measure() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--widths", default="1024,1280,1600,1920")
     ap.add_argument("--whatif", action="store_true",
-                    help="also re-measure with minmax(0,1fr) injected")
+                    help="also re-measure with the bare `1fr` bug injected")
     args = ap.parse_args()
     widths = [int(w) for w in args.widths.split(",")]
 
@@ -220,12 +229,18 @@ def main_measure() -> None:
                       f"  ({'no-op confirmed' if sc == 'auto' else 'declaring it WOULD change something'})")
 
             if args.whatif:
+                # Injects the BUG, not the fix. Until 2026-08-13 this injected
+                # minmax(0,1fr) — which shipped on 2026-08-11, so it re-measured
+                # the baseline and labelled it a hypothesis. Reverting to a bare
+                # `1fr` is the useful direction now: it reproduces the failure on
+                # demand, which is what you want when checking whether a new wide
+                # element would have been caught.
                 page.add_style_tag(content="""
-                    .auction-grid { grid-template-columns: repeat(3, minmax(0,1fr)) !important; }
-                    @media (max-width: 1023px) { .auction-grid { grid-template-columns: minmax(0,1fr) !important; } }
+                    .auction-grid { grid-template-columns: repeat(3, 1fr) !important; }
+                    @media (max-width: 1023px) { .auction-grid { grid-template-columns: 1fr !important; } }
                 """)
                 page.wait_for_timeout(150)
-                report(page, width, "WHAT-IF minmax(0,1fr)")
+                report(page, width, "WHAT-IF bare 1fr (the 2026-08-11 bug)")
             ctx.close()
         b.close()
 

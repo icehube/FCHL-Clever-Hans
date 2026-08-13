@@ -16,12 +16,22 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
-Last triaged 2026-08-11, when the `main.py (undo)` view finding closed together
-with the opponent-pick view swap from the testing-pass section below (see
-[CHANGELOG.md](CHANGELOG.md)). Before that, 2026-08-07 swept three entries and a
-live testing pass added the `[owner-testing]` entries — each of those was
-reproduced against the running app before being written down, so they record a
-mechanism rather than a symptom. No entries are waiting on a manual check.
+Last triaged 2026-08-13, walking every entry to pick the next piece of work. The
+outcome is worth recording, because most of what is below is parked for a
+**reason that has to expire before the entry is actionable**: the Proj heuristic
+and the stale counterfactual both need a real draft to re-measure, the
+short-roster MILP path is measured currently unreachable, the opponent-edit
+exposure needs an actual accidental edit to justify a gate, and the stable
+player-id refactor touches the assign and bidding paths. So a quiet backlog here
+does not mean a healthy one — it means the cheap items are gone. Two new entries
+were filed the same day from a second grill pass over the layout batch.
+
+2026-08-11 closed the `main.py (undo)` view finding together with the
+opponent-pick view swap from the testing-pass section below (see
+[CHANGELOG.md](CHANGELOG.md)); 2026-08-07 swept three entries and a live testing
+pass added the `[owner-testing]` entries — each of those was reproduced against
+the running app before being written down, so they record a mechanism rather than
+a symptom. No entries are waiting on a manual check.
 
 **Two of the entries below carry a deferral reason that has already been
 disproved once.** The 2026-08-11 pair were both deferred on a diagnosis that
@@ -39,6 +49,7 @@ prose is a hypothesis, not a measurement, unless it says what was measured.
 
 ### frontend/UX
 
+- [2026-08-13] [grill] templates/partials/league_state.html:8 — **the three `.table-scroll-x` regions cannot be scrolled by keyboard** (no `tabindex`, so they are not focusable; WCAG 2.1.1). Introduced 2026-08-11 with the grid fix, which made the League State and roster tables scroll inside their own panels rather than paint across the next one — so their right-hand columns are now reachable only with a pointer or a trackpad gesture. Deferred deliberately rather than overlooked: `tabindex="0"` on three wrappers adds three tab stops to the panels you tab through while a bid is live, and the draft is a single operator on a mouse. The content is not lost, it is one drag away. Revisit if the draft is ever run from the keyboard, or if a screen reader is ever in play — at which point the fix is `tabindex="0"` plus `role="region"` and an `aria-label` naming the table, not tabindex alone
 - [2026-08-11] [grill] templates/partials/team_panel.html:120 — **an opponent's pick now auto-presents their EDITABLE panel, which used to require a deliberate click.** The roster-edit forms are not gated on `is_my_team` by design (auditing a rival is the point), but before 2026-08-11 `/assign` always came home to BOT, so a rival's Bench / `$` / ↓ Minors / Recall controls only appeared when you asked for them. Now a sale puts them on screen at the highest-tempo moment of the draft. Measured, and this is why it is filed rather than fixed: the salary box is `hx-trigger="change"` (`team_panel.html:132`), so it needs a typed value plus a blur, and every other control is a discrete small button — a stray click cannot fire one. No test or gate added: gating them on `is_my_team` would remove the working feature the 2026-08-07 view work exists to provide. Revisit only if a real draft produces an accidental edit; the fix would be a confirm on opponent edits, not a gate
 - [2026-08-11] [grill] main.py:1270 (load_scenario) — **`/load-scenario`'s and `/buyout`'s view resets have no test in either direction.** Both call `_view_team(MY_TEAM)` and both are pre-existing behaviour that 2026-08-11 preserved rather than changed, so this is a gap the change inherited, not one it opened — `/reset`'s equivalent IS covered (`test_reset_returns_the_view_to_my_team`) and `/buyout`'s reset is covered on the *undo* side only (`test_undoing_a_buyout_shows_my_team`). Deleting either call leaves the suite green. Deferred as low-value: `MY_TEAM` is always a live code (`_context` does `teams[MY_TEAM]` unconditionally), so the new validation guard cannot make these silently no-op, and the failure mode is a panel showing the wrong team after an operation that replaces the world anyway. Two one-line tests next to the existing `/reset` one if anyone is in there
 - [2026-08-08] [review] main.py:101 (_backfill_keeper_flags) — **the backfill repairs the live state but not the undo chain**, so after booting a pre-`is_keeper` save file, undoing back past everything done this session restores minors with no provenance and the next recall of one colours him as a purchase again. `AuctionState._snapshots` is a list of whole JSON documents rather than of dicts, so repairing them from `main.py` means hard-coding a second copy of the state's JSON key names — a wrong key would silently do nothing, which is worse than the bug. Deferred as narrow and cosmetic: it needs a legacy file, an undo past the whole session, and it costs a row colour. If it ever matters, the fix belongs in `state.py` as a `from_json` hook, not here
@@ -56,6 +67,7 @@ prose is a hypothesis, not a measurement, unless it says what was measured.
 
 ### test infrastructure
 
+- [2026-08-13] [grill] tests/measure_layout.py:174 (report / min_contents) — **a stale selector in `TARGETS` is indistinguishable from an element that legitimately does not render.** `report` prints `(absent)` for both, and `min_contents` skips `None` with no line at all — on min-content, the number a layout investigation actually turns on. This is not hypothetical: `#league-state > table` went stale the moment the 2026-08-11 fix wrapped that table, so for two days the instrument silently could not see the 955px element it was written to find (repaired 2026-08-13 by matching descendants, and `--whatif` now injects the bug so the failure is reproducible). Deferred because the only real check is "every selector resolves", which needs a Chrome launch for a dev-only instrument pytest deliberately does not collect — and a test that must be run by hand is the same trust problem one level up. Cheaper mitigation if it bites again: print `(NO MATCH)` versus `(not rendered)` by testing the selector against `document` before the element lookup
 - [2026-08-07] [refresh-drill] data_loader.py (_disambiguated_names) — the duplicate-name suffix is a workaround for a naming assumption, not a repair of it: the player NAME is still the primary key, so two players who share one are kept apart by a display string rather than by identity. A stable player id as the key would make the ambiguity structurally impossible and keep names clean on screen. Deferred by owner decision (2026-08-07), with the inventory recorded here so the follow-up does not have to rediscover it: `available_players`, `market_prices`/`model_prices`, `find_player`, ~20 endpoints taking a `player` form field, the transaction log, the trade dropdowns, and the `bo-<name>` DOM ids — plus `to_json`/`from_json`, so saved drafts and the undo chain need a migration. Large, and it touches the assign and bidding paths a live draft depends on
 - [2026-07-05] [review] tests/ — coverage gaps. Mostly closed: trade guards, combo turn, endgame and live ceiling tested; all three assert-nothing tests fixed and mutation-checked 2026-08-07; corrupt-state startup fallback closed 2026-08-07 by `tests/test_crash_recovery.py`; `/trade-between` happy path and undo-after-{adjust-salary, toggle-bench, move-to-minors, move-to-roster, set-nominator} closed 2026-08-07 by `tests/test_trade_buyout_undo.py::TestUndoRevertsEveryRosterEdit`. **What is left is MILP-infeasible rendering** — awaiting triage, and note the engine finding above measures the trigger as currently unreachable, so this may be untestable without a synthetic pool
 

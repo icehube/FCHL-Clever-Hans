@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from config import MAX_SALARY, MIN_SALARY
 
-from tests.helpers import a_buyout_candidate
+from tests.helpers import a_buyout_candidate, pool_top
 
 # Repo-relative so the scan works from any rootdir pytest is invoked with.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -256,11 +256,21 @@ class TestSwapTargetsResolve:
         input that targets it, so the pair is always consistent even though
         neither is on a fresh page. Checking the union keeps the guard honest
         about "does this id ever exist" without failing on that pairing.
+
+        The bid name is derived from the pool, and the render is checked to be
+        a live bid: `/bid-check` on a name that is NOT in the pool answers with
+        the not-found branch, which still carries `#bid-advice` and `#bid-price`
+        (measured 2026-08-13) — so a stale literal here would quietly shrink
+        this union to the two ids that survive both branches.
         """
         page = client.get("/").text
         active_bid = client.post("/bid-check", data={
-            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN,SRL",
+            "player": pool_top()[0], "price": "3.0", "bidders": "BOT,LGN,SRL",
         }).text
+        assert any(v in active_bid for v in ("BID", "CAUTION", "DROP", "WIN")), (
+            "the 'active bid' render is the not-found branch, so every region "
+            "that exists only during a live bid is missing from this inventory"
+        )
         return page + active_bid
 
     def test_every_target_exists_in_the_rendered_page(self, client):
@@ -419,10 +429,20 @@ class TestBidPriceInput:
         assert 'id="bid-price"' in r.text, "Inactive bid form missing id='bid-price'"
 
     def test_active_form_has_bid_price_id(self, client):
-        """After bid-check, the active form should have id='bid-price'."""
+        """After bid-check, the active form should have id='bid-price'.
+
+        `#bid-price` alone could not tell the two apart: the not-found branch
+        carries it too (measured 2026-08-13), so with a stale player name this
+        was a second copy of the inactive test above. The verdict anchor is what
+        makes it a statement about the ACTIVE form.
+        """
         r = client.post("/bid-check", data={
-            "player": "Artemi Panarin", "price": "2.0", "bidders": "",
+            "player": pool_top()[0], "price": "2.0", "bidders": "",
         })
+        assert any(v in r.text for v in ("BID", "CAUTION", "DROP", "WIN")), (
+            "no verdict, so /bid-check answered with the not-found branch and "
+            "this is not the active form"
+        )
         assert 'id="bid-price"' in r.text, "Active bid form missing id='bid-price'"
 
 

@@ -966,6 +966,73 @@ class TestBidCheckOnAPlayerItCannotFind:
         assert 'id="bid-advice"' not in page
 
 
+class TestTheDegradedOptimizerBadge:
+    """When the roster MILP can't solve, every bid number is a floor fallback.
+
+    `bid_panel.html` says so in a warning, deliberately OUTSIDE the `bid_advice`
+    gate, so it qualifies the panel whether or not a bid is live. Untested until
+    2026-08-13 on the grounds that the trigger was unreachable — half true. It is
+    unreachable through *bidding* (owner decision 2026-08-06: the commissioner
+    refuses any bid that would leave a team unable to fill 24), but buyout
+    penalties, `/trade-between` and `/adjust-salary` all raise cap load and
+    **warn rather than refuse**, so the state is legal, just expensive to reach.
+    """
+
+    def _degrade(self) -> None:
+        """Leave BOT unable to fill its roster at the floor, so the MILP fails.
+
+        The precondition assert is the load-bearing line: with a nearly-full
+        roster $1.0M IS a solvable budget, and all three tests below would then
+        be asserting against an Optimal MILP without saying so.
+        """
+        import main
+
+        bot = main.auction_state.teams[main.MY_TEAM]
+        assert bot.total_spots_remaining >= 3, (
+            f"BOT has only {bot.total_spots_remaining} spots left — $1.0M would "
+            f"be a solvable budget and this would test nothing"
+        )
+        squeeze(main.MY_TEAM, 1.0)
+        # GET / renders the context; it does not re-solve. Without this the page
+        # would show the previous, Optimal solution.
+        main._recompute()
+        assert main.milp_solution.status != "Optimal", main.milp_solution.status
+
+    def test_the_page_says_the_advice_is_degraded(self, client):
+        self._degrade()
+        r = client.get("/")
+        assert "Optimizer Infeasible" in r.text, (
+            "the MILP failed and the panel showed floor-value bid advice with "
+            "nothing on screen to say the numbers are fallbacks"
+        )
+
+    def test_the_swapped_bid_fragment_carries_it_too(self, client):
+        """/bid-check replaces #bid-panel, so the warning has to be inside it.
+
+        Rendered only on `GET /` it would vanish on the first bidder toggle —
+        i.e. exactly when the operator starts leaning on the numbers.
+        """
+        self._degrade()
+        r = client.post("/bid-check", data={
+            "player": pool_top()[0], "bidders": "BOT,SRL", "price": "1.0",
+        })
+        assert "Optimizer Infeasible" in r.text
+
+    def test_a_solvable_optimizer_shows_no_warning(self, client):
+        """A warning that is always up is wallpaper, which is worse than none.
+
+        Anchored on the panel rendering at all, per the same reasoning as
+        `test_a_quiet_page_carries_no_bid_advice_block`: a bare absence
+        assertion goes green on an error page.
+        """
+        import main
+
+        assert main.milp_solution.status == "Optimal", main.milp_solution.status
+        page = client.get("/").text
+        assert 'id="bid-panel"' in page, "GET / did not render the bid panel"
+        assert "Optimizer" not in page
+
+
 class TestTeamView:
     """The success path of /team-view renders partials/team_detail.html, which
     imports the player_label macro. test_edge_cases.test_team_view_nonexistent

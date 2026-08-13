@@ -73,6 +73,32 @@ def assign(client: Any, player: str, team: str, salary: float) -> Any:
     return response
 
 
+def pool_top(n: int = 1) -> list[str]:
+    """The n highest-scoring available players, by name.
+
+    Derived rather than named, per the CLAUDE.md rule: `players.csv` is replaced
+    before every draft. The chart tests are the reason this matters more than
+    usual — `/player-chart/<gone>` answers **200** with a ~250-byte empty state,
+    so a stale literal does not fail, it silently turns
+    `assert 'id="player-chart-container"' not in r.text` into an assertion that
+    cannot fail, on the test guarding the two-mount invariant.
+
+    Top by points on purpose: a floor-priced player is the degenerate end of the
+    distribution, and a chart test wants a curve to look at.
+
+    Lives here because `test_browser_ui.py` had grown its own `_pool_top` — the
+    path `squeeze` took to three copies before it was folded in.
+    """
+    import main
+
+    ranked = sorted(
+        main.auction_state.available_players.values(),
+        key=lambda p: -p.projected_points,
+    )
+    assert len(ranked) >= n, f"only {len(ranked)} players in the pool, wanted {n}"
+    return [p.name for p in ranked[:n]]
+
+
 def a_roster_player(code: str):
     """The first player on `code`'s ACTIVE roster — a target for a roster edit.
 

@@ -12,6 +12,7 @@ from tests.helpers import (
     a_buyout_candidate,
     a_roster_player,
     assign,
+    pool_top,
     section_of,
     squeeze,
     toast_of,
@@ -786,16 +787,27 @@ class TestPlayerChart:
     """
 
     def test_player_chart_valid(self, client):
-        """Player chart should return SVG visualization."""
-        r = client.get("/player-chart/Steven Stamkos")
+        """Player chart should return SVG visualization.
+
+        Also the guard on its sibling below: both derive the name from the pool,
+        so a name that stopped matching fails HERE, loudly, instead of turning
+        the mount-id assertion into one that cannot fail.
+        """
+        r = client.get(f"/player-chart/{pool_top()[0]}")
         assert r.status_code == 200
         assert "Price Model" in r.text
         assert "<svg" in r.text
         assert "<path" in r.text
 
     def test_the_chart_body_carries_no_mount_id(self, client):
-        """The property that makes two mounts legal."""
-        r = client.get("/player-chart/Steven Stamkos")
+        """The property that makes two mounts legal.
+
+        `/player-chart/<gone>` answers 200 with a ~250-byte empty state that
+        contains no mount id either, so this assertion passes on a page with no
+        chart in it at all — which is exactly what a hard-coded name became once
+        `players.csv` was replaced. Derived from the pool for that reason.
+        """
+        r = client.get(f"/player-chart/{pool_top()[0]}")
         assert 'id="player-chart-container"' not in r.text, (
             "the chart body owns the mount id again — an innerHTML swap nests "
             "it inside the mount and duplicates the id"

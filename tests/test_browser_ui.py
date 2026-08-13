@@ -25,7 +25,7 @@ pytest.importorskip("playwright.sync_api", reason="pip install -r requirements-d
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 import main  # noqa: E402
-from tests.helpers import squeeze  # noqa: E402
+from tests.helpers import pool_top, squeeze  # noqa: E402
 
 pytestmark = pytest.mark.browser
 
@@ -57,15 +57,6 @@ def page(browser, live_server):
 def _open(page, live_server):
     page.goto(live_server, wait_until="domcontentloaded")
     page.wait_for_selector("#bid-panel")
-
-
-def _pool_top(n: int = 2) -> list[str]:
-    """The n highest-scoring available players, by name."""
-    ranked = sorted(
-        main.auction_state.available_players.values(),
-        key=lambda p: -p.projected_points,
-    )
-    return [p.name for p in ranked[:n]]
 
 
 def _start_bid(page, player: str, price: str = "3.0", bidders: str = "BOT"):
@@ -101,7 +92,7 @@ class TestCounterfactualDoesNotDisturbTheControls:
         self, page, live_server
     ):
         _open(page, live_server)
-        player = _pool_top(1)[0]
+        player = pool_top()[0]
 
         # Hold /explain so the pre-arrival layout can be measured. Without the
         # delay the fragment is already in place by the time the panel settles
@@ -136,7 +127,7 @@ class TestCounterfactualDoesNotDisturbTheControls:
         seen: list[str] = []
         page.on("request", lambda r: seen.append(r.url) if "/explain/" in r.url else None)
 
-        _start_bid(page, _pool_top(1)[0])
+        _start_bid(page, pool_top()[0])
         page.wait_for_selector("#bid-counterfactual .alert")
         page.wait_for_timeout(600)  # a loop would have fired many times by now
 
@@ -158,7 +149,7 @@ class TestTheAssignClickSurvives:
         self, page, live_server
     ):
         _open(page, live_server)
-        player = _pool_top(1)[0]
+        player = pool_top()[0]
         _start_bid(page, player, price="3.0")
 
         # Type a new price and click Assign with no Tab, no Enter — exactly the
@@ -188,7 +179,7 @@ class TestBiddingSessionSurvives:
 
     def test_pressing_n_mid_bid_keeps_the_bidding_session(self, page, live_server):
         _open(page, live_server)
-        player = _pool_top(1)[0]
+        player = pool_top()[0]
         _start_bid(page, player, price="4.2")
 
         # Focus a BUTTON, not an input: shortcuts.js guards on
@@ -204,7 +195,7 @@ class TestBiddingSessionSurvives:
 
     def test_toggling_a_bidder_keeps_the_session(self, page, live_server):
         _open(page, live_server)
-        player = _pool_top(1)[0]
+        player = pool_top()[0]
         _start_bid(page, player, price="4.2")
 
         explains: list[str] = []
@@ -458,7 +449,7 @@ class TestTheChartLandsWhereYouClicked:
     def _open_with_a_live_bid(self, page, live_server):
         """A DOM holding both mounts: the bid panel embeds its own chart."""
         _open(page, live_server)
-        bid_player, other = _pool_top(2)
+        bid_player, other = pool_top(2)
         _start_bid(page, bid_player)
         page.wait_for_selector("#bid-panel .price-chart-card")
         return bid_player, other
@@ -664,7 +655,7 @@ class TestTheDataBannerOutlivesAPick:
         # A real pick through the real controls, not htmx.ajax: the Assign form
         # is what targets #app with the whole page, and it is the swap the
         # operator triggers first.
-        player = _pool_top(1)[0]
+        player = pool_top()[0]
         _start_bid(page, player)
         with page.expect_response(re.compile(r"/assign")):
             page.click("#bid-panel form[hx-vals] button[type='submit']")
@@ -808,7 +799,7 @@ class TestATypoDoesNotVanish:
 
         # Derived from the pool, so a data refresh cannot turn this into a
         # successful bid check that silently tests nothing.
-        typo = f"{_pool_top(1)[0]} Jr."
+        typo = f"{pool_top()[0]} Jr."
         assert typo not in main.auction_state.available_players
 
         page.fill("#bid-panel input[name='player']", typo)
@@ -962,7 +953,7 @@ class TestTooltipsStayInsideTheirPanel:
             _open(pg, live_server)
             # A live bid, so .bid-details and its four tooltips actually exist —
             # they render only inside a verdict block.
-            _start_bid(pg, _pool_top(1)[0], bidders="BOT,SRL,MAC")
+            _start_bid(pg, pool_top()[0], bidders="BOT,SRL,MAC")
             pg.wait_for_selector(".bid-details .tooltip")
 
             where = f"{width}px/{state or 'fresh'}"

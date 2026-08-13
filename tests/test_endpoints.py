@@ -2085,3 +2085,95 @@ class TestTheTradeFormCanSeeTheMinors:
         assert minor.name not in bot, f"{minor.name} never left BOT"
         assert minor.name in theirs, f"{minor.name} left BOT but arrived nowhere"
         assert incoming.name in bot
+
+
+class TestDoneTeamsAreNotProjectedForward:
+    """A team that has stopped drafting must not be projected as if it hadn't.
+
+    `_context` estimates every opponent's finished total as
+    `current + unfilled_starter_slots × mean(points of the affordable top)`. For
+    a DONE team there are no more picks, so every one of those points is
+    invented — and the error is enormous rather than marginal, because a team
+    that stopped early never spent its budget, so its `physical_max_bid` is still
+    MAX_SALARY and the affordability filter hands it the best players in the pool.
+
+    Measured 2026-08-13 against the `endgame-ceiling-binds` scenario, whose eight
+    done teams read **+673 to +1101 points** above their real finals (SRL: 390
+    actual, 1491 shown). It corrupts the rank badge specifically, which is the
+    figure you read to know whether you are winning: BOT's real 1311 sat behind
+    five phantom teams and the panel said #6 while BOT was first by a distance.
+
+    Not an edge case — the design notes put 3+ early finishers in every draft, so
+    this was wrong on draft day, in the second half, every time.
+    """
+
+    _CELLS = re.compile(
+        r"<td>(\d+)</td>\s*<td class=\"font-semibold[^\"]*\">(\d+)", re.S
+    )
+
+    def _proj(self, html: str, code: str) -> tuple[int, int]:
+        """(Pts, Proj) for one team's League State row."""
+        start = html.index(f"<strong>{code}</strong>")
+        row = html[start:html.index("</tr>", start)]
+        found = self._CELLS.search(row)
+        assert found, f"could not read Pts/Proj out of {code}'s row: {row[:400]}"
+        return int(found.group(1)), int(found.group(2))
+
+    def test_marking_a_team_done_drops_its_projection_to_what_it_has(self, client):
+        import main
+
+        victim = next(
+            c for c, t in main.auction_state.teams.items()
+            if c != main.MY_TEAM and sum(t.roster_needs.values()) > 0
+        )
+        current, before = self._proj(client.get("/").text, victim)
+        # Precondition, so this cannot pass by both numbers being equal already.
+        assert before > current, (
+            f"{victim} is projected {before} against {current} now — pick a team "
+            f"with unfilled slots or this test proves nothing"
+        )
+
+        r = client.post("/team-done", data={"team_code": victim})
+        assert r.status_code == 200, r.text
+
+        current_after, after = self._proj(client.get("/").text, victim)
+        assert after == current_after, (
+            f"{victim} has stopped drafting but is still projected {after} "
+            f"against {current_after} actual — {after - current_after} invented points"
+        )
+        assert after < before, "the projection did not move at all"
+
+    def test_a_done_team_cannot_outrank_a_team_still_drafting(self, client):
+        """The consequence, stated as the thing the operator actually reads."""
+        import main
+
+        victim = next(
+            c for c, t in main.auction_state.teams.items()
+            if c != main.MY_TEAM and sum(t.roster_needs.values()) > 0
+        )
+        client.post("/team-done", data={"team_code": victim})
+        html = client.get("/").text
+        _, theirs = self._proj(html, victim)
+        _, mine = self._proj(html, main.MY_TEAM)
+        assert theirs < mine, (
+            f"{victim} stopped drafting on a part-built roster yet still projects "
+            f"{theirs} against BOT's {mine}, so the rank badge reads backwards"
+        )
+
+    def test_marking_my_own_team_done_stops_projecting_my_purchases(self, client):
+        """Why the `is_done` branch is ordered ahead of the MILP branch.
+
+        Marking your own team done is a legal move in that table, and a MILP that
+        keeps planning purchases you have sworn off is the same lie aimed at
+        yourself.
+        """
+        import main
+
+        current, before = self._proj(client.get("/").text, main.MY_TEAM)
+        assert before > current, "BOT needs open slots for this to prove anything"
+
+        client.post("/team-done", data={"team_code": main.MY_TEAM})
+        current_after, after = self._proj(client.get("/").text, main.MY_TEAM)
+        assert after == current_after, (
+            f"BOT is done but still projects {after} against {current_after}"
+        )

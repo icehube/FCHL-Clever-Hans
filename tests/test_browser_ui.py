@@ -876,6 +876,24 @@ class TestTooltipsStayInsideTheirPanel:
     # that actually caught the team-panel case; 375 and 1280 did not.
     WIDTHS = (375, 640, 700, 800, 1024, 1280, 1920)
 
+    # (width, scenario-or-None). A fresh reset cannot render 8 of the app's 20
+    # `data-tip` tooltips, and the one that mattered most is `#bid-limits`' only
+    # `tooltip-left`: it renders per CAPPED row, and on a fresh state the ceiling
+    # IS the salary cap, so nothing is ever capped and this suite had never once
+    # measured it (`BACKLOG.md`, bid_limits.html:41). `endgame-ceiling-binds`
+    # produces ~83 capped rows.
+    #
+    # Three widths rather than all seven, because the extra cost is a page load
+    # plus a live bid each and the risk does not vary smoothly: 375 is the 1-col
+    # case where the panel is widest, 1024 the tightest 3-col track (~329px), and
+    # 1280 the width the draft is actually run at. A left-anchored bubble in a
+    # horizontally scrollable table is most at risk at the narrow end.
+    STATES = tuple((w, None) for w in WIDTHS) + (
+        (375, "endgame-ceiling-binds"),
+        (1024, "endgame-ceiling-binds"),
+        (1280, "endgame-ceiling-binds"),
+    )
+
     PROBE = """() => {
       // The box a bubble must stay inside is the nearest ancestor that can
       // scroll, not the grid: since 2026-08-11 the league table and the roster
@@ -934,30 +952,34 @@ class TestTooltipsStayInsideTheirPanel:
         offenders: list[str] = []
         counted = 0
         seen: set[str] = set()
-        for width in self.WIDTHS:
+        for width, state in self.STATES:
             context = browser.new_context(viewport={"width": width, "height": 900})
             pg = context.new_page()
-            pg.request.post(f"{live_server}/reset")
+            if state is None:
+                pg.request.post(f"{live_server}/reset")
+            else:
+                pg.request.post(f"{live_server}/load-scenario", form={"name": state})
             _open(pg, live_server)
             # A live bid, so .bid-details and its four tooltips actually exist —
             # they render only inside a verdict block.
             _start_bid(pg, _pool_top(1)[0], bidders="BOT,SRL,MAC")
             pg.wait_for_selector(".bid-details .tooltip")
 
+            where = f"{width}px/{state or 'fresh'}"
             data = pg.evaluate(self.PROBE)
-            assert data["rows"], f"no tooltips found at {width}px"
+            assert data["rows"], f"no tooltips found at {where}"
             counted = max(counted, len(data["rows"]))
             seen.update(r["tip"] for r in data["rows"])
             for row in data["rows"]:
                 # `auto` on both sides means the bubble was never laid out,
                 # which would make every comparison below vacuously true.
                 assert not row["widthAuto"], (
-                    f"{width}px: could not resolve a bubble box for "
+                    f"{where}: could not resolve a bubble box for "
                     f"{row['text']!r} — this measurement is not viable"
                 )
                 if row["left"] < 0 or row["right"] > row["boxContent"]:
                     offenders.append(
-                        f"{width}px {row['text']!r} spans "
+                        f"{where} {row['text']!r} spans "
                         f"[{row['left']},{row['right']}] of "
                         f"0..{row['boxContent']} in {row['box']}"
                     )
@@ -966,7 +988,7 @@ class TestTooltipsStayInsideTheirPanel:
                 # only a narrower max-width will.
                 elif row["width"] > row["boxClient"]:
                     offenders.append(
-                        f"{width}px {row['text']!r} is {row['width']}px wide "
+                        f"{where} {row['text']!r} is {row['width']}px wide "
                         f"inside {row['box']}, which is only "
                         f"{row['boxClient']}px — unreadable at any anchor"
                     )
@@ -990,6 +1012,13 @@ class TestTooltipsStayInsideTheirPanel:
             "Marginal (bid panel)": "What he adds to YOUR optimal roster",
             "Sigma (price chart)": "How SPREAD OUT",
             "Proj (league table)": "Computed two ways",
+            # The app's only `tooltip-left`, and the reason the endgame scenario
+            # is in STATES. It renders per CAPPED row, so on a fresh state it
+            # never renders at all and this suite measured 0 of them until
+            # 2026-08-13. Requiring it by name means a scenario that stops
+            # producing capped rows fails HERE rather than quietly reverting this
+            # to a fresh-state-only check that still passes.
+            "Capped model price (available players)": "no opponent can push bidding that high",
         }
         missing = [k for k, frag in required.items() if not any(frag in t for t in seen)]
         assert not missing, (

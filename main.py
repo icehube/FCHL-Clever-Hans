@@ -690,7 +690,30 @@ def _context(request: Request) -> dict:
     projections = {}
     for code, t in auction_state.teams.items():
         current = t.current_roster_points
-        if code == MY_TEAM and milp_solution and milp_solution.status == "Optimal":
+        if t.is_done:
+            # A done team has STOPPED drafting, so its roster is final and its
+            # projection is simply what it has. Projecting its unfilled slots is
+            # not a small overstatement: measured 2026-08-13 on the
+            # endgame-ceiling-binds scenario, the eight done teams read +673 to
+            # **+1101** points above their real finals (SRL: 390 actual, 1491
+            # shown) because a team that never spent still has
+            # physical_max_bid = MAX_SALARY, so the affordability filter below
+            # hands it the best players in the pool.
+            #
+            # It corrupts the RANK BADGE, which is the number you read to know
+            # where you stand: BOT's real 1311 sat behind five phantom teams, so
+            # the panel said #6 when BOT was first by a mile. Reachable in every
+            # draft — the design notes put 3+ early finishers in each one — and
+            # it gets worse the further a done team is from a full roster.
+            #
+            # This branch is first on purpose, so it also covers BOT. Marking
+            # your own team done is a legal move in the League State table, and a
+            # MILP that keeps planning purchases you have sworn off is the same
+            # lie pointed at yourself. Done teams are already excluded from
+            # market ceilings, demand counts and nomination order; this is the
+            # same rule reaching the one place it had not.
+            projected = current
+        elif code == MY_TEAM and milp_solution and milp_solution.status == "Optimal":
             projected = int(milp_solution.total_points)
         else:
             # Only unfilled STARTER slots add points — bench scores nothing

@@ -966,11 +966,16 @@ class TestBidCheckOnAPlayerItCannotFind:
         assert 'id="bid-advice"' not in page
 
 
-class TestTheDegradedOptimizerBadge:
-    """When the roster MILP can't solve, every bid number is a floor fallback.
+class TestRenderingWhenTheOptimizerFails:
+    """A failed MILP changes TWO panels, and only one of them says so.
 
-    `bid_panel.html` says so in a warning, deliberately OUTSIDE the `bid_advice`
-    gate, so it qualifies the panel whether or not a bid is live. Untested until
+    `bid_panel.html` warns that every bid number is a floor fallback,
+    deliberately OUTSIDE the `bid_advice` gate, so it qualifies the panel whether
+    or not a bid is live. `team_panel.html` gates its headline number and its
+    whole buy list on the same status and just drops them. Both halves are
+    covered here — the class was badge-only for the first hour of its life, and
+    closing the "MILP-infeasible rendering" backlog item on that basis was an
+    over-claim. Untested until
     2026-08-13 on the grounds that the trigger was unreachable — half true. It is
     unreachable through *bidding* (owner decision 2026-08-06: the commissioner
     refuses any bid that would leave a team unable to fill 24), but buyout
@@ -1031,6 +1036,52 @@ class TestTheDegradedOptimizerBadge:
         page = client.get("/").text
         assert 'id="bid-panel"' in page, "GET / did not render the bid panel"
         assert "Optimizer" not in page
+
+    def test_the_team_panel_stops_showing_a_buy_list(self, client):
+        """The other half of a failed MILP — and the half that explains nothing.
+
+        `team_panel.html` gates both the Optimal Projected Points headline and
+        every MILP *target* row on `status == "Optimal"`, so an Infeasible solve
+        silently strips the buy list out of BOT's own panel: measured 2026-08-13
+        at 12 of 63 rows and ~5.6KB, with the word "Optimizer" appearing nowhere
+        inside that panel — the badge that explains it is in `#bid-panel`, a
+        different grid column.
+
+        Asserted on the target NAMES rather than on a row count or the styling
+        class that marks them, so a restyle cannot quietly make this vacuous.
+        Narrowed to the names actually on screen while Optimal, which is what
+        stops the second half passing for the wrong reason — an HTML-escaped
+        name would never match either string either way.
+
+        One mutation this deliberately does NOT kill: deleting
+        `milp.status == "Optimal"` from `show_milp` (team_panel.html:72) leaves
+        it green, because every non-Optimal return in `solve_optimal_roster`
+        sets `roster=[]` (optimizer.py:147, 156, 262) and the `and milp.roster`
+        term already gates the list. The status term there is belt-and-braces,
+        not a second source of truth — the *headline* alert on line 61 has no
+        such backstop and dropping its check does redden this test. Recorded so
+        the surviving mutant reads as redundancy rather than as a weak assert.
+        """
+        import main
+
+        bot = main.auction_state.teams[main.MY_TEAM]
+        rostered = {p.name for p in bot.keeper_players + bot.acquired_players}
+        targets = [p.name for p in main.milp_solution.roster if p.name not in rostered]
+        assert targets, "a fresh BOT has nothing left to buy — this tests nothing"
+
+        panel = section_of(client.get("/").text, "team-panel")
+        assert "Optimal Projected Points" in panel
+        visible = [t for t in targets if t in panel]
+        assert visible, f"none of {len(targets)} targets is on screen to lose"
+
+        self._degrade()
+        after = section_of(client.get("/").text, "team-panel")
+        assert "Optimal Projected Points" not in after
+        assert not [t for t in visible if t in after], (
+            "the optimizer failed but the panel is still recommending buys, so "
+            "the prices and points beside them are floor fallbacks presented as "
+            "a plan"
+        )
 
 
 class TestTeamView:

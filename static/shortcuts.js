@@ -55,6 +55,25 @@ document.body.addEventListener('htmx:sendError', function() {
     }}));
 });
 
+/* Dismiss a nomination recommendation once you have acted on it.
+
+   The recommendation is stale the moment bidding starts, and it competes with
+   the bid panel for attention at the highest-tempo moment of the draft. Only
+   the half that was acted on goes: per the CBA a nomination turn is 1 RFA + 1
+   UFA and an RFA sale KEEPS the turn, so the other half is the next thing the
+   operator needs.
+
+   On afterRequest, not on click: htmx aborts an in-flight request whose
+   triggering element is removed from the DOM, so removing the block on click
+   would cancel the very /bid-check it is meant to accompany. Gated on
+   `successful` so a failed request leaves the recommendation on screen rather
+   than silently discarding it — /nominate is the only way back. */
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    if (!e.detail.successful) return;
+    var pick = e.target.closest && e.target.closest('.nomination-pick');
+    if (pick) pick.remove();
+});
+
 /* Sort table by clicking column headers */
 function sortTable(th) {
     var table = th.closest('table');

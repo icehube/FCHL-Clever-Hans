@@ -34,8 +34,14 @@
     </button>
     {% endif %}
 
+    {# `.nomination-pick` marks a recommendation as dismissable: shortcuts.js
+       removes the one whose "Bid on" form just fired, AFTER the request
+       succeeds. Only that one — per the CBA a nomination turn is 1 RFA + 1 UFA
+       and an RFA sale KEEPS the turn, so the other half is the next thing you
+       need, not clutter. Removed on afterRequest rather than on click because
+       htmx aborts a request whose triggering element leaves the DOM. #}
     {% if rfa_pick is defined and rfa_pick %}
-    <div class="mb-2">
+    <div class="mb-2 nomination-pick">
         <h3 class="font-semibold text-sm mb-1">RFA Pick (Secret Bid)</h3>
         <div class="card bg-base-300 p-3 text-sm">
             <div class="font-bold text-accent">{{ rfa_pick.player.name }}</div>
@@ -59,7 +65,7 @@
     {% endif %}
 
     {% if ufa_pick is defined and ufa_pick %}
-    <div class="mb-2">
+    <div class="mb-2 nomination-pick">
         <h3 class="font-semibold text-sm mb-1">UFA Pick (Open Bid)</h3>
         <div class="card bg-base-300 p-3 text-sm">
             <div class="font-bold text-accent">{{ ufa_pick.player.name }}</div>

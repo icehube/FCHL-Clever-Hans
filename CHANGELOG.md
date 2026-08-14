@@ -20,6 +20,21 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-14]
+
+### Added
+
+- **Two things that competed with the bid advice mid-auction can now be dismissed.** Both from the 2026-08-07 testing pass. The counterfactual gained a close button — it auto-loads under the live bid advice on every whole-panel swap and previously could not be got rid of. It closes with `this.closest('.counterfactual-card')`, never an id, because that body is mounted twice (the `#explanation` panel from the players table's "?" links, and inline under the bid panel). And a nomination recommendation now disappears once you have acted on it.
+
+  **Only the half you acted on goes**, which the original request did not distinguish: per the CBA a nomination turn is 1 RFA + 1 UFA and *an RFA sale keeps the turn*, so hiding both would delete the next thing the operator needs. Removal happens on `htmx:afterRequest`, not on click, because **htmx aborts an in-flight request whose triggering element leaves the DOM** — the naive version would cancel the very `/bid-check` the button exists to start. It is gated on `event.detail.successful`, so a failed request leaves the recommendation on screen; `/nominate` is the only way back. Implemented as a listener in `shortcuts.js` rather than a server-side out-of-band swap: `/bid-check` deliberately does not touch the nomination panel (that panel split is what stopped price changes wiping the recommendations), and re-coupling them for this would undo it.
+
+  **Three of the four mutation checks on the browser tests initially survived, and each one exposed a real gap.** (1) Closing the *bid panel's* counterfactual cannot distinguish `closest()` from `document.querySelector()` — `all_panels.html` puts `.area-auction` before `.area-players`, so the bid panel's card is already first in document order and both implementations return the same element. The test now closes the `#explanation` card, the one that is not first, which is where they disagree. (2) With that fixed, `getElementById('explanation').remove()` still passed: it takes the card with it. So the test now also asserts the **mount survives its contents** — destroying `#explanation` would remove the target every future "?" link swaps into, the same failure `buyout_scan.html`'s unconditional wrapper exists to prevent. (3) The abort hazard is pinned by asserting the bid panel is actually bidding on the player afterwards; without it the test passes against a build that dismisses the card and fires nothing.
+
+### Fixed
+
+- **`TestExplain` had a silent trap and an assert-nothing test, in the code path being changed.** `test_explain_player` fetched a hard-coded `Sidney Crosby` and asserted `"Counterfactual" in r.text` — but "Counterfactual" is the *panel heading*, present in the 267-byte empty state too, so once that name left `players.csv` the test would have passed against a page holding no counterfactual at all. It now derives the name from the pool and asserts on `.counterfactual-card`, and pointing the derivation at a missing player reddens it where the old form stayed green. `test_explain_invalid` asserted only `status_code == 200`, which is true of every response the endpoint can produce; it now pins the empty state by size and by the absence of the card. Two new cases cover what the close button depends on: both mounts render it, and the inline mount carries no `id="explanation"` — previously only the mount's `inline=1` *attribute* was checked, never the response's id-freedom.
+
+
 ## [2026-08-13]
 
 ### Changed

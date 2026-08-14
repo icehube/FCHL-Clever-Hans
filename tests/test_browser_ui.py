@@ -1027,3 +1027,101 @@ class TestTooltipsStayInsideTheirPanel:
             f"{len(offenders)} tooltip bubbles render outside the panel area:\n  "
             + "\n  ".join(offenders[:8])
         )
+
+
+class TestMidBidClutterCanBeDismissed:
+    """Two things that compete with the bid advice at the highest-tempo moment.
+
+    Both are DOM-removal properties, which is why they live here: TestClient can
+    prove the close button and the marker class are RENDERED (and
+    `TestExplain` does), but only a browser can answer whether a click removes
+    the right element — or whether removing an element cancels the request that
+    was meant to accompany it.
+    """
+
+    def test_closing_one_counterfactual_leaves_the_other(self, page, live_server):
+        """The two-mount invariant, at the only altitude where it is visible.
+
+        `counterfactual.html` is mounted twice — as the #explanation panel from
+        the players table's "?" links, and inline under the live bid advice. A
+        close button resolving by id, or by any document-wide query, removes
+        whichever comes first in document order rather than the one clicked.
+
+        **Only one of the two directions can detect that, and the first draft of
+        this test picked the wrong one.** `all_panels.html` puts `.area-auction`
+        before `.area-players`, so the BID PANEL's card is first: clicking its
+        own close button hits the same element whether the code says `closest()`
+        or `document.querySelector()`, and a mutation to the latter sailed
+        through green. So this closes the **#explanation** card — the one that is
+        not first — which is where the two implementations disagree.
+        """
+        _open(page, live_server)
+        bid_player, other = pool_top(2)
+        _start_bid(page, bid_player)
+        page.wait_for_selector("#bid-panel .counterfactual-card")
+
+        page.click(f'#bid-limits a[hx-get^="/explain/"]:right-of(:text-is("{other}"))')
+        page.wait_for_selector("#explanation .counterfactual-card")
+        assert page.locator(".counterfactual-card").count() == 2, (
+            "the test needs both mounts in one document or it proves nothing"
+        )
+        assert page.locator(".counterfactual-card").first.evaluate(
+            "el => !!el.closest('#bid-panel')"
+        ), (
+            "the bid panel's card is no longer first in document order, so "
+            "closing #explanation's stops discriminating — swap the direction"
+        )
+
+        page.click("#explanation .counterfactual-card button")
+        page.wait_for_selector("#explanation .counterfactual-card", state="detached")
+        assert page.locator("#bid-panel .counterfactual-card").count() == 1, (
+            "closing the panel's counterfactual removed the bid panel's instead "
+            "— the close button is resolving document-wide, not with closest()"
+        )
+        # The MOUNT has to outlive its contents. `getElementById('explanation')
+        # .remove()` passes every assertion above — it takes the card with it —
+        # while destroying the target every future "?" link swaps into, so the
+        # panel could never come back. Same rule as buyout_scan.html's
+        # unconditional wrapper.
+        assert page.locator("#explanation").count() == 1, (
+            "the close button removed the #explanation mount, not just the card "
+            "— the panel is the target of every '?' link and cannot come back"
+        )
+        assert page.locator("#bid-counterfactual").count() == 1, (
+            "the inline mount is gone, so the bid panel's lazy load has nowhere "
+            "to land on the next whole-panel swap"
+        )
+
+    def test_bidding_a_pick_dismisses_that_recommendation_only(self, page, live_server):
+        """And the /bid-check it fired must still land.
+
+        The reason this is removed on afterRequest rather than on click: htmx
+        aborts an in-flight request whose triggering element leaves the DOM, so
+        the naive version would cancel the very bid check the button exists to
+        start. The bid-panel assertion at the end is what catches that — without
+        it this passes against a build that dismisses the card and does nothing.
+        """
+        _open(page, live_server)
+        page.keyboard.press("n")
+        page.wait_for_selector(".nomination-pick")
+        picks = page.locator(".nomination-pick")
+        assert picks.count() == 2, (
+            f"expected an RFA and a UFA recommendation, got {picks.count()} — "
+            f"with one block there is no 'only' to prove"
+        )
+        rfa = page.locator(".nomination-pick", has_text="RFA Pick")
+        player = rfa.locator(".font-bold").first.inner_text().strip()
+
+        with page.expect_response(re.compile(r"/bid-check")):
+            rfa.locator("button[type='submit']").click()
+
+        page.wait_for_selector(".nomination-pick:has-text('RFA Pick')", state="detached")
+        assert page.locator(".nomination-pick", has_text="UFA Pick").count() == 1, (
+            "bidding the RFA half dismissed the UFA recommendation too — an RFA "
+            "sale KEEPS the nomination turn, so that is the next thing needed"
+        )
+        panel = page.locator("#bid-panel").inner_text()
+        assert player.split(" (")[0] in panel, (
+            f"the bid panel is not bidding on {player} — removing the card "
+            f"aborted its own /bid-check"
+        )

@@ -680,14 +680,60 @@ class TestNominate:
 
 class TestExplain:
     def test_explain_player(self, client):
-        """Explain should return counterfactual."""
-        r = client.get("/explain/Sidney Crosby")
+        """Explain should return a populated counterfactual.
+
+        Asserted on `.counterfactual-card`, not on the word "Counterfactual":
+        that word is the PANEL HEADING and it is in the 267-byte empty state
+        too, so with the hard-coded name this test carried until 2026-08-14
+        (`Sidney Crosby`) a data refresh would have left it passing against a
+        page holding no counterfactual at all. Name derived for the same reason.
+        """
+        player = pool_top()[0]
+        r = client.get(f"/explain/{player}")
         assert r.status_code == 200
-        assert "Counterfactual" in r.text
+        assert "counterfactual-card" in r.text, (
+            "no counterfactual body — the panel rendered its empty state"
+        )
+        assert player in html.unescape(r.text)
 
     def test_explain_invalid(self, client):
+        """The empty state, asserted rather than merely reached.
+
+        This checked `status_code == 200` alone until 2026-08-14, which is true
+        of every response the endpoint can produce.
+        """
         r = client.get("/explain/Nobody")
         assert r.status_code == 200
+        assert "counterfactual-card" not in r.text
+        assert len(r.text) < 400, f"expected an empty state, got {len(r.text)} bytes"
+
+    def test_both_mounts_carry_a_close_button(self, client):
+        """The panel and the inline copy under the bid panel both get one.
+
+        The inline mount is the one the operator cannot otherwise dismiss: it
+        auto-loads on every whole-panel swap and sits directly under the live
+        bid advice.
+        """
+        player = pool_top()[0]
+        for url in (f"/explain/{player}", f"/explain/{player}?inline=1"):
+            body = client.get(url).text
+            assert "counterfactual-card" in body, url
+            assert "this.closest('.counterfactual-card').remove()" in body, url
+            assert "getElementById" not in body, (
+                f"{url} closes by id — mounted twice, so that removes the FIRST "
+                f"counterfactual in the document, not the one clicked"
+            )
+
+    def test_the_inline_mount_carries_no_panel_id(self, client):
+        """The invariant the close button's `closest()` depends on.
+
+        Same rule as the chart: the body is mounted in two places, so it owns no
+        id. If the inline copy carried `id="explanation"` the document would hold
+        two, and htmx would resolve `hx-target` to whichever came first.
+        """
+        body = client.get(f"/explain/{pool_top()[0]}?inline=1").text
+        assert "counterfactual-card" in body, "nothing rendered, so nothing proven"
+        assert 'id="explanation"' not in body
 
 
 class TestTeamDone:

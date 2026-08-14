@@ -9,8 +9,18 @@
    own. Reachable inline only if the player leaves the pool between the bid
    panel rendering and this loading. #}
 {% if counterfactual is defined and counterfactual %}
-<div>
-    <h3 class="font-bold text-sm">{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
+<div class="counterfactual-card">
+    <div class="flex items-center justify-between">
+        <h3 class="font-bold text-sm">{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
+        {# closest(), never getElementById: this body is mounted twice, so an id
+           lookup would close the FIRST counterfactual in the document rather
+           than the one the button sits in — the same reason the class lives on
+           this div instead of an id. Mirrors player_chart.html's close button.
+           The inline mount reloads on the next whole-panel swap (hx-trigger
+           ="load" in bid_panel.html), which is right: dismissing stale numbers
+           should not suppress fresh ones. #}
+        <button onclick="this.closest('.counterfactual-card').remove()" class="btn btn-xs btn-ghost">&times;</button>
+    </div>
 
     <div class="grid grid-cols-2 gap-2 mt-2">
         <div class="card bg-base-300 p-3">

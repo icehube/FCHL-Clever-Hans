@@ -109,9 +109,6 @@ entry that closes, and one had already closed by then.)
   tie-break (see `.claude/rules/pricing-pipeline.md`). So this is an *additional*
   column, not a correction: the two side by side show at a glance who is cheap
   because the market is thin versus cheap because the model rates him low.
-- **Hide the recommendations once "Bid on X" is clicked.** They are stale the
-  moment the auction starts, and they stay on screen competing with the bid
-  panel for attention.
 
 **Buyout Analyzer**
 
@@ -190,11 +187,6 @@ was wrong and the same premise would sink the follow-up:
   affordance is not obvious; this is the panel most likely to be used under time
   pressure during a break.
 
-**Counterfactual**
-
-- **Close button.** Copy `player_chart.html`'s `this.closest('.the-card').remove()`
-  — *not* `getElementById`, per the CLAUDE.md rule about partials mounted in two
-  places.
 
 ### Testing
 

@@ -1097,6 +1097,40 @@ class TestLeagueStateIsNarrow:
     def _panel(self, client) -> str:
         return section_of(client.get("/").text, "league-state")
 
+    def test_every_row_has_a_cell_for_every_header(self, client):
+        """The Penalty column is conditional in BOTH `<th>` and `<td>`.
+
+        Two `{% if any_penalties %}` guards 40 lines apart have to agree, and
+        nothing checked that they did. Written after this table's column count
+        was found recorded as 13 in four separate documents when it is 12 — a
+        number nobody could check is a number that rots, so this asserts the
+        shape instead of restating the figure. Deliberately relative: it pins
+        header-to-cell agreement, not a hard-coded 12, so adding a column is a
+        one-line template change rather than a test edit.
+        """
+        import main
+
+        for penalties in (True, False):
+            for t in main.auction_state.teams.values():
+                t.penalties = 0.3 if penalties else 0.0
+                t._invalidate_cache()
+            panel = self._panel(client)
+            head = panel[panel.index("<thead>"):panel.index("</thead>")]
+            # `<th>` and `<th ` specifically: `count("<th")` also matches
+            # `<thead>`, and that off-by-one is almost certainly where the
+            # recorded 13 came from — the first draft of THIS test reproduced
+            # it, which is the best argument for the test existing.
+            headers = head.count("<th>") + head.count("<th ")
+            body = panel[panel.index("<tbody>"):]
+            rows = [r for r in body.split("<tr")[1:]]
+            assert rows, "League State rendered no rows"
+            for row in rows:
+                assert row.count("<td") == headers, (
+                    f"{headers} headers but {row.count('<td')} cells with "
+                    f"penalties={penalties} — the two `any_penalties` guards "
+                    f"disagree, so a column is silently offset"
+                )
+
     def test_it_shows_codes_and_not_full_names(self, client):
         import main
 

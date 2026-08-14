@@ -1,7 +1,8 @@
 <section class="card bg-base-200 shadow-md p-4" id="league-state">
     <h2 class="card-title text-accent text-base mb-2">League State</h2>
     {% set any_penalties = teams.values()|selectattr('penalties', 'gt', 0)|list|length > 0 %}
-    {# 13 columns, min-content 868px — still the widest thing in the app, and the
+    {# 12 columns (11 when no team carries a penalty), min-content 868px — still
+       the widest thing in the app, and the
        element that used to set its whole grid column's floor and push
        #team-panel off-screen (see .auction-grid in style.css). It scrolls
        itself now; without this wrapper it paints across the team panel.

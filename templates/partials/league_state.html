@@ -1,10 +1,20 @@
 <section class="card bg-base-200 shadow-md p-4" id="league-state">
     <h2 class="card-title text-accent text-base mb-2">League State</h2>
     {% set any_penalties = teams.values()|selectattr('penalties', 'gt', 0)|list|length > 0 %}
-    {# 13 columns, min-content 955px — the widest thing in the app, and the
+    {# 13 columns, min-content 868px — still the widest thing in the app, and the
        element that used to set its whole grid column's floor and push
        #team-panel off-screen (see .auction-grid in style.css). It scrolls
-       itself now; without this wrapper it paints across the team panel. #}
+       itself now; without this wrapper it paints across the team panel.
+
+       Was 955px until 2026-08-13, when the full team name and the "Stopped
+       Drafting" label came out. That bought only 87px, and measuring per column
+       says why: min-content is each column's longest WORD, not its longest
+       string, so a two-word name never cost more than "Johannesburg". Every one
+       of the 12 columns is now floored by its own HEADER — Remaining 102,
+       Spendable 100, Cap Used 92, Max Bid 83, Penalty 81 — summing to exactly
+       the 868. Nothing in the body can narrow this table further; only shorter
+       headers can, and that trades legibility in a dense numeric table. See
+       BACKLOG.md before reaching for it. #}
     <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
         <thead>
@@ -43,8 +53,16 @@
                 </a>
             </td>
             <td>
-                <a hx-get="/team-view/{{ code }}" hx-target="#team-panel" hx-swap="outerHTML" class="link link-hover text-sm">
-                    <strong>{{ code }}</strong> <span class="text-xs opacity-60 ml-1">{{ t.name }}</span>
+                {# Code only. The full name is up to 23 characters ("Johannesburg
+                   Israeleafs") and it was the widest string in the widest table
+                   in the app — see the min-content note above. Native `title`
+                   rather than a DaisyUI `data-tip`, following the bidder toggle
+                   in bid_panel.html: a tip here would join an inventory whose
+                   placement is already only partly checked, and buy a placement
+                   problem for a hover hint. The name still reads in full on the
+                   team panel header and in both trade dropdowns. #}
+                <a hx-get="/team-view/{{ code }}" hx-target="#team-panel" hx-swap="outerHTML" class="link link-hover text-sm" title="{{ t.name }}">
+                    <strong>{{ code }}</strong>
                 </a>
                 {% if t.is_my_team %}<span class="badge badge-info badge-xs ml-1">★</span>{% endif %}
             </td>
@@ -61,9 +79,19 @@
             <td>
                 <form hx-post="/team-done" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ code }}">
+                    {# A binary flag, so one glyph rather than "Stopped Drafting"
+                       — the second-widest string in the table. Colour already
+                       carries the state (error/success outline); `aria-label` is
+                       what keeps the button named once the words are gone, and
+                       `title` still describes the ACTION, which is not the same
+                       thing. `○` rather than an empty button for the drafting
+                       case: this control excludes a team from every market
+                       ceiling, and a blank click target is the wrong place to
+                       save 8px. #}
                     <button type="submit" class="btn btn-xs {% if t.is_done %}btn-error btn-outline{% else %}btn-success btn-outline{% endif %}"
+                            aria-label="{{ 'Stopped drafting' if t.is_done else 'Still drafting' }}"
                             title="{{ 'Click to include in market calculations' if t.is_done else 'Click to exclude from market calculations' }}">
-                        {{ "Stopped Drafting" if t.is_done else "Drafting" }}
+                        {{ "✕" if t.is_done else "○" }}
                     </button>
                 </form>
             </td>

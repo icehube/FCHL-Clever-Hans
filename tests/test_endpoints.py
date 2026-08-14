@@ -1084,6 +1084,75 @@ class TestRenderingWhenTheOptimizerFails:
         )
 
 
+class TestLeagueStateIsNarrow:
+    """The densest table in the app answers by code and by glyph, not in prose.
+
+    `#league-state` is the widest element on screen and the one that used to set
+    its whole grid column's floor. Sliced with `section_of` on purpose: both
+    trade dropdowns render `code — name` for all eleven teams, so a whole-page
+    check for a team name is true no matter what this table does — the exact
+    trap `section_of`'s own docstring documents.
+    """
+
+    def _panel(self, client) -> str:
+        return section_of(client.get("/").text, "league-state")
+
+    def test_it_shows_codes_and_not_full_names(self, client):
+        import main
+
+        panel = self._panel(client)
+        teams = main.auction_state.teams
+        missing = [c for c in teams if c not in panel]
+        assert not missing, f"League State is missing team codes: {missing}"
+        # The name is still in the markup, as the `title=` the sibling test
+        # requires — so "not in panel" would be false by construction. Count
+        # instead: every occurrence must BE that attribute. Restoring the name
+        # span puts a second one in the cell text and this fires.
+        spelled_out = [
+            t.name for t in teams.values()
+            if panel.count(t.name) > panel.count(f'title="{t.name}"')
+        ]
+        assert not spelled_out, (
+            f"full team names are rendered as text in League State "
+            f"({spelled_out}) — they cost width in the one table that already "
+            f"scrolls to fit"
+        )
+
+    def test_the_name_is_still_one_hover_away(self, client):
+        """Narrower must not mean unreadable: the code still resolves to a name."""
+        import main
+
+        panel = self._panel(client)
+        for t in main.auction_state.teams.values():
+            assert f'title="{t.name}"' in panel, (
+                f"{t.code} carries no title, so its code decodes to nothing"
+            )
+
+    def test_done_reads_as_a_glyph_both_ways(self, client):
+        """Driven through the real toggle, not read off a fresh template.
+
+        The colour classes already encode the state, so asserting on those would
+        pass against a button that still said "Stopped Drafting" — the glyph is
+        the thing this change is about.
+        """
+        import main
+
+        victim = next(c for c in main.auction_state.teams if c != main.MY_TEAM)
+        before = self._panel(client)
+        assert "○" in before and "✕" not in before, "a fresh league has nobody done"
+
+        r = client.post("/team-done", data={"team_code": victim})
+        assert main.auction_state.teams[victim].is_done, (
+            f"/team-done did not mark {victim} done, so the glyph below would "
+            f"be asserting against an unchanged table"
+        )
+        after = section_of(r.text, "league-state")
+        assert "✕" in after, f"{victim} is done but the row does not say so"
+        assert 'aria-label="Stopped drafting"' in after, (
+            "the glyph replaced the button's accessible name instead of moving it"
+        )
+
+
 class TestTeamView:
     """The success path of /team-view renders partials/team_detail.html, which
     imports the player_label macro. test_edge_cases.test_team_view_nonexistent

@@ -145,10 +145,25 @@ entry that closes, and one had already closed by then.)
 
 **League State table**
 
-- **Three-letter codes only.** Full names wrap and cost the column width the
-  numbers need.
-- **Render Done as an X**, not the current text — it is a binary flag in a
-  dense table.
+Both original items — three-letter codes only, and Done as an X — landed
+2026-08-13. What they bought is worth recording, because the premise under them
+was wrong and the same premise would sink the follow-up:
+
+- **Shorter column headers are the only lever left, and it is a real trade.**
+  Removing the full team name and the "Stopped Drafting" label took min-content
+  from **955px to 868px** — only 87px, because min-content is each column's
+  longest *word*, not its longest string, so a two-word name never cost more
+  than "Johannesburg" and the wrapped button never more than "Drafting".
+  Measured per column afterwards, **all 12 columns are now floored by their own
+  header text** and they sum to exactly the 868: Remaining 102, Spendable 100,
+  Cap Used 92, Max Bid 83, Penalty 81, Roster 73, Needs 72, Team 66, Proj 57,
+  Done 53, Pts 51, logo 38. So nothing in the table *body* can narrow this
+  further — `Rem` / `Spend` / `Cap` / `Max` / `Pen` would, by roughly 200px, and
+  that is abbreviating the labels on a dense grid of money figures that all look
+  alike. Not filed as a want because it was not asked for and the legibility
+  cost is real; filed as the measurement so the next person does not re-derive
+  it or reach for the body again. The table still overflows its column at every
+  width including 1920, so `.table-scroll-x` stays load-bearing either way.
 
 **Available Players**
 

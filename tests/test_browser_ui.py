@@ -1121,7 +1121,34 @@ class TestMidBidClutterCanBeDismissed:
             "sale KEEPS the nomination turn, so that is the next thing needed"
         )
         panel = page.locator("#bid-panel").inner_text()
-        assert player.split(" (")[0] in panel, (
+        assert player in panel, (
             f"the bid panel is not bidding on {player} — removing the card "
             f"aborted its own /bid-check"
+        )
+
+    def test_a_failed_bid_check_leaves_the_recommendation_on_screen(
+        self, page, live_server
+    ):
+        """`/nominate` is the only way back, so a failure must not discard it.
+
+        Pins the `event.detail.successful` guard, which is a documented rule in
+        CLAUDE.md and was otherwise reasoned from the htmx contract rather than
+        measured. Without the guard the operator loses the recommendation AND
+        gets no bid — the worst of both, at the tempo where it matters most.
+        """
+        _open(page, live_server)
+        page.keyboard.press("n")
+        page.wait_for_selector(".nomination-pick")
+        rfa = page.locator(".nomination-pick", has_text="RFA Pick")
+        assert rfa.count() == 1
+
+        page.route("**/bid-check", lambda route: route.fulfill(
+            status=500, content_type="text/html", body="boom"))
+        with page.expect_response(re.compile(r"/bid-check")):
+            rfa.locator("button[type='submit']").click()
+        page.wait_for_timeout(300)  # let any afterRequest handler run
+
+        assert page.locator(".nomination-pick", has_text="RFA Pick").count() == 1, (
+            "a 500 from /bid-check discarded the recommendation — nothing was "
+            "bid and the only way back is re-running /nominate"
         )

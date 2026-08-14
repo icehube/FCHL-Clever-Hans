@@ -13,7 +13,8 @@
 <div class="price-chart-card card bg-base-300 p-2 mb-2">
     <div class="flex items-center justify-between mb-1">
         <h3 class="font-semibold text-sm">Price Model: {{ chart_player.name }}</h3>
-        <button onclick="this.closest('.price-chart-card').remove()" class="btn btn-xs btn-ghost">&times;</button>
+        <button onclick="this.closest('.price-chart-card').remove()" class="btn btn-xs btn-ghost"
+                aria-label="Close the price chart" title="Close">&times;</button>
     </div>
     <div class="chart-meta">
         {{ chart_player.position }} · <img src="/nhl_logos/{{ chart_player.nhl_team }}.svg" alt="{{ chart_player.nhl_team }}" class="h-5 inline object-contain" title="{{ chart_player.nhl_team }}"> · {{ chart_player.projected_points }}pts

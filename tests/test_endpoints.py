@@ -723,6 +723,11 @@ class TestExplain:
                 f"{url} closes by id — mounted twice, so that removes the FIRST "
                 f"counterfactual in the document, not the one clicked"
             )
+            # A glyph is not a name: with no aria-label the button's accessible
+            # name computes to "×" (U+00D7), announced as "times". The League
+            # State done toggle carries one for exactly this reason.
+            assert "aria-label=" in body, f"{url}'s close button has no name"
+
 
     def test_the_inline_mount_carries_no_panel_id(self, client):
         """The invariant the close button's `closest()` depends on.
@@ -844,6 +849,17 @@ class TestPlayerChart:
         assert "Price Model" in r.text
         assert "<svg" in r.text
         assert "<path" in r.text
+
+    def test_the_close_button_has_an_accessible_name(self, client):
+        """`&times;` alone computes to "times", which names nothing.
+
+        Same gap the counterfactual shipped with on 2026-08-14 and the League
+        State done toggle had already fixed a day earlier — caught by grilling
+        the copy, so both were labelled together.
+        """
+        r = client.get(f"/player-chart/{pool_top()[0]}")
+        assert "price-chart-card').remove()" in r.text, "no close button rendered"
+        assert 'aria-label="Close the price chart"' in r.text
 
     def test_the_chart_body_carries_no_mount_id(self, client):
         """The property that makes two mounts legal.

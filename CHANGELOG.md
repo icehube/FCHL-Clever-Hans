@@ -20,6 +20,20 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-15b]
+
+### Fixed
+
+- **Every sortable column in the app now actually sorts; one of them never has.** The Available Players NHL header carried `data-sort-col`, an `onclick` and `cursor-pointer` since the column was added, but `sortTable` compared `cell.textContent` and the cell holds only an `<img>` — measured **0 of 705 rows with any text**, so every key tied, the stable sort was a no-op, and clicking left the order byte-identical. A control that looks live and is inert is worse than no control: mid-draft you assume the sort took and read the wrong row.
+
+  Fixed in shared JS rather than by removing the affordance, because sorting a 705-player pool by club is plausibly useful: `cellSortText()` falls back to the cell's `img[alt]`, which is already the club code and already what a screen reader announces, so the sort order matches what the column communicates. Verified in Chrome — ascending puts ANA first and descending WSH, all 705 rows preserved, no console errors. The two NHL headers in `logs_panel.html`, made deliberately non-sortable a day earlier *because* the mechanism did not exist, are sortable again.
+
+  **An empty cell is not an inert column, and the distinction is load-bearing.** The RFA column is blank for 683 of 705 players and carries a prior team for the other 22; grouping those 22 is exactly what clicking it is for. A first pass at the guard sampled only the first body row and would have condemned it.
+
+### Investigated
+
+- **The guard that was supposed to catch this had been scoped to the wrong panel.** `test_no_header_offers_a_sort_that_cannot_work` shipped 2026-08-15 inside `TestTheLogsPanel`, written as "the general rule rather than the instance" — but scoped to one panel it could never see `bid_limits.html`, where the live bug was, in the table scanned most during a draft. Replaced by `TestEverySortableColumnCanActuallySort`, which walks every `<table>` in `GET /` and every body row. Three tests, because the HTML-level ones cannot see JavaScript: two assert no column is inert and that at least one genuinely depends on the fallback, and a third reads `static/shortcuts.js` to assert `sortTable` still routes through `cellSortText` and that the `img[alt]` branch is still there — without it, reverting the fix left both HTML tests green, since they simulate the fallback rather than run it.
+
 ## [2026-08-15]
 
 ### Added

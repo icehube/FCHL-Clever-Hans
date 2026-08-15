@@ -74,6 +74,27 @@ document.body.addEventListener('htmx:afterRequest', function(e) {
     if (pick) pick.remove();
 });
 
+/* What a cell sorts on, falling back to an image's alt text.
+
+   A column of bare <img> has no textContent, so every row produced the same
+   key, the stable sort was a no-op and the header was inert while still
+   looking clickable — measured 2026-08-15 at 0 of 705 rows in the Available
+   Players NHL column. That is worse than no control: mid-draft you assume the
+   sort took and read the wrong row.
+
+   `alt` rather than `title` because alt is what the column already announces
+   to a screen reader, so the sort order matches what the cell communicates.
+   Note an EMPTY cell is different from an inert column and must stay empty:
+   the RFA column is blank for the 683 non-RFA players and sorts correctly on
+   the 22 that aren't — grouping them is the point of clicking it. */
+function cellSortText(cell) {
+    if (!cell) return '';
+    var text = cell.textContent.trim();
+    if (text) return text;
+    var img = cell.querySelector('img[alt]');
+    return img ? img.getAttribute('alt').trim() : '';
+}
+
 /* Sort table by clicking column headers */
 function sortTable(th) {
     var table = th.closest('table');
@@ -92,8 +113,8 @@ function sortTable(th) {
     th.classList.add(asc ? 'sort-asc' : 'sort-desc');
 
     rows.sort(function(a, b) {
-        var aText = a.cells[col].textContent.trim();
-        var bText = b.cells[col].textContent.trim();
+        var aText = cellSortText(a.cells[col]);
+        var bText = cellSortText(b.cells[col]);
         var aVal, bVal;
 
         if (type === 'currency') {

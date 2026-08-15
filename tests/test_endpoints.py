@@ -2616,47 +2616,6 @@ class TestTheLogsPanel:
             "a non-team code became a /team-view link"
         )
 
-    def test_no_header_offers_a_sort_that_cannot_work(self, client):
-        """`sortTable` compares `cell.textContent`, so a column of bare <img>
-        sorts every row to the same key and the click does nothing.
-
-        Measured in Chrome before this guard: clicking NHL left the row order
-        byte-identical, because the cells read "\n\n\n". A control that looks
-        live and is inert is worse than no control — during a draft you assume
-        the sort worked and read the wrong row. Stated as the general rule
-        rather than as "the NHL header has no onclick", so a future sortable
-        column of icons is caught too.
-
-        `bid_limits.html` has the same dud on its own NHL column; that is
-        pre-existing and tracked in BACKLOG.md rather than fixed here.
-        """
-        import main
-
-        assign(client, pool_top()[0], main.MY_TEAM, 2.0)
-        client.post("/buyout", data={"player": a_buyout_candidate().name})
-
-        panel = self._panel(client)
-        for table in re.findall(r"<table.*?</table>", panel, re.S):
-            head = re.search(r"<thead>(.*?)</thead>", table, re.S)
-            body = re.search(r"<tbody>(.*?)</tbody>", table, re.S)
-            if not head or not body:
-                continue
-            rows = re.findall(r"<tr>(.*?)</tr>", body.group(1), re.S)
-            assert rows, "a rendered table with no body rows proves nothing"
-            cells = re.findall(r"<td[^>]*>(.*?)</td>", rows[0], re.S)
-            for th in re.findall(r"<th[^>]*>", head.group(1)):
-                col = re.search(r'data-sort-col="(\d+)"', th)
-                if not col or "sortTable" not in th:
-                    continue
-                i = int(col.group(1))
-                assert i < len(cells), f"{th} sorts column {i} of {len(cells)}"
-                text = re.sub(r"<[^>]+>", "", cells[i]).strip()
-                assert text, (
-                    f"{th} is clickable but column {i} renders no text "
-                    f"({cells[i].strip()[:60]!r}) — sortTable reads textContent, "
-                    f"so this header is inert"
-                )
-
     def test_a_fresh_pick_carries_its_nhl_badge(self, client):
         """/assign must put the club on the record it writes.
 
@@ -2710,4 +2669,113 @@ class TestTheLogsPanel:
         panel = self._panel(client)
         assert f'src="/nhl_logos/{club}.svg"' in panel, (
             f"{victim.name}'s {club} badge is missing after the buyout"
+        )
+
+
+class TestEverySortableColumnCanActuallySort:
+    """`sortTable` compares cell text, so a column with none is an inert control.
+
+    Page-wide on purpose. The first version of this lived inside
+    `TestTheLogsPanel` and checked only that panel — which is precisely how the
+    bug it was written for survived: `bid_limits.html`'s NHL header had been
+    inert since the column was added, in the table scanned most during a draft,
+    and a logs-scoped guard could never see it. Measured 2026-08-15 at 0 of 705
+    rows with text; clicking it left the row order byte-identical.
+
+    It also reads EVERY body row, not the first. A column can be legitimately
+    blank on row 1 and still sort: Available Players' RFA cell is empty for the
+    683 non-RFA players and carries a prior team for the other 22, and grouping
+    those 22 is the whole point of clicking it. "Row 1 is empty" would have
+    condemned a working control.
+    """
+
+    def _sortable_columns(self, html: str):
+        """(table_index, header, col, [cell html for every body row])."""
+        found = []
+        for n, table in enumerate(re.findall(r"<table.*?</table>", html, re.S)):
+            head = re.search(r"<thead>(.*?)</thead>", table, re.S)
+            body = re.search(r"<tbody>(.*?)</tbody>", table, re.S)
+            if not head or not body:
+                continue
+            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", body.group(1), re.S)
+            if not rows:
+                continue
+            for th in re.findall(r"<th[^>]*>.*?</th>", head.group(1), re.S):
+                col = re.search(r'data-sort-col="(\d+)"', th)
+                if not col or "sortTable" not in th:
+                    continue
+                i = int(col.group(1))
+                cells = []
+                for row in rows:
+                    row_cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+                    if i < len(row_cells):
+                        cells.append(row_cells[i])
+                label = re.sub(r"<[^>]+>", "", th).strip()
+                found.append((n, label, i, cells))
+        return found
+
+    def _sort_key(self, cell_html: str) -> str:
+        """What `cellSortText` would return, including the img[alt] fallback."""
+        text = re.sub(r"<[^>]+>", "", cell_html).strip()
+        if text:
+            return text
+        alt = re.search(r'<img[^>]*\balt="([^"]*)"', cell_html)
+        return alt.group(1).strip() if alt else ""
+
+    def test_no_sortable_header_is_inert(self, client):
+        """Every clickable header must have something to sort on somewhere."""
+        import main
+
+        assign(client, pool_top()[0], main.MY_TEAM, 2.0)
+        client.post("/buyout", data={"player": a_buyout_candidate().name})
+
+        columns = self._sortable_columns(client.get("/").text)
+        assert len(columns) >= 15, (
+            f"only found {len(columns)} sortable columns; the scraper is broken, "
+            f"not the app"
+        )
+        inert = [
+            (label, col, len(cells))
+            for _n, label, col, cells in columns
+            if not any(self._sort_key(c) for c in cells)
+        ]
+        assert not inert, (
+            f"clickable headers with nothing to sort on: {inert} — sortTable "
+            f"ties every row, so the click does nothing"
+        )
+
+    def test_the_alt_fallback_is_what_rescues_the_logo_columns(self, client):
+        """Pins the mechanism, not just the outcome.
+
+        Without this, deleting the `img[alt]` fallback from `cellSortText`
+        leaves `test_no_sortable_header_is_inert` green only for as long as no
+        logo column is sortable — and the fallback is the entire fix. Asserts
+        that at least one sortable column depends on it.
+        """
+        columns = self._sortable_columns(client.get("/").text)
+        rescued = [
+            (label, col) for _n, label, col, cells in columns
+            if not any(re.sub(r"<[^>]+>", "", c).strip() for c in cells)
+            and any(self._sort_key(c) for c in cells)
+        ]
+        assert rescued, (
+            "no column relies on the alt fallback, so nothing here would notice "
+            "if cellSortText stopped applying it"
+        )
+
+    def test_the_javascript_actually_uses_the_fallback(self):
+        """The tests above read HTML; the fallback lives in JS they never run.
+
+        A guard against the pair passing while `sortTable` still reads
+        `textContent` directly — which is the state the app shipped in.
+        """
+        js = open("static/shortcuts.js").read()
+        assert "cellSortText" in js, "the helper is gone"
+        assert "img[alt]" in js, "the fallback no longer reads alt"
+        sort_body = js[js.index("function sortTable"):js.index("function renumberRows")]
+        assert "cellSortText(a.cells[col])" in sort_body, (
+            "sortTable stopped routing through cellSortText"
+        )
+        assert ".textContent" not in sort_body, (
+            "sortTable reads textContent directly again, bypassing the fallback"
         )

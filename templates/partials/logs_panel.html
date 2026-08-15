@@ -37,10 +37,10 @@
                     <tr>
                         <th data-sort-col="0" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">#</th>
                         <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
-                        {# Not sortable: the cell holds only an <img>, and sortTable reads
-                           textContent, so the header would look live and do
-                           nothing. See BACKLOG for the same dud in bid_limits.html. #}
-                        <th class="cursor-default">NHL</th>
+                        {# Sorts on the img's alt (the club code) via cellSortText —
+                           a bare-<img> column has no textContent and was inert
+                           until 2026-08-15. #}
+                        <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
                         <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
                         <th data-sort-col="4" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Team</th>
                         <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Salary</th>
@@ -74,8 +74,8 @@
                 <thead>
                     <tr>
                         <th data-sort-col="0" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
-                        {# Not sortable — see the Auction tab's NHL header. #}
-                        <th class="cursor-default">NHL</th>
+                        {# Sorts on alt — see the Auction tab's NHL header. #}
+                        <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
                         <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
                         <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Team</th>
                         <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Salary</th>

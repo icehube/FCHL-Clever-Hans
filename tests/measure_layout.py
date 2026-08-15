@@ -60,7 +60,11 @@ TARGETS = [
     "#team-panel .table-scroll-x",
     "#team-panel table",
     "#bid-panel",
-    "#logs-panel .scroll-container table",
+    # The Auction tab specifically, not "#logs-panel table": the panel holds
+    # three, only one is displayed, and querySelector would take whichever came
+    # first in source order — a display:none table measures 0, which reads as a
+    # real number rather than as "not the one you meant".
+    "#logs-panel div[role=tabpanel]:first-of-type table",
 ]
 
 PROBE = """

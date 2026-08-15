@@ -1,4 +1,7 @@
-{# One transaction row's NHL club badge. Expects `t`, a TransactionRecord.
+{# One transaction row's NHL club badge. Expects `row`, a TransactionRecord —
+   the same name `_log_team_link.html` takes, so the two sibling fragments have
+   one contract rather than two. Both are driven by the loop variable directly,
+   so every log loop must name it `row`.
 
    Reads the record's OWN nhl_team, never a lookup by name: the log outlives
    the roster, and a bought-out player is on no roster and gone from the pool —
@@ -7,7 +10,7 @@
    Guarded because the field can legitimately be blank: a record written before
    the field existed whose player has since left players.csv keeps "" through
    _backfill_nhl_teams. Draw nothing rather than a broken image. #}
-{% if t.nhl_team %}
-<img src="/nhl_logos/{{ t.nhl_team }}.svg" alt="{{ t.nhl_team }}"
-     class="h-5 inline object-contain" title="{{ t.nhl_team }}">
+{% if row.nhl_team %}
+<img src="/nhl_logos/{{ row.nhl_team }}.svg" alt="{{ row.nhl_team }}"
+     class="h-5 inline object-contain" title="{{ row.nhl_team }}">
 {% endif %}

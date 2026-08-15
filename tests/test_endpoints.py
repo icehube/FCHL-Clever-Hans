@@ -2616,6 +2616,47 @@ class TestTheLogsPanel:
             "a non-team code became a /team-view link"
         )
 
+    def test_no_header_offers_a_sort_that_cannot_work(self, client):
+        """`sortTable` compares `cell.textContent`, so a column of bare <img>
+        sorts every row to the same key and the click does nothing.
+
+        Measured in Chrome before this guard: clicking NHL left the row order
+        byte-identical, because the cells read "\n\n\n". A control that looks
+        live and is inert is worse than no control — during a draft you assume
+        the sort worked and read the wrong row. Stated as the general rule
+        rather than as "the NHL header has no onclick", so a future sortable
+        column of icons is caught too.
+
+        `bid_limits.html` has the same dud on its own NHL column; that is
+        pre-existing and tracked in BACKLOG.md rather than fixed here.
+        """
+        import main
+
+        assign(client, pool_top()[0], main.MY_TEAM, 2.0)
+        client.post("/buyout", data={"player": a_buyout_candidate().name})
+
+        panel = self._panel(client)
+        for table in re.findall(r"<table.*?</table>", panel, re.S):
+            head = re.search(r"<thead>(.*?)</thead>", table, re.S)
+            body = re.search(r"<tbody>(.*?)</tbody>", table, re.S)
+            if not head or not body:
+                continue
+            rows = re.findall(r"<tr>(.*?)</tr>", body.group(1), re.S)
+            assert rows, "a rendered table with no body rows proves nothing"
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", rows[0], re.S)
+            for th in re.findall(r"<th[^>]*>", head.group(1)):
+                col = re.search(r'data-sort-col="(\d+)"', th)
+                if not col or "sortTable" not in th:
+                    continue
+                i = int(col.group(1))
+                assert i < len(cells), f"{th} sorts column {i} of {len(cells)}"
+                text = re.sub(r"<[^>]+>", "", cells[i]).strip()
+                assert text, (
+                    f"{th} is clickable but column {i} renders no text "
+                    f"({cells[i].strip()[:60]!r}) — sortTable reads textContent, "
+                    f"so this header is inert"
+                )
+
     def test_a_fresh_pick_carries_its_nhl_badge(self, client):
         """/assign must put the club on the record it writes.
 

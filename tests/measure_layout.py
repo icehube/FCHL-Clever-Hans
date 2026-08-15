@@ -60,7 +60,7 @@ TARGETS = [
     "#team-panel .table-scroll-x",
     "#team-panel table",
     "#bid-panel",
-    "#transaction-log .scroll-container table",
+    "#logs-panel .scroll-container table",
 ]
 
 PROBE = """

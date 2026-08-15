@@ -20,6 +20,30 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-15]
+
+### Added
+
+- **The three log wants, in one panel: Auction / Transaction / Change tabs, clickable teams, and logos.** `transaction_log.html` and `change_log.html` are gone, replaced by `logs_panel.html` plus two shared row fragments. The tabs are CSS-only — three radio inputs sharing a name, with `.tab-content` siblings — because every row is already in the response and a per-tab round trip would rebuild the whole ~8.5ms context (including the 704-row `bid_limits` list) to filter rows the browser is already holding. Nothing was vendored: `.tabs`, `.tab`, `.tab-active` and `.tabs-boxed` are all in the trimmed DaisyUI build, so the no-CDN rule is untouched. The selected tab lives only in the DOM and therefore resets on every `all_panels.html` swap, i.e. on every `/assign` — Auction is `checked` so that reset lands on the tab you want mid-draft. Verified in Chrome: three tabs, exactly one panel visible at a time, correct row counts per tab, and no console errors.
+
+- **`TransactionRecord.nhl_team`**, so the log can show an NHL club badge. Denormalised deliberately: **the log outlives the roster.** A bought-out player is on no roster *and* gone from the pool, so resolving the club by name at render time draws nothing on precisely the rows the Transaction tab exists for — which is what `test_the_nhl_club_outlives_the_roster` pins, and it is the only test that distinguishes the stored field from a lookup.
+
+### Fixed / decided
+
+- **"NHL team logos in both logs" was not buildable as written, and the plan said so before any code moved.** `ChangeRecord` is `timestamp`/`kind`/`team_code`/`description` — no player at all — so there is nothing there to resolve an NHL club from. Settled as: FCHL team logos in **both** logs (from `teams[code].logo`, the same expression `league_state.html` uses), NHL club logos in the transaction log only.
+
+- **The Auction/Transaction split is a TOTAL partition (`draft` vs everything else), deliberately against CLAUDE.md's allowlist rule for `transaction_type`.** That rule exists because a mis-routed value points `_viewed_team` at the string `"SRL→MAC"`. Here the failure inverts: a record matching no branch **disappears from the draft record entirely**, which is worse than one landing in the wrong tab. So the two lists always sum to `len(transaction_log)`, a new transaction type is visible by default, and a test asserts the sum across three different writers. The `"SRL→MAC"` hazard is handled where it actually bites — `_log_team_link.html` renders a `/team-view` link only when `row.team_code in teams`, and plain text otherwise. CLAUDE.md now records this as the one deliberate exception rather than leaving the two rules to look contradictory.
+
+- **The plan's own call-site table was wrong about `/trade-execute`.** It assumed `PlayerOnRoster`; the endpoint actually works with `PlayerTrade`, a DTO with no `nhl_team` — and its *receive* side is assembled from **client-submitted JSON**, so threading the field through there would mean trusting the browser for a value the log keeps forever. Resolved with `_nhl_team_of()`, a lookup used at that one site and nowhere else, on the grounds that a trade always leaves every player somewhere (a roster, or the pool when there is no source team) and so cannot come up empty the way a buyout can. The distinction is written into the helper's docstring, because "why is this a lookup here and a stored field there" is exactly the question a later tidy-up would get wrong.
+
+- **Legacy save files still load.** `_transaction_from_dict` reads the new key with `.get`, and that is load-bearing rather than defensive: `_load_saved_state` treats *any* parse exception as an unusable file and renames it `.corrupt`, so a bare lookup would discard a byte-perfect draft on the first boot after this change — at the exact moment every real save file is a legacy one. `_backfill_nhl_teams` then refills historical records from the same `players.csv` map it already builds for rostered players. Both halves are pinned, and they needed *separate* tests: the `.get` keeps the file parsing, the backfill keeps pre-upgrade picks from showing a blank badge for the rest of the draft.
+
+### Investigated
+
+- **Tailwind's Play JIT costs nothing per htmx swap, so the vendored bundle stays.** The open backlog entry deferred a real build on tooling risk; the reason to revisit was a hypothesis that its MutationObserver re-scans on every panel swap, which across a 150-pick auction would be a genuine draft-day cost. Measured in Chrome instead of reasoned: injected CSS grew **72 characters on the first `/bid-check` swap and 0 on every swap after**, with one longtask on that first swap and none subsequently — the JIT only compiles classes it has not seen, and after the first render every class in the app is already compiled. The load cost is real (398KB transferred, ~560ms of longtasks, DCL 868ms) but it is paid once, and the app is opened once on draft day. The entry stands, on stronger grounds than it was originally written with.
+
+- **Three tests were written, watched pass, and then found unable to fail** — recorded because the failures were all in the *test*, not the code. (1) A backfill test asserted `/nhl_logos/<club>.svg` against the whole page; the drafted player is on BOT's roster, whose table renders the same URL, so it passed with the backfill deleted — fixed by scoping through `section_of`. (2) Counting `<tbody>` blocks to get per-tab row counts silently renumbered the tabs whenever one rendered its empty state instead of a table; fixed by slicing on the three radio inputs. (3) Nothing covered a *live* pick's badge — deleting `nhl_team=p.nhl_team` from `/assign` left the buyout test and both legacy-file tests green, because the backfill refills the field on the way in and so hides a writer that stopped passing it.
+
 ## [2026-08-14]
 
 ### Added

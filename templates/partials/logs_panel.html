@@ -1,0 +1,131 @@
+{# The draft record, in three tabs. Replaces the separate transaction_log.html
+   and change_log.html cards (2026-08-15).
+
+   The tabs are CSS-only — radio inputs plus `.tab-content` siblings, the
+   DaisyUI pattern, all of which the trimmed vendor build already carries. No
+   endpoint and no JS: every row is already in this response, and a per-tab
+   round trip would rebuild the whole ~8.5ms context (including the 704-row
+   bid_limits list) to filter rows the browser is holding.
+
+   The selected tab therefore lives only in the DOM and resets on any
+   all_panels.html swap, i.e. on every /assign. That is why Auction is
+   `checked` — during a draft the reset lands on the tab you want. #}
+<section class="card bg-base-200 shadow-md p-4" id="logs-panel">
+    <h2 class="card-title text-accent text-base mb-2">Logs</h2>
+
+    <div role="tablist" class="tabs tabs-boxed tabs-sm mb-2">
+        {# The three inputs share a name, so the browser enforces one-at-a-time.
+           `aria-label` IS the tab's visible text in this DaisyUI pattern — the
+           input has no children to put a label in. #}
+        <input type="radio" name="log-tab" role="tab" class="tab" checked
+               aria-label="Auction ({{ auction_txns|length }})">
+        <div role="tabpanel" class="tab-content pt-2">
+            {% if auction_txns %}
+            <div class="text-xs opacity-80 mb-2 flex flex-wrap gap-3">
+                <span>Picks: <strong>{{ auction_txns|length }}</strong></span>
+                <span>Avg: <strong>${{ "%.1f"|format(auction_txns|map(attribute='salary')|sum / auction_txns|length) }}M</strong></span>
+                {% set f_txns = auction_txns|selectattr('position', 'equalto', 'F')|list %}
+                {% set d_txns = auction_txns|selectattr('position', 'equalto', 'D')|list %}
+                {% set g_txns = auction_txns|selectattr('position', 'equalto', 'G')|list %}
+                {% if f_txns %}<span>F: <strong>${{ "%.1f"|format(f_txns|map(attribute='salary')|sum / f_txns|length) }}M</strong> ({{ f_txns|length }})</span>{% endif %}
+                {% if d_txns %}<span>D: <strong>${{ "%.1f"|format(d_txns|map(attribute='salary')|sum / d_txns|length) }}M</strong> ({{ d_txns|length }})</span>{% endif %}
+                {% if g_txns %}<span>G: <strong>${{ "%.1f"|format(g_txns|map(attribute='salary')|sum / g_txns|length) }}M</strong> ({{ g_txns|length }})</span>{% endif %}
+            </div>
+            <div class="scroll-container">
+            <table class="table table-xs table-zebra">
+                <thead>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">#</th>
+                        <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
+                        <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
+                        <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
+                        <th data-sort-col="4" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Team</th>
+                        <th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Salary</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for t in auction_txns|reverse %}
+                <tr>
+                    <td>{{ loop.revindex }}</td>
+                    <td>{{ t.position }}</td>
+                    <td>{% include "partials/_log_nhl_logo.html" %}</td>
+                    <td>{{ t.player_name }}</td>
+                    <td>{% set row = t %}{% include "partials/_log_team_link.html" %}</td>
+                    <td>${{ "%.1f"|format(t.salary) }}M</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p class="text-sm opacity-50">No picks yet.</p>
+            {% endif %}
+        </div>
+
+        <input type="radio" name="log-tab" role="tab" class="tab"
+               aria-label="Transaction ({{ other_txns|length }})">
+        <div role="tabpanel" class="tab-content pt-2">
+            {% if other_txns %}
+            <div class="scroll-container">
+            <table class="table table-xs table-zebra">
+                <thead>
+                    <tr>
+                        <th data-sort-col="0" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Pos</th>
+                        <th data-sort-col="1" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">NHL</th>
+                        <th data-sort-col="2" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Player</th>
+                        <th data-sort-col="3" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Team</th>
+                        <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Salary</th>
+                        <th data-sort-col="5" data-sort-type="text" onclick="sortTable(this)" class="cursor-pointer">Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for t in other_txns|reverse %}
+                <tr>
+                    <td>{{ t.position }}</td>
+                    <td>{% include "partials/_log_nhl_logo.html" %}</td>
+                    <td>{{ t.player_name }}</td>
+                    <td>{% set row = t %}{% include "partials/_log_team_link.html" %}</td>
+                    <td>${{ "%.1f"|format(t.salary) }}M</td>
+                    <td><span class="badge badge-xs {% if t.transaction_type == 'buyout' %}badge-warning{% else %}badge-info{% endif %}">{{ t.transaction_type }}</span></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p class="text-sm opacity-50">No trades or buyouts yet.</p>
+            {% endif %}
+        </div>
+
+        <input type="radio" name="log-tab" role="tab" class="tab"
+               aria-label="Change ({{ change_log|length }})">
+        <div role="tabpanel" class="tab-content pt-2">
+            {% if change_log %}
+            <div class="scroll-container" style="max-height: 200px;">
+            <table class="table table-xs table-zebra">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Team</th>
+                        <th>Kind</th>
+                        <th>Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for c in change_log|reverse %}
+                <tr>
+                    <td class="opacity-60 text-xs whitespace-nowrap">{{ c.timestamp[11:19] }}</td>
+                    <td>{% set row = c %}{% include "partials/_log_team_link.html" %}</td>
+                    <td><span class="badge badge-xs badge-ghost">{{ c.kind }}</span></td>
+                    <td class="text-xs">{{ c.description }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p class="text-sm opacity-50">No edits yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</section>

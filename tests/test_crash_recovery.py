@@ -20,7 +20,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.helpers import toast_of
+from tests.helpers import section_of, toast_of
 
 
 # Everything lifespan and _recompute own. Restoring `auction_state` alone is
@@ -351,11 +351,23 @@ def _a_pre_auction_minor() -> tuple[str, str]:
     pytest.fail("no team has a minor-league player — the CSV cannot exercise this")
 
 
-def _legacy_state_without_keeper_flags(state_dir, build=lambda c: None):
-    """Save an auction through the app, then strip every `is_keeper` from it.
+def _legacy_state_without_keeper_flags(
+    state_dir, build=lambda c: None, key="is_keeper", scope=None
+):
+    """Save an auction through the app, then strip `key` from it.
 
-    That field landed 2026-08-08, so this is precisely the shape of a file saved
-    mid-auction by the previous build. Written by the app and edited afterwards
+    Defaults to `is_keeper`, which landed 2026-08-08, so this is precisely the
+    shape of a file saved mid-auction by the previous build. Parameterised
+    because the same shape recurs on every field this schema grows —
+    `nhl_team` on TransactionRecord (2026-08-15) is the second.
+
+    `scope` names a top-level list to restrict the strip to, and getting it
+    right is what makes the fixture honest. `nhl_team` is old on Player and
+    PlayerOnRoster and new only on TransactionRecord, so a whole-document strip
+    simulates a file no build has ever written — and it fails at the PARSE
+    (`_player_from_dict` reads its copy with a bare lookup), which is a
+    different code path from the one under test and would have passed for the
+    wrong reason had the assertion been weaker. Written by the app and edited afterwards
     rather than hand-authored, for the reason `_good_state_with_pick` gives: a
     fixture blob drifts from `to_json` and the test then covers a shape nothing
     writes. Both copies on disk get it, so the recovery ladder cannot quietly
@@ -369,14 +381,18 @@ def _legacy_state_without_keeper_flags(state_dir, build=lambda c: None):
 
     def strip(obj):
         if isinstance(obj, dict):
-            return {k: strip(v) for k, v in obj.items() if k != "is_keeper"}
+            return {k: strip(v) for k, v in obj.items() if k != key}
         if isinstance(obj, list):
             return [strip(v) for v in obj]
         return obj
 
     current = state_dir / "auction_state.json"
     with open(current) as f:
-        data = strip(json.load(f))
+        data = json.load(f)
+    if scope:
+        data[scope] = strip(data[scope])
+    else:
+        data = strip(data)
     # `AuctionState._snapshots` is a list of whole JSON DOCUMENTS, not of
     # dicts, so the walk above steps over each one as an opaque string
     # and left the field in the undo chain — which is how this helper first hung
@@ -384,14 +400,25 @@ def _legacy_state_without_keeper_flags(state_dir, build=lambda c: None):
     # difflib quadratic. A file written by the old build has no `is_keeper`
     # anywhere, chain included.
     data["_snapshots"] = [
-        json.dumps(strip(json.loads(s))) for s in data.get("_snapshots", [])
+        json.dumps(_strip_snapshot(json.loads(s), strip, scope))
+        for s in data.get("_snapshots", [])
     ]
-    text = json.dumps(data)
-    leaked = text.count('"is_keeper"')
+    text = json.dumps(data[scope] if scope else data)
+    leaked = text.count(f'"{key}"')
     assert leaked == 0, f"the strip missed {leaked} copies of the field"
+    text = json.dumps(data)
     current.write_text(text)
     (state_dir / "auction_state.json.backup").write_text(text)
     return built
+
+
+def _strip_snapshot(snapshot: dict, strip, scope: str | None) -> dict:
+    """Apply the same strip to one snapshot document."""
+    if not scope:
+        return strip(snapshot)
+    if scope in snapshot:
+        snapshot[scope] = strip(snapshot[scope])
+    return snapshot
 
 
 def _send_down(client, team_code: str, player_name: str) -> None:
@@ -523,3 +550,70 @@ class TestKeeperProvenanceSurvivesAnOldStateFile:
                 f"{name} kept his provenance only if the backfill matched on "
                 f"the disambiguated name"
             )
+
+
+class TestTheLogsNhlClubSurvivesAnOldStateFile:
+    """`TransactionRecord.nhl_team` landed 2026-08-15; older files lack it.
+
+    Two halves, and both are needed. `_transaction_from_dict`'s `.get` keeps the
+    file PARSING — without it `_load_saved_state` renames a good draft
+    `.corrupt`, which `tests/test_state.py` pins. This class covers the other
+    half: parsing to a blank club would leave every pre-upgrade pick with no
+    badge in the Auction tab for the rest of the draft, so
+    `_backfill_nhl_teams` re-reads it from the same players.csv it already uses
+    for rostered players.
+    """
+
+    def _draft_one(self, client):
+        """A real pick through /assign, returning (name, expected club)."""
+        import main
+
+        ranked = sorted(
+            main.auction_state.available_players.values(),
+            key=lambda p: -p.projected_points,
+        )
+        p = next(p for p in ranked if p.nhl_team)
+        r = client.post("/assign", data={
+            "player": p.name, "team": main.MY_TEAM, "salary": "2.0"})
+        assert toast_of(r).get("type") != "error", toast_of(r)
+        return p.name, p.nhl_team
+
+    def test_the_club_comes_back(self, state_dir):
+        import main
+
+        drafted = _legacy_state_without_keeper_flags(
+            state_dir, build=self._draft_one, key="nhl_team",
+            scope="transaction_log")
+        name, club = drafted
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            record = next(
+                t for t in main.auction_state.transaction_log if t.player_name == name)
+            assert record.nhl_team == club, (
+                f"{name}'s club loaded as {record.nhl_team!r} from a legacy "
+                f"file; expected {club!r}"
+            )
+
+    def test_the_badge_is_back_on_screen(self, state_dir):
+        """The consequence, asserted where the operator would see it.
+
+        The field alone is not the deliverable — `_log_nhl_logo.html` skips a
+        blank one silently, so a backfill that ran but wrote the wrong thing
+        looks identical to no badge at all.
+
+        Scoped to the panel with `section_of`, and that is not a formality: the
+        drafted player is on BOT's roster, whose table renders the same
+        `/nhl_logos/<club>.svg`, so a whole-page assertion passes with the
+        backfill deleted. It did, when this test was first written.
+        """
+        import main
+
+        drafted = _legacy_state_without_keeper_flags(
+            state_dir, build=self._draft_one, key="nhl_team",
+            scope="transaction_log")
+        _name, club = drafted
+
+        with TestClient(main.app) as c:
+            panel = section_of(c.get("/").text, "logs-panel")
+        assert f'src="/nhl_logos/{club}.svg"' in panel

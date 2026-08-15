@@ -1,0 +1,24 @@
+{# One log row's FCHL team cell: logo + code, linked to that team's panel.
+   Expects `row` — a TransactionRecord or a ChangeRecord, which is all this
+   needs, since both carry `team_code`.
+
+   The `in teams` guard is the point of the fragment, not defensive padding.
+   /trade-between logs `team_code` as f"{source}→{dest}" (main.py), so this
+   field is NOT always a team code — see TransactionRecord.transaction_type's
+   comment. Unguarded, `teams[...]` raises on those rows and the link points at
+   /team-view/SRL→MAC. The change log's five writers all pass validated codes,
+   but they share this fragment anyway: one rule, checked in one place, is
+   worth more than two rules that agree today.
+
+   Same swap as league_state.html — #team-panel by outerHTML, so /team-view's
+   OOB scan fragment lands and #bid-panel is never touched. #}
+{% if row.team_code in teams %}
+<a hx-get="/team-view/{{ row.team_code }}" hx-target="#team-panel" hx-swap="outerHTML"
+   class="cursor-pointer inline-flex items-center gap-1 whitespace-nowrap hover:opacity-80"
+   title="{{ teams[row.team_code].name }}">
+    <img src="/fchl_logos/{{ teams[row.team_code].logo }}" alt="" class="w-4 h-4">
+    {{ row.team_code }}
+</a>
+{% else %}
+{{ row.team_code }}
+{% endif %}

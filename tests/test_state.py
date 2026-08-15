@@ -999,3 +999,42 @@ class TestEveryMutatingPostTakesASnapshot:
         assert not redundant, (
             f"these are exempted but do snapshot; drop them from the list: {redundant}"
         )
+
+
+class TestASaveFileWithoutNhlTeamStillLoads:
+    """`TransactionRecord.nhl_team` was added 2026-08-15; older files lack it.
+
+    `_transaction_from_dict` reads it with `.get` — the only such lookup in the
+    file, surrounded by bare `d[...]`, so it reads like an oversight and is the
+    obvious thing for a later tidy-up to "fix". It is load-bearing:
+    `_load_saved_state` treats ANY parse exception as an unusable file and
+    renames it `.corrupt`, so a KeyError here would discard a byte-perfect draft
+    on the first boot after the upgrade — the exact 2026-08-07 failure, at the
+    exact moment every real save file is a legacy one.
+    """
+
+    def _legacy_json(self) -> str:
+        """A serialized state with the key stripped, as a pre-upgrade file."""
+        state = AuctionState(
+            teams={"BOT": TeamState(code="BOT", name="Bots", is_my_team=True)},
+            transaction_log=[TransactionRecord(
+                player_name="Someone", position="F", team_code="BOT", salary=3.0,
+                model_price=2.5, market_price=2.8, timestamp="2026-08-15T12:00:00",
+                transaction_type="draft", nhl_team="EDM",
+            )],
+        )
+        data = json.loads(state.to_json())
+        for record in data["transaction_log"]:
+            del record["nhl_team"]
+        return json.dumps(data)
+
+    def test_it_parses(self):
+        restored = AuctionState.from_json(self._legacy_json())
+        assert len(restored.transaction_log) == 1
+        assert restored.transaction_log[0].player_name == "Someone"
+
+    def test_the_missing_club_defaults_to_blank(self):
+        """Blank rather than absent: the template draws nothing on "", and
+        `_backfill_nhl_teams` fills it from players.csv on the next startup."""
+        restored = AuctionState.from_json(self._legacy_json())
+        assert restored.transaction_log[0].nhl_team == ""

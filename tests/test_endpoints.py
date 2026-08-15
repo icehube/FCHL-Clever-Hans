@@ -2513,3 +2513,160 @@ class TestDoneTeamsAreNotProjectedForward:
         assert after == current_after, (
             f"BOT is done but still projects {after} against {current_after}"
         )
+
+
+class TestTheLogsPanel:
+    """The merged Auction / Transaction / Change log (2026-08-15).
+
+    Replaced two separate cards. Three properties are worth pinning: every
+    record stays visible, a team code that is not a team code never becomes a
+    link, and the NHL club survives the player leaving every roster.
+    """
+
+    def _panel(self, client) -> str:
+        return section_of(client.get("/").text, "logs-panel")
+
+    def _tab_rows(self, panel: str) -> list[int]:
+        """Body row counts, one per tab, in document order.
+
+        Sliced on the three radio inputs rather than on `<tbody>`: an empty tab
+        renders its empty-state paragraph and no table at all, so counting
+        tables silently renumbers the tabs — which is how the first draft of
+        this read the Change tab's count off the Transaction tab.
+        """
+        starts = [m.start() for m in re.finditer(r'<input type="radio" name="log-tab"', panel)]
+        assert len(starts) == 3, f"expected 3 tabs, found {len(starts)}"
+        bounds = starts + [len(panel)]
+        counts = []
+        for i, start in enumerate(starts):
+            chunk = panel[start:bounds[i + 1]]
+            body = re.search(r"<tbody>(.*?)</tbody>", chunk, re.S)
+            counts.append(body.group(1).count("<tr>") if body else 0)
+        return counts
+
+    def test_every_transaction_lands_in_exactly_one_tab(self, client):
+        """The split is a TOTAL partition, deliberately not an allowlist.
+
+        `logs_panel.html` reads `draft` versus everything-else. An allowlist
+        would be the CLAUDE.md rule for `transaction_type`, but that rule guards
+        against a mis-routed value reaching `_view_team`; here a record matching
+        no branch vanishes from the draft record entirely, which is the worse
+        failure. So the tabs must sum to the whole log.
+
+        Driven through three DIFFERENT writers, because they emit three
+        different type strings and a partition that only ever sees `draft` is
+        not being tested at all.
+        """
+        import main
+
+        assign(client, pool_top()[0], main.MY_TEAM, 2.0)
+        client.post("/buyout", data={"player": a_buyout_candidate().name})
+        victim = main.auction_state.teams["SRL"].roster_players[0].name
+        client.post("/trade-between", data={
+            "team_a": "SRL", "team_b": "MAC",
+            "players_from_a": victim, "players_from_b": "",
+        })
+
+        logged = len(main.auction_state.transaction_log)
+        assert logged >= 3, f"only {logged} records; the setup did not take"
+
+        auction, other, _change = self._tab_rows(self._panel(client))
+        assert auction + other == logged, (
+            f"tabs show {auction}+{other}={auction + other} of {logged} "
+            f"transactions — {logged - auction - other} are invisible"
+        )
+
+    def test_a_drafted_players_team_opens_that_teams_panel(self, client):
+        """The want this closes: notice a rival's pick, click through to them."""
+        import main
+
+        buyer = next(c for c in main.auction_state.teams if c != main.MY_TEAM)
+        assign(client, pool_top()[0], buyer, 2.0)
+
+        panel = self._panel(client)
+        assert f'hx-get="/team-view/{buyer}"' in panel, (
+            f"no /team-view link for {buyer} in the logs panel"
+        )
+        assert 'hx-target="#team-panel"' in panel
+
+    def test_a_two_team_trades_arrow_code_is_never_a_link(self, client):
+        """/trade-between logs `team_code` as f"{source}→{dest}".
+
+        That is not a team code, so `_log_team_link.html` must render it as
+        text. Unguarded, `teams[...]` raises outright — and if it were made
+        forgiving instead, the row would offer a link to `/team-view/SRL→MAC`,
+        which silently no-ops against `_view_team`'s validation and reads as a
+        dead control.
+        """
+        import main
+
+        victim = main.auction_state.teams["SRL"].roster_players[0].name
+        r = client.post("/trade-between", data={
+            "team_a": "SRL", "team_b": "MAC",
+            "players_from_a": victim, "players_from_b": "",
+        })
+        assert toast_of(r).get("type") in ("success", "warning"), toast_of(r)
+
+        panel = self._panel(client)
+        assert "SRL→MAC" in panel, "the trade row is missing entirely"
+        assert 'hx-get="/team-view/SRL→MAC"' not in panel
+        # html.escape leaves → alone but a future encoder might not; assert on
+        # the shape rather than the one spelling.
+        assert not re.search(r'hx-get="/team-view/[^"]*(→|&#\d+;)', panel), (
+            "a non-team code became a /team-view link"
+        )
+
+    def test_a_fresh_pick_carries_its_nhl_badge(self, client):
+        """/assign must put the club on the record it writes.
+
+        Separate from the buyout case below, which reads a club captured on a
+        different code path (`bo_nhl_team`), and from the legacy-file tests in
+        `test_crash_recovery.py`, where `_backfill_nhl_teams` refills it on the
+        way in and so hides a writer that stopped passing it. Deleting
+        `nhl_team=p.nhl_team` from /assign turned all three green — this is the
+        one that catches it.
+        """
+        import main
+
+        p = next(
+            p for p in sorted(
+                main.auction_state.available_players.values(),
+                key=lambda p: -p.projected_points,
+            )
+            if p.nhl_team
+        )
+        assign(client, p.name, main.MY_TEAM, 2.0)
+
+        record = next(
+            t for t in main.auction_state.transaction_log if t.player_name == p.name)
+        assert record.nhl_team == p.nhl_team, (
+            f"the log recorded {record.nhl_team!r} for {p.name}, not {p.nhl_team!r}"
+        )
+        assert f'src="/nhl_logos/{p.nhl_team}.svg"' in self._panel(client)
+
+    def test_the_nhl_club_outlives_the_roster(self, client):
+        """Why `nhl_team` is stored on the record instead of looked up.
+
+        A bought-out player is on no roster AND gone from the pool, so resolving
+        the club by name at render time draws nothing on exactly the rows the
+        Transaction tab exists for. Buy one out, then require his badge.
+        """
+        import main
+
+        victim = a_buyout_candidate()
+        club = victim.nhl_team
+        assert club, f"{victim.name} has no NHL club; pick a different fixture"
+
+        r = client.post("/buyout", data={"player": victim.name})
+        assert toast_of(r).get("type") in ("success", "warning"), toast_of(r)
+
+        assert main.auction_state.teams[main.MY_TEAM].find_player(victim.name) is None
+        assert victim.name not in main.auction_state.available_players, (
+            "he is back in the pool, so a lookup would still work and this "
+            "test cannot distinguish the two designs"
+        )
+
+        panel = self._panel(client)
+        assert f'src="/nhl_logos/{club}.svg"' in panel, (
+            f"{victim.name}'s {club} badge is missing after the buyout"
+        )

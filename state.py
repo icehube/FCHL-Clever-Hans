@@ -414,9 +414,17 @@ class TransactionRecord:
     # rather than the strings it logs. Anything branching on this must
     # ALLOWLIST, because
     # /trade-between (the "trade" writer) puts f"{source}→{dest}" in team_code,
-    # so that field is not always a team code. transaction_log.html carries the
-    # same list; the two move together.
+    # so that field is not always a team code — `_log_team_link.html` guards on
+    # `in teams` for exactly this, and `logs_panel.html` splits the log on it.
+    # Note that split is a TOTAL partition (`draft` vs everything else) rather
+    # than an allowlist, on purpose: there a mis-classified record would vanish
+    # from the log instead of merely landing in the wrong tab.
     transaction_type: str
+    # The NHL club AT THE TIME OF THE TRANSACTION. Denormalised on purpose: the
+    # log outlives the roster. A bought-out player is on no roster and gone from
+    # the pool, so resolving the club by name at render time draws nothing on
+    # exactly the rows the Transaction tab exists for.
+    nhl_team: str = ""
 
 
 @dataclass
@@ -698,6 +706,7 @@ def _transaction_to_dict(t: TransactionRecord) -> dict:
         "market_price": t.market_price,
         "timestamp": t.timestamp,
         "transaction_type": t.transaction_type,
+        "nhl_team": t.nhl_team,
     }
 
 
@@ -729,4 +738,14 @@ def _transaction_from_dict(d: dict) -> TransactionRecord:
         market_price=d["market_price"],
         timestamp=d["timestamp"],
         transaction_type=d["transaction_type"],
+        # .get, not d["nhl_team"]. Every save file written before this field
+        # exists lacks the key, which makes the legacy case the NORMAL case on
+        # the first boot after this change. A KeyError here fails the PARSE, and
+        # per `_load_saved_state` only the parse decides usability — so a bare
+        # lookup would rename a byte-perfect draft `.corrupt` and start fresh,
+        # four hours in, over a logo. Same reason `_roster_player_from_dict`
+        # reads its own `nhl_team` with `.get` (above); `_player_from_dict` uses
+        # a bare lookup because a POOL player has carried the field since the
+        # first release, so a file missing it there is unreadable anyway.
+        nhl_team=d.get("nhl_team", ""),
     )

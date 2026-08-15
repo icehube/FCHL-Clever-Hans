@@ -86,7 +86,7 @@ _viewed_team: str = MY_TEAM
 # candidate loaded off disk has to be validated BEFORE it is installed, or a
 # half-backfilled corrupt state is already the live one by the time it raises.
 def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv") -> None:
-    """Fill in nhl_team for roster players loaded from old state files."""
+    """Fill in nhl_team for roster players and log records from old state files."""
     import csv
     nhl_lookup: dict[str, str] = {}
     with open(csv_path) as f:
@@ -96,6 +96,13 @@ def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv")
         for p in team.keeper_players + team.acquired_players + team.minor_players:
             if not p.nhl_team:
                 p.nhl_team = nhl_lookup.get(p.name, "")
+    # The log carries its own copy (see TransactionRecord.nhl_team), so records
+    # written before that field existed need the same fill. `.get("", ...)`
+    # rather than a skip: a player who has since left the CSV keeps the blank,
+    # and the template draws nothing rather than a broken image.
+    for t in state.transaction_log:
+        if not t.nhl_team:
+            t.nhl_team = nhl_lookup.get(t.player_name, "")
 
 
 def _backfill_keeper_flags(
@@ -488,6 +495,24 @@ def _recompute():
     milp_solution = solve_optimal_roster(team, auction_state.available_players, market_prices)
 
 
+def _nhl_team_of(name: str) -> str:
+    """A player's NHL club, from wherever he currently is, or "" if nowhere.
+
+    Only for /trade-execute, whose `PlayerTrade` DTO carries no NHL club — the
+    receive side is assembled from client-submitted JSON, and threading it
+    through there would mean trusting the browser for a field the log keeps
+    forever. A lookup is sound HERE and nowhere else: a trade always leaves
+    every player somewhere (a roster, or the pool when there is no source
+    team), so this cannot come up empty the way it would after a buyout.
+    """
+    for team in auction_state.teams.values():
+        p = team.find_player(name)
+        if p:
+            return p.nhl_team
+    pooled = auction_state.available_players.get(name)
+    return pooled.nhl_team if pooled else ""
+
+
 def _log_transaction(
     player_name: str,
     position: str,
@@ -498,6 +523,7 @@ def _log_transaction(
     model_price: float = 0,
     market_price: float = 0,
     timestamp: str | None = None,
+    nhl_team: str = "",
 ) -> None:
     """Append a TransactionRecord to the auction state's transaction log."""
     auction_state.transaction_log.append(TransactionRecord(
@@ -509,6 +535,7 @@ def _log_transaction(
         market_price=market_price,
         timestamp=timestamp or datetime.now().isoformat(),
         transaction_type=txn_type,
+        nhl_team=nhl_team,
     ))
 
 
@@ -771,6 +798,20 @@ def _context(request: Request) -> dict:
         "available_players": auction_state.available_players,
         "transaction_log": auction_state.transaction_log,
         "change_log": auction_state.change_log,
+        # The Logs panel's Auction/Transaction split. Deliberately a TOTAL
+        # partition — `draft` and everything-else — rather than the allowlist
+        # CLAUDE.md mandates for transaction_type elsewhere. That rule exists
+        # because a mis-routed value points _viewed_team at "SRL→MAC"; here the
+        # failure inverts, and a record matching no tab disappears from the log
+        # entirely. A new transaction type must be visible in the wrong tab
+        # rather than invisible in none, so the two lists always sum to
+        # len(transaction_log).
+        "auction_txns": [
+            t for t in auction_state.transaction_log if t.transaction_type == "draft"
+        ],
+        "other_txns": [
+            t for t in auction_state.transaction_log if t.transaction_type != "draft"
+        ],
         "milp": milp_solution,
         "market_info": market_info,
         "bid_limits": bid_limits,
@@ -861,6 +902,7 @@ async def assign_player(
     _log_transaction(
         p.name, p.position, team, salary, "draft",
         model_price=model_price_val, market_price=market_price_val,
+        nhl_team=p.nhl_team,
     )
 
     # A nomination turn is a combo: 1 RFA (silent bid) then 1 UFA (open
@@ -1087,13 +1129,19 @@ async def trade_execute(request: Request, trade_id: str = Form("")):
     # Log trade transactions for both teams (when source_team is known)
     now = datetime.now().isoformat()
     for p in trade_give:
-        _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_out", timestamp=now)
+        club = _nhl_team_of(p.name)
+        _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_out",
+                         timestamp=now, nhl_team=club)
         if source_team:
-            _log_transaction(p.name, p.position, source_team, p.salary, "trade_in", timestamp=now)
+            _log_transaction(p.name, p.position, source_team, p.salary, "trade_in",
+                             timestamp=now, nhl_team=club)
     for p in trade_receive:
-        _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_in", timestamp=now)
+        club = _nhl_team_of(p.name)
+        _log_transaction(p.name, p.position, MY_TEAM, p.salary, "trade_in",
+                         timestamp=now, nhl_team=club)
         if source_team:
-            _log_transaction(p.name, p.position, source_team, p.salary, "trade_out", timestamp=now)
+            _log_transaction(p.name, p.position, source_team, p.salary, "trade_out",
+                             timestamp=now, nhl_team=club)
 
     # Recompute model prices for any newly available players
     global model_prices
@@ -1137,6 +1185,7 @@ async def buyout(request: Request, player: str = Form(...)):
     if p:
         bo_position = p.position
         bo_salary = p.salary
+        bo_nhl_team = p.nhl_team
 
     # Capture, attempt, commit on success — a refused buyout must not cost an
     # undo step. Ineligible players are refused routinely (the Analyzer only
@@ -1157,7 +1206,8 @@ async def buyout(request: Request, player: str = Form(...)):
 
     # Log buyout transaction
     if p:
-        _log_transaction(player, bo_position, MY_TEAM, bo_salary, "buyout")
+        _log_transaction(player, bo_position, MY_TEAM, bo_salary, "buyout",
+                         nhl_team=bo_nhl_team)
 
     _recompute()
     _save_state()
@@ -1688,7 +1738,8 @@ async def trade_between(
         p.is_keeper = False
         if target.add_acquired_player(p):
             demoted.append(f"{p.name} → {dest} minors")
-        _log_transaction(p.name, p.position, f"{source}→{dest}", p.salary, "trade", timestamp=now)
+        _log_transaction(p.name, p.position, f"{source}→{dest}", p.salary, "trade",
+                         timestamp=now, nhl_team=p.nhl_team)
     _recompute()
     _save_state()
     note = f" ({'; '.join(demoted)} — roster full)" if demoted else ""

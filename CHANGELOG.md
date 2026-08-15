@@ -20,6 +20,20 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-15c]
+
+### Fixed
+
+- **One salary correction was two edits, and `Ctrl+Z` looked broken.** The salary box posts itself on `change` and also sat inside a `<form>` that posted, so pressing Enter fired implicit form submission *and* the change event, while the `$` button blurred the input (change) then submitted (form). Measured in Chrome: **one Enter press produced 2 POSTs, 2 change-log rows — the second a no-op reading `"$4.6M → $4.6M"` — and 2 snapshots**, so the first `Ctrl+Z` reverted the no-op and the salary did not move. On the one control whose entire job is fixing a mistake mid-draft, an undo that appears to do nothing is the worst available failure: you conclude undo is broken and stop trusting it.
+
+  The wrapper is now a `<div class="salary-edit">` with no `hx-post`, so there is no implicit submission and Enter can only fire `change`; `hx-include` targets the wrapper by class rather than `closest form`, since htmx gathers the hidden inputs from any matched element. Re-measured after: 1 POST, 1 log row, 1 snapshot, and one `Ctrl+Z` restores the old salary.
+
+- **The `$` submit button is gone**, closing the 2026-08-07 want — and its stated precondition is now measured rather than assumed. All five input paths auto-submit exactly once: type+Tab, type+Enter, the native spinner arrows, type-then-click-elsewhere, and paste+blur. The button was not a harmless fallback; it was one of the two double-submit paths. The input gained a `title` explaining that it saves on leaving the box, since removing a visible control removes the affordance that said so.
+
+### Investigated
+
+- **Every existing `/adjust-salary` test posts the endpoint directly, which is why this shipped unnoticed.** A duplicate request originates in the *browser*; `TestClient` cannot produce one, so eleven endpoint tests and two browser tests all passed against it — the two browser ones drive the control via `fill()`+`blur()` and `htmx.ajax`, neither of which is a doubling path. `TestASalaryCorrectionIsOneEdit` covers the three that matter (one POST, one undo, one log row) and all three go red against the old markup.
+
 ## [2026-08-15b]
 
 ### Fixed

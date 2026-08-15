@@ -1152,3 +1152,84 @@ class TestMidBidClutterCanBeDismissed:
             "a 500 from /bid-check discarded the recommendation — nothing was "
             "bid and the only way back is re-running /nominate"
         )
+
+
+class TestASalaryCorrectionIsOneEdit:
+    """One edit must cost one request, one log row and one snapshot.
+
+    The salary box posts itself on `change`. Until 2026-08-15 it also sat in a
+    <form> that posted, so Enter fired implicit form submission AND the change
+    event, and the old $ submit button blurred the input (change) then
+    submitted (form). Measured before the fix: one Enter press gave 2 POSTs,
+    2 change-log rows — the second a no-op reading "$4.6M → $4.6M" — and 2
+    snapshots, so the first Ctrl+Z reverted the no-op and the salary did not
+    move. On the control whose entire job is fixing a mistake mid-draft, an
+    undo that looks broken is the worst available failure.
+
+    Browser-only of necessity: `TestClient` posts the endpoint directly and can
+    never see a duplicate the BROWSER sends. Every existing /adjust-salary test
+    does exactly that, which is why this shipped unnoticed.
+    """
+
+    def _first_editable(self, page):
+        wrap = page.locator("#team-panel .salary-edit").first
+        return wrap.locator('input[name="player_name"]').get_attribute("value"), \
+            wrap.locator('input[name="new_salary"]')
+
+    def test_pressing_enter_posts_once(self, page, live_server):
+        _open(page, live_server)
+        _name, box = self._first_editable(page)
+
+        posts = []
+        page.on("request", lambda r: r.method == "POST"
+                and "adjust-salary" in r.url and posts.append(r.url))
+        box.click()
+        box.fill("4.6")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(1200)
+
+        assert len(posts) == 1, (
+            f"one Enter press sent {len(posts)} POSTs — the duplicate writes a "
+            f"no-op change-log row and steals a Ctrl+Z"
+        )
+
+    def test_one_enter_press_costs_one_undo(self, page, live_server):
+        """The consequence, which is what the operator actually experiences."""
+        _open(page, live_server)
+        name, box = self._first_editable(page)
+        before = main.auction_state.teams[main.MY_TEAM].find_player(name).salary
+        target = "4.6" if abs(before - 4.6) > 0.05 else "5.7"
+
+        box.click()
+        box.fill(target)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(1200)
+        after = main.auction_state.teams[main.MY_TEAM].find_player(name).salary
+        assert abs(after - float(target)) < 0.05, f"the edit did not land: {after}"
+
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(1200)
+        restored = main.auction_state.teams[main.MY_TEAM].find_player(name).salary
+        assert abs(restored - before) < 0.05, (
+            f"one Ctrl+Z left {name} at ${restored}M, not ${before}M — the edit "
+            f"consumed more than one snapshot"
+        )
+
+    def test_the_edit_still_logs_exactly_one_row(self, page, live_server):
+        """A no-op row ("$4.6M → $4.6M") is noise in the audit trail the Change
+        tab exists to be."""
+        _open(page, live_server)
+        name, box = self._first_editable(page)
+        start = len(main.auction_state.change_log)
+
+        box.click()
+        box.fill("5.2")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(1200)
+
+        added = main.auction_state.change_log[start:]
+        assert len(added) == 1, (
+            f"one edit wrote {len(added)} log rows: "
+            f"{[c.description for c in added]}"
+        )
+        assert "→" in added[0].description and name in added[0].description

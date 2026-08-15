@@ -167,10 +167,6 @@ was wrong and the same premise would sink the follow-up:
 
 **Bid panel**
 
-- **Drop the `$` submit button.** `team_panel.html` already documents it as a
-  fallback for the auto-submit; if the auto-submit is trusted, the button is
-  noise in the busiest panel on screen. Confirm the auto-submit fires on every
-  input path first — that is what the fallback was for.
 - **Tooltip on Sigma**, explaining that it is the spread of the price
   distribution (a function of the predicted log-price, not of points) and that a
   wide sigma means the model is unsure rather than that the player is expensive.

@@ -122,17 +122,32 @@
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <button type="submit" class="btn btn-xs btn-ghost" title="{{ 'Activate' if p.is_bench else 'Bench' }}">{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
-                {# Auto-submits on change/blur so the user doesn't have to
-                   click the $ button. Button stays as a fallback. #}
-                <form hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML" class="flex items-center gap-1">
+                {# A DIV, not a form, and no submit button — both deliberately.
+
+                   The input posts itself on `change`. Wrapping that in a form
+                   that ALSO posts meant two requests for one edit: pressing
+                   Enter fires implicit form submission *and* the change event,
+                   and clicking the old $ button blurred the input (change) then
+                   submitted (form). Measured 2026-08-15 — one Enter press gave
+                   2 POSTs, 2 change-log rows (the second a no-op reading
+                   "$4.6M → $4.6M"), and 2 snapshots, so Ctrl+Z reverted the
+                   no-op and the salary did not move. On the control whose whole
+                   job is fixing a mistake mid-draft, an undo that looks broken
+                   is the worst possible failure.
+
+                   No form means no implicit submission, so Enter can only fire
+                   `change`. `hx-include` therefore targets the wrapper by class
+                   rather than "closest form" — htmx gathers the two hidden
+                   inputs from any matched element, not just a <form>. #}
+                <div class="salary-edit flex items-center gap-1">
                     <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
                     <input type="number" name="new_salary" step="0.1" min="0.5" max="11.4" value="{{ '%.1f'|format(p.salary) }}"
                            hx-post="/adjust-salary" hx-target="#app" hx-swap="innerHTML"
-                           hx-trigger="change" hx-include="closest form"
+                           hx-trigger="change" hx-include="closest .salary-edit"
+                           title="Correct this salary — saves when you leave the box"
                            class="input input-xs input-bordered bg-base-200 w-16">
-                    <button type="submit" class="btn btn-xs btn-ghost" title="Adjust salary">$</button>
-                </form>
+                </div>
                 {# Benched is the only precondition. This used to also require
                    is_acquired, mirroring an engine restriction on demoting
                    keepers that was lifted with the buyout eligibility work —

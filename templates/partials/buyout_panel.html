@@ -16,15 +16,42 @@
            drops A-E prospects sitting on the active roster (offering them was
            an illegal move whose numbers looked fine, since they DO count on
            cap) and picks up group 2/3 players in the minors, where everyone
-           drafted past 24 lands. #}
-        <div class="flex flex-wrap gap-1 mb-2">
-            {% for p in team.all_players|selectattr('can_be_bought_out')|sort(attribute='projected_points') %}
-            <button hx-get="/buyout-check/{{ p.name }}" hx-target="#buyout-panel" hx-swap="outerHTML"
-                    class="btn btn-xs btn-outline">
-                {{ player_label(p, with_position=false) }}{% if p.is_minor %} <span class="opacity-60">(M)</span>{% endif %}
-            </button>
+           drafted past 24 lands.
+
+           A picker rather than the row of buttons this was until 2026-08-15.
+           The set grows every time BOT drafts a group 2/3 player, and each
+           label is too wide to share a 415px column, so at the 1280px width the
+           draft is run at the "row" was 15 buttons on 15 rows — 468px of list
+           inside a 587px panel. Owner decision 2026-08-08.
+
+           No buyout dot in here, deliberately. The `bo-` placeholders live in
+           team_panel.html's two roster tables and nowhere else; `dom_id` mints
+           ONE id per player, so a second copy would duplicate it and htmx's
+           OOB resolve (`querySelectorAll("#"+id)`) would swap both. #}
+        {% set candidates = team.all_players|selectattr('can_be_bought_out')|sort(attribute='projected_points')|list %}
+        {% if candidates %}
+        {# The empty first option is load-bearing: without it the top candidate
+           is pre-selected, and choosing him fires no `change` at all — the
+           first click on the most likely buyout in the list would do nothing.
+           `disabled` so it cannot be re-chosen once a check has run. #}
+        <select name="player_name"
+                hx-get="/buyout-check" hx-trigger="change"
+                hx-target="#buyout-panel" hx-swap="outerHTML"
+                class="select select-xs select-bordered w-full mb-2">
+            <option value="" disabled {% if not (buyout_result is defined and buyout_result) %}selected{% endif %}>Check a buyout…</option>
+            {# The response replaces the whole panel, this select included, so
+               the checked player has to be re-selected here or the box snaps
+               back to the placeholder with a verdict for someone else under
+               it. `(M)` is plain text: an <option> may not contain markup. #}
+            {% for p in candidates %}
+            <option value="{{ p.name }}" {% if buyout_result is defined and buyout_result and buyout_result.player_name == p.name %}selected{% endif %}>{{ player_label(p, with_position=false) }}{% if p.is_minor %} (M){% endif %}</option>
             {% endfor %}
-        </div>
+        </select>
+        {% else %}
+        {# An empty <select> is a control that looks broken. The old flex div
+           rendered nothing at all here, which was correct by accident. #}
+        <p class="text-xs opacity-60 mb-2">No group 2/3 players to buy out.</p>
+        {% endif %}
 
         {% if buyout_result is defined and buyout_result %}
         {% set verdict_class = 'error' if buyout_result.recommendation == 'buyout' else 'success' %}

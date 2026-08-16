@@ -1156,9 +1156,21 @@ async def trade_execute(request: Request, trade_id: str = Form("")):
     )
 
 
-@app.get("/buyout-check/{player_name}", response_class=HTMLResponse)
+@app.get("/buyout-check", response_class=HTMLResponse)
 async def buyout_check(request: Request, player_name: str):
-    """Preview buyout impact."""
+    """Preview buyout impact.
+
+    The name is a QUERY parameter, not a path segment, and that is what lets the
+    Analyzer's picker be a bare `<select name="player_name">` with no wrapper,
+    no submit button and no JS — htmx sends a triggering select's own value on a
+    GET. It also removes an encoding hazard the path form carried: this was the
+    one place in the app a raw player name went into a URL unencoded (every
+    other name-in-path call site uses `|urlencode`). No name in the current pool
+    trips it, but `_disambiguated_names`' last-resort tier is ` (#n)`, and a `#`
+    never reaches the server at all — the request would truncate at the fragment
+    and the panel would answer "not found" for a player on the roster in front
+    of you. A data refresh is exactly what turns that tier on.
+    """
     try:
         result = evaluate_buyout(auction_state, player_name, market_prices)
     except ValueError as e:

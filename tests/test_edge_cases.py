@@ -375,7 +375,7 @@ class TestAPIEdgeCases:
 
     def test_buyout_check_nonexistent_player(self, client):
         """Buyout check of non-roster player should not crash."""
-        r = client.get("/buyout-check/Nobody")
+        r = client.get("/buyout-check", params={"player_name": "Nobody"})
         assert r.status_code == 200
 
     def test_team_done_nonexistent_team(self, client):

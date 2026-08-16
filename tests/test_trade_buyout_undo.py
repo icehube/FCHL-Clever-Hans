@@ -87,7 +87,7 @@ def targets(client):
     Every one of these used to be a literal ("Dougie Hamilton", "Clayton
     Keller", "Evander Kane", "Steven Stamkos"), which coupled the whole file to
     a dataset that is replaced before every draft. The 2026-08-07 refresh drill
-    showed how that reads when it breaks: `/buyout-check/<gone>` still answers
+    showed how that reads when it breaks: `/buyout-check?player_name=<gone>` answers
     200, so the failure was "Should recommend KEEP for top player" against a
     player who was not on the roster at all.
 
@@ -154,7 +154,7 @@ class TestBuyoutFlow:
     def test_00_buyout_check_low_value_player(self, client, targets):
         """Buyout check on a low-point expensive player should return advice."""
         target = targets["buyout"]
-        r = client.get(f"/buyout-check/{target['name']}")
+        r = client.get("/buyout-check", params={"player_name": target["name"]})
         assert r.status_code == 200
         assert any(v in r.text for v in ["BUYOUT", "KEEP"]), (
             "Buyout check should return BUYOUT or KEEP verdict"
@@ -164,13 +164,15 @@ class TestBuyoutFlow:
 
     def test_01_buyout_check_high_value_player(self, client, targets):
         """Buyout check on a high-point player should recommend KEEP."""
-        r = client.get(f"/buyout-check/{targets['keep']['name']}")
+        r = client.get(
+            "/buyout-check", params={"player_name": targets["keep"]["name"]}
+        )
         assert r.status_code == 200
         assert "KEEP" in r.text, "Should recommend KEEP for top player"
 
     def test_02_buyout_check_invalid_player(self, client):
         """Buyout check on non-roster player should not crash."""
-        r = client.get("/buyout-check/Nobody McFake")
+        r = client.get("/buyout-check", params={"player_name": "Nobody McFake"})
         assert r.status_code == 200
 
     def test_03_execute_buyout(self, client, targets):

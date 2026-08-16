@@ -1354,3 +1354,71 @@ class TestAvailablePlayerFilters:
             f"the # column reads {nums[:6]}… — renumberRows did not run after "
             f"the filter was re-applied"
         )
+
+
+# ---------------------------------------------------------------- buyout picker
+
+
+class TestTheBuyoutPickerIsOneRow:
+    """The Analyzer's candidate list, collapsed from ~15 buttons to a select.
+
+    Two things here are invisible to `TestClient`. Whether htmx sends a bare
+    `<select>`'s own value on a GET is a claim about htmx's runtime, not about
+    the markup — and it is the whole mechanism, since the picker has no wrapper,
+    no submit button and no JS. And a panel's rendered height is exactly the
+    measurement that motivated the change.
+    """
+
+    def _open_analyzer(self, page):
+        page.eval_on_selector(
+            "#buyout-panel details", "el => el.open = true"
+        )
+        page.wait_for_selector("#buyout-panel select", state="visible")
+
+    def test_picking_a_name_runs_the_check_and_the_box_keeps_it(
+        self, page, live_server
+    ):
+        _open(page, live_server)
+        self._open_analyzer(page)
+
+        # Derived, never named: players.csv is replaced before every draft.
+        # The second option, because the first is the disabled placeholder.
+        victim = page.eval_on_selector(
+            "#buyout-panel select", "el => el.options[1].value"
+        )
+        assert victim, "the picker offered no candidates"
+
+        with page.expect_response(re.compile(r"/buyout-check")):
+            page.select_option("#buyout-panel select", victim)
+        page.wait_for_selector("#buyout-panel h3")
+
+        # (a) The request carried the name — the only proof htmx includes a
+        # triggering select's value on a GET. If this ever fails the fix is
+        # hx-include="this" on the select, not a redesign.
+        verdict = page.text_content("#buyout-panel h3")
+        assert victim in verdict, f"verdict reads {verdict!r}, not about {victim}"
+
+        # (b) The response replaced the select too, so the box has to still
+        # name him — otherwise the control disagrees with the answer under it.
+        shown = page.eval_on_selector("#buyout-panel select", "el => el.value")
+        assert shown == victim, f"the box snapped back to {shown!r}"
+
+    def test_the_open_panel_stays_short(self, page, live_server):
+        """Measured 2026-08-15 at this viewport before the change: 15 candidates
+        on 15 rows, 468px of list inside a 587px panel, growing with every group
+        2/3 pick. The threshold is generous — it is here to fail loudly if the
+        list is ever re-expanded, not to pin a layout to the pixel.
+        """
+        _open(page, live_server)
+        self._open_analyzer(page)
+
+        n, height = page.evaluate("""() => {
+            const p = document.querySelector('#buyout-panel');
+            return [p.querySelectorAll('option').length - 1,
+                    p.getBoundingClientRect().height];
+        }""")
+        assert n >= 10, f"only {n} candidates — the fixture no longer exercises this"
+        assert height < 250, (
+            f"#buyout-panel is {height:.0f}px tall with {n} candidates; the "
+            f"picker exists so it does not grow with the roster"
+        )

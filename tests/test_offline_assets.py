@@ -272,7 +272,9 @@ def test_every_rendered_colour_class_is_defined():
         bot = main.auction_state.teams[main.MY_TEAM]
         verdicts: dict[str, str] = {}
         for p in (q for q in bot.all_players if q.can_be_bought_out):
-            html = client.get(f"/buyout-check/{p.name}").text
+            html = client.get(
+                "/buyout-check", params={"player_name": p.name}
+            ).text
             for verdict in ("BUYOUT", "KEEP"):
                 if f">{verdict}</span>" in html:
                     verdicts.setdefault(verdict, html)

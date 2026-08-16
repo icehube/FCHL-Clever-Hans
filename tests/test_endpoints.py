@@ -12,6 +12,7 @@ from tests.helpers import (
     a_buyout_candidate,
     a_roster_player,
     assign,
+    buyout_options,
     pool_top,
     section_of,
     squeeze,
@@ -1403,13 +1404,83 @@ class TestAssignSurvivesAPriceChange:
 class TestBuyout:
     def test_buyout_check(self, client):
         """Buyout check should return preview."""
-        r = client.get(f"/buyout-check/{a_buyout_candidate().name}")
+        r = client.get(
+            "/buyout-check", params={"player_name": a_buyout_candidate().name}
+        )
         assert r.status_code == 200
         assert "Buyout" in r.text
 
     def test_buyout_check_invalid(self, client):
-        r = client.get("/buyout-check/Nobody")
+        r = client.get("/buyout-check", params={"player_name": "Nobody"})
         assert r.status_code == 200
+
+
+class TestTheBuyoutPicker:
+    """The `<select>` that replaced the row of ~15 buttons on 2026-08-15."""
+
+    def test_it_offers_exactly_the_eligible_set(self, client):
+        """The scan, the dots and this picker read ONE expression, per CLAUDE.md
+        — `all_players|selectattr('can_be_bought_out')`.
+
+        Stated as an equality because the two halves fail differently and both
+        have happened: a `roster_players` copy here is the 2026-08-07 bug that
+        silently hid 11 of BOT's 15 eligible players (reads on screen as "no
+        buyout helps"), while offering an A-E prospect is a button for a move
+        the engine will refuse. The existing eligibility tests cover
+        ineligible-are-absent and minors-are-present; neither notices an
+        eligible ACTIVE player going missing.
+        """
+        import main
+
+        offered = set(buyout_options(client.get("/").text))
+        bot = main.auction_state.teams[main.MY_TEAM]
+        eligible = {p.name for p in bot.all_players if p.can_be_bought_out}
+        assert eligible, "BOT has no eligible player — the fixture is wrong"
+        assert offered == eligible, (
+            f"missing: {sorted(eligible - offered)}; "
+            f"offered illegally: {sorted(offered - eligible)}"
+        )
+
+    def test_the_checked_player_stays_selected(self, client):
+        """`/buyout-check` swaps the whole panel, this select included.
+
+        Without the `selected` the box snaps back to "Check a buyout…" while a
+        verdict for someone else sits underneath it — the control disagreeing
+        with the answer directly below it, on an irreversible move.
+        """
+        victim = a_buyout_candidate().name
+        panel = section_of(
+            client.get("/buyout-check", params={"player_name": victim}).text,
+            "buyout-panel",
+        )
+        chosen = re.findall(r'<option value="([^"]*)"[^>]*\bselected\b', panel)
+        assert chosen == [victim], f"selected option is {chosen}, wanted [{victim}]"
+
+    def test_the_first_option_is_an_empty_placeholder(self, client):
+        """Otherwise the top candidate is pre-selected and choosing him fires no
+        `change` — the first click on the most likely buyout does nothing.
+
+        Asserted here rather than in the browser because Playwright's
+        `select_option` dispatches `change` unconditionally, so the harness that
+        looks like the right place to catch this physically cannot.
+        """
+        panel = section_of(client.get("/").text, "buyout-panel")
+        first = re.search(r"<option[^>]*>", panel).group(0)
+        assert 'value=""' in first and "selected" in first, (
+            f"first option is {first!r} — a pre-selected real candidate"
+        )
+
+    def test_the_picker_carries_no_buyout_dots(self, client):
+        """The `bo-` placeholders live in team_panel.html's roster tables only.
+
+        `_dom_id` mints ONE id per player and htmx resolves an out-of-band
+        target with `querySelectorAll("#"+id)`, so a second copy in here would
+        be a duplicate id that the scan swaps twice. BACKLOG.md's entry for this
+        want assumed the dots lived in the Analyzer and had to be rehoused; they
+        never did, and moving them in would be the defect.
+        """
+        panel = section_of(client.get("/").text, "buyout-panel")
+        assert 'id="bo-' not in panel
 
 
 class TestRoundThreeMutators:
@@ -2086,14 +2157,18 @@ class TestBuyoutScanIsOfferedOnlyWhereItWorks:
         panel = section_of(client.get("/").text, "buyout-panel")
         assert "/buyout-indicators" in panel
 
-    def test_the_per_player_buttons_stay_on_an_opponent(self, client):
-        """They act on `team` (always BOT) and render into #buyout-panel, so
-        they work whoever is on screen — gating them too would remove a working
-        control along with the broken one."""
+    def test_the_picker_stays_on_an_opponent(self, client):
+        """It acts on `team` (always BOT) and renders into #buyout-panel, so it
+        works whoever is on screen — gating it too would remove a working
+        control along with the broken one.
+
+        Reads the offered NAMES, not just the presence of the control: an empty
+        select is still a `<select>`, and the failure this guards against is the
+        candidates disappearing when you look at a rival.
+        """
         client.get("/team-view/SRL")
         try:
-            panel = section_of(client.get("/").text, "buyout-panel")
-            assert "/buyout-check/" in panel
+            assert buyout_options(client.get("/").text)
         finally:
             client.get("/team-view/BOT")
 

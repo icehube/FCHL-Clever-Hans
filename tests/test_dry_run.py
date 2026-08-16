@@ -178,7 +178,7 @@ class TestDryRun:
         # BOT's lowest-scoring keeper: the one a buyout would plausibly target.
         target = min(_bot_roster(client), key=lambda p: p["projected_points"])["name"]
 
-        r = client.get(f"/buyout-check/{target}")
+        r = client.get("/buyout-check", params={"player_name": target})
         assert r.status_code == 200
 
         # Execute buyout

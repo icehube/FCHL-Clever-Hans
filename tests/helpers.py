@@ -124,7 +124,7 @@ def a_buyout_candidate(state=None):
 
     Tests used to name one ("Dougie Hamilton", $4.2M / 16pts) and assert against
     a hard-coded salary. `players.csv` is replaced before every draft, so a
-    literal silently stops matching — and `/buyout-check/<gone>` still answers
+    literal silently stops matching — and `/buyout-check?player_name=<gone>` answers
     200, which is how the 2026-08-07 drill produced "Should recommend KEEP for
     top player" about a player who was not on the roster.
 
@@ -145,6 +145,24 @@ def a_buyout_candidate(state=None):
     ]
     assert eligible, "BOT has no buyout-eligible player — the fixture is wrong"
     return max(eligible, key=lambda p: p.salary / max(p.projected_points, 1))
+
+
+def buyout_options(html: str) -> list[str]:
+    """The names the Buyout Analyzer offers, read off its picker.
+
+    Three tests used to learn the offered set by string-matching each button's
+    URL (`f"/buyout-check/{p.name}" in html`), which coupled them to the markup
+    AND to the route shape — both changed on 2026-08-15 when the row of buttons
+    became a `<select>` and the name moved to a query parameter. One reader, so
+    the next change to either is a one-line edit rather than a three-file hunt.
+
+    Scoped to `#buyout-panel`: the same names appear in the team panel's roster
+    tables, so a whole-page match would report players the Analyzer never
+    offered. The empty placeholder option is dropped — it is a prompt, not a
+    candidate.
+    """
+    panel = section_of(html, "buyout-panel")
+    return [n for n in re.findall(r'<option value="([^"]*)"', panel) if n]
 
 
 def squeeze(code: str, headroom: float) -> None:

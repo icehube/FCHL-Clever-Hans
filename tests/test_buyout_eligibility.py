@@ -22,6 +22,7 @@ import pytest
 
 from config import BUYOUT_PENALTY_RATE, MY_TEAM
 from main import _dom_id
+from tests.helpers import buyout_options
 from trade import evaluate_buyout, execute_buyout
 
 
@@ -160,23 +161,25 @@ class TestPanelOffersExactlyTheEligible:
             yield c
 
     def _panel(self, client):
-        return client.get("/buyout-check/Nobody McFake").text
+        return client.get(
+            "/buyout-check", params={"player_name": "Nobody McFake"}
+        ).text
 
     def test_ineligible_players_are_not_offered(self, client):
         import main
 
-        html = self._panel(client)
+        offered = set(buyout_options(self._panel(client)))
         bot = main.auction_state.teams[MY_TEAM]
         ineligible = [p for p in bot.all_players if not p.can_be_bought_out]
         assert ineligible, "fixture must contain prospects to exclude"
 
-        offered = [p.name for p in ineligible if f"/buyout-check/{p.name}" in html]
-        assert not offered, f"panel offers illegal buyouts: {offered}"
+        illegal = [p.name for p in ineligible if p.name in offered]
+        assert not illegal, f"panel offers illegal buyouts: {illegal}"
 
     def test_eligible_minors_are_offered(self, client):
         import main
 
-        html = self._panel(client)
+        offered = set(buyout_options(self._panel(client)))
         bot = main.auction_state.teams[MY_TEAM]
         eligible_minors = [
             p for p in bot.minor_players if p.can_be_bought_out
@@ -184,10 +187,7 @@ class TestPanelOffersExactlyTheEligible:
         if not eligible_minors:
             pytest.skip("no group 2/3 players in BOT's minors in current data")
 
-        missing = [
-            p.name for p in eligible_minors
-            if f"/buyout-check/{p.name}" not in html
-        ]
+        missing = [p.name for p in eligible_minors if p.name not in offered]
         assert not missing, f"eligible minors hidden from the panel: {missing}"
 
     def test_refusal_explains_itself_instead_of_a_blank_panel(self, client):
@@ -196,7 +196,7 @@ class TestPanelOffersExactlyTheEligible:
         bot = main.auction_state.teams[MY_TEAM]
         victim = next(p for p in bot.all_players if not p.can_be_bought_out)
 
-        r = client.get(f"/buyout-check/{victim.name}")
+        r = client.get("/buyout-check", params={"player_name": victim.name})
         assert r.status_code == 200
         assert "showToast" in r.headers.get("HX-Trigger", ""), (
             "an ineligible player rendered an empty panel with no explanation"

@@ -4,6 +4,14 @@ Simulates a realistic auction through the HTTP API: early picks, mid-auction
 trades and buyouts, late-auction with teams done, and final verification.
 Tests interaction between all systems (optimizer, market, nominations, toasts,
 OOB swaps, atomic saves) in a single continuous flow.
+
+40 is a deliberate stopping point, not an oversight. A full-length auction is
+165 open active spots, and `tests/measure_ceiling.py` runs one on demand —
+verified 2026-08-16: MILP `Optimal` throughout, no negative budget, no roster
+over 24, and `GET /`, `/nominate` and the buyout scan all still 200 at the end.
+Doing it here too would add ~15s to the suite to re-assert what the instrument
+already answers. What 40 buys is the *interaction* coverage above, which needs
+a mid-auction, not an endgame.
 """
 
 import json

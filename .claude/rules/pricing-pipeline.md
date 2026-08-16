@@ -53,6 +53,19 @@ Position-agnostic -- any team can bid on any player (extras go to bench or minor
 market_price = min(model_price, market_ceiling)
 ```
 
+**How often that `min` actually fires depends entirely on how fast the league spends**, and the two ends of the range are far apart -- measured 2026-08-16 over a full 165-pick auction by `tests/measure_ceiling.py`:
+
+| buyers pay | ceiling binds | first bind | league cap unspent |
+|---|---|---|---|
+| the tool's own market price | **0 of 165 picks** | never | 18% ($59.4M of $337.7M) |
+| what the reserve rule allows | **133 of 165 picks** | pick 32, at $7.3M | 0% |
+
+In the drain run the ceiling steps $11.4M -> $7.3M -> $4.5M -> $0.5M and is at the floor by pick 60. So the layer is **not** inert -- it binds readily once the money is gone. The pinned run is the artefact: paying exactly the model price is the one behaviour the model cannot be wrong about, so it leaves 18% of the cap unspent and two rich teams keep the ceiling at `MAX_SALARY` on their own. A real draft is somewhere between, and which end it lands nearer decides how much Layer 2 contributes to *planning* -- see `BACKLOG.md`. **Do not restate either run as "the" behaviour of the ceiling.**
+
+The threshold underneath both numbers: the ceiling is the second-highest of ten, so it holds at `MAX_SALARY` until **all but one** opponent is priced out -- not until the league is broke. Pinned by `tests/test_market.py::TestWhenTheCeilingLeavesTheCap`.
+
+None of this is true of the **live** ceiling, which is a different computation over a different set -- see the Critical rule below.
+
 **Final bid recommendation** -- two caps that mean different things, kept apart:
 ```
 value_cap     = min(marginal_value, physical_max_bid)   # hard: past this he isn't worth it
@@ -92,6 +105,15 @@ The bid recommendation must **NEVER** exceed what opponents can force BOT to pay
 - **Live ceiling** (`compute_live_ceiling`): when BOT is among the active bidders, the HIGHEST opponent max is the price-to-beat (that opponent must drop out for BOT to win); when BOT is only observing, second-highest. Caps the bid advisor.
 
 If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardless of what the model or marginal value says.
+
+**The two are computed over different SETS, and that is why they behave nothing alike.** The idle one takes all 10 opponents, so any two rich teams pin it at `MAX_SALARY`; the live one takes only the named bidders, which is usually two or three, so a single poor rival puts it well below. Measured mid-draft on the same states where the idle ceiling never left the cap:
+
+| live ceiling below `MAX_SALARY` | fresh | mid-draft |
+|---|---|---|
+| 1 rival | 0/10 | **7/10** |
+| 2 rivals | 0/45 | **21/45** |
+
+A first pass at the planning-price question above measured the *idle* ceiling and concluded the panel's "Should win it" figure would never show a number and `stop_status` would read `at_cap` all draft. **That is wrong** -- `/bid-check` builds its own `MarketInfo` from `compute_live_ceiling` over the named bidders, so the forecast fires routinely from mid-draft. Recorded because reasoning from one ceiling to the other is the specific mistake, and it was made here.
 
 ### The one exception: a real price beats a forecast
 

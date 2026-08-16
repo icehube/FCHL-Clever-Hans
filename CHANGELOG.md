@@ -20,6 +20,36 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-16]
+
+### Investigated
+
+- **Does the market layer's ceiling ever change a planning price?** Closed with no engine change; the answer is "it depends entirely on how fast the league spends", and the two ends of that range are far enough apart that neither can be quoted as *the* behaviour.
+
+  `market_price = min(model_price, market_ceiling)` is what the MILP plans on. Nothing in the suite could say whether the ceiling half of that `min` ever fires, because it is a property of a whole auction rather than of any one state. `tests/measure_ceiling.py` (new — an instrument, named like `measure_layout.py` so pytest ignores it) runs a full 165-pick auction and reports it per pick, under two spending models:
+
+  | buyers pay | ceiling binds | first bind | distinct ceilings | league cap unspent |
+  |---|---|---|---|---|
+  | the tool's own market price | 0 of 165 | never | `[11.4]` | 18% ($59.4M of $337.7M) |
+  | what the reserve rule allows (`--drain`) | **133 of 165** | pick 32, $7.3M | `[0.5, 4.5, 7.3, 11.4]` | 0% |
+
+  **The triage that opened this reported only the first row, and concluded Layer 2 contributes nothing to planning. The `--drain` run killed that.** The ceiling binds readily — from pick 32, and it is at the $0.5M floor by pick 60. What produces the pinned run is not an inert layer, it is that paying exactly the model price is the one behaviour the model cannot be wrong about: it leaves 18% of the cap unspent, and two teams finishing rich (JHN $19.8M, GVR $14.1M) hold the ceiling at `MAX_SALARY` between them. A real draft sits somewhere between the rows, and where it sits is now a measurable question rather than an argued one.
+
+  Supporting evidence read the same way from the other side: `scenarios.py` already needed `_scenario_endgame_ceiling_binds`, whose `_drain()` helper buys players purely to force spendable budgets down — the repo had to construct the binding case by hand once before.
+
+  **A second claim from the same triage, also killed by measurement.** It reported that `stop_status` would therefore read `at_cap` for the entire draft and the panel's "Should win it" figure would never show a number. Wrong: `/bid-check` builds its own `MarketInfo` from `compute_live_ceiling` over the *named bidders only* (`main.bid_check`), not the idle ceiling. Over every matchup rather than a sample — 10 single-rival and 45 two-rival, since an average would hide that the same rich teams pin it — the live ceiling is below `MAX_SALARY` in **7/10** and **21/45** by mid-draft, against 0/10 and 0/45 on a fresh state. The advisor's forecast fires routinely. Reasoning from one ceiling to the other is the specific mistake, it was made twice here, and `.claude/rules/pricing-pipeline.md` now says so under the Critical rule.
+
+  Left behind: the numbers in `.claude/rules/pricing-pipeline.md` and one clause on CLAUDE.md's three-layer row; the open design question in `BACKLOG.md` (should a planning price be demand-aware rather than a second-highest-of-ten nobody reaches?), deferred deliberately because changing it moves every bid recommendation in the tool and there is a draft coming; and a note in `test_dry_run.py` that its 40 picks are a stopping point, since full length is now covered on demand.
+
+### Fixed
+
+- **`test_second_highest_is_ceiling` could not fail.** Found while pinning the threshold above, in the test named for the rule the whole layer rests on. `_make_league`'s OPP1 and OPP2 both come out at `physical_max_bid = 11.4` — clamped at `MAX_SALARY` — so its two assertions read `11.4 == 11.4` twice and passed just as happily against a `compute_market_ceiling` returning the **highest**. Verified by mutation: the whole of `tests/test_market.py` was green against that change except the two tests added the same day. Heavier keeper salaries put all three opponents below the cap and distinct, plus an explicit guard on that separation so the next budget tweak fails loudly instead of quietly disarming it.
+
+### Added
+
+- **`tests/test_market.py::TestWhenTheCeilingLeavesTheCap`** — where the idle ceiling stops being `MAX_SALARY`. It is the second-highest of ten, so it holds at the cap until **all but one** opponent is priced out, not until the league is broke. That threshold is what makes the `min` inert early and nobody had written it down, so a change to `physical_max_bid` or to the second-highest rule would have moved it silently. Two tests: a walk that squeezes the real 11-team league one opponent at a time and pins the whole transition, and the single state it turns on stated alone, so a mutant that shifts the threshold says which end moved.
+
+
 ## [2026-08-15f]
 
 ### Changed

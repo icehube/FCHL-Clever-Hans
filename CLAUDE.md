@@ -131,7 +131,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 
 | Decision | Why |
 |---|---|
-| Three-layer pricing | Model alone ignores budget constraints. Market layer ensures bids reflect reality. |
+| Three-layer pricing | Model alone ignores budget constraints. Market layer ensures bids reflect reality — always for the bid advisor, and for the MILP's planning prices only once the league has actually spent its cap (measured: `tests/measure_ceiling.py`). |
 | Market ceiling from exact budgets | Perfect visibility during draft. Use it. |
 | "Team done" toggle | 3+ teams finish early per draft. Their dead budget distorts market calculations if not excluded. |
 | Trade eval via hypothetical MILP | Same optimizer, just run on a cloned state. No new algorithm needed. |

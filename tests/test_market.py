@@ -114,14 +114,33 @@ class TestComputeMarketCeiling:
         return teams
 
     def test_second_highest_is_ceiling(self):
-        """Market ceiling should be the second-highest physical_max."""
-        teams = self._make_league()
+        """Market ceiling should be the second-highest physical_max.
+
+        The keeper salaries are deliberately much heavier than `_make_league`'s.
+        With the default budgets, OPP1 and OPP2 both clamp to MAX_SALARY, so
+        this test's two assertions read `11.4 == 11.4` twice and pass just as
+        happily against a `compute_market_ceiling` that returns the HIGHEST —
+        the one rule it is named for. Keep all three maxes below the cap and
+        distinct; the assert below is what stops that from rotting again.
+        """
+        teams = self._make_league(
+            OPP1=_make_team("OPP1", keeper_salary=39.0, num_keepers=10,
+                            keeper_positions={"F": 5, "D": 3, "G": 2}),
+            OPP2=_make_team("OPP2", keeper_salary=41.0, num_keepers=10,
+                            keeper_positions={"F": 5, "D": 3, "G": 2}),
+            OPP3=_make_team("OPP3", keeper_salary=45.0, num_keepers=10,
+                            keeper_positions={"F": 5, "D": 3, "G": 2}),
+        )
+        maxes = {c: teams[c].physical_max_bid for c in ("OPP1", "OPP2", "OPP3")}
+        assert len(set(maxes.values())) == 3 and max(maxes.values()) < MAX_SALARY, (
+            f"budgets no longer separate below the cap ({maxes}); this test "
+            f"cannot tell highest from second-highest until they do"
+        )
+
         info = compute_market_ceiling(teams)
         # OPP1 has most budget, OPP2 second, OPP3 least
-        opp1_max = teams["OPP1"].physical_max_bid
-        opp2_max = teams["OPP2"].physical_max_bid
-        assert info.market_ceiling == opp2_max
-        assert info.highest_bid == opp1_max
+        assert info.market_ceiling == maxes["OPP2"]
+        assert info.highest_bid == maxes["OPP1"]
 
     def test_excludes_my_team(self):
         """BOT should be excluded from market ceiling calculation."""
@@ -162,6 +181,83 @@ class TestComputeMarketCeiling:
         teams = self._make_league()
         info = compute_market_ceiling(teams)
         assert info.demand_count == 3  # All 3 opponents active
+
+
+class TestWhenTheCeilingLeavesTheCap:
+    """Where the idle ceiling stops being MAX_SALARY, against the real league.
+
+    `market_price = min(model_price, market_ceiling)`, so while the ceiling sits
+    at MAX_SALARY the MILP is planning on raw model prices — the second half of
+    that `min` does nothing. Whether that ever changes during a draft is a
+    property of how fast budgets drain, and `tests/measure_ceiling.py` measures
+    it end to end: at model prices it never binds (0 of 165 picks, 18% of the
+    league cap unspent), and with the money actually spent it first binds at
+    pick 32 and binds on 133 of 165.
+
+    This pins the *mechanism* underneath both of those numbers, which is the
+    part a future change could move silently. The ceiling is the SECOND-highest
+    opponent max, so it holds at the cap until all but one opponent is priced
+    out — not until the league is broke. Nobody had written that threshold down.
+    """
+
+    # A team reaches MAX_SALARY when `spendable_budget + MIN_SALARY` does, so
+    # anything under this line cannot bid the league maximum. Squeezing to the
+    # line itself is not enough: `spendable_budget` subtracts the reserve for
+    # every remaining spot, which on a fresh roster is several million.
+    PIN_LINE = MAX_SALARY - MIN_SALARY
+
+    def test_the_cap_holds_until_all_but_one_opponent_is_priced_out(self, client):
+        import main
+
+        from tests.helpers import squeeze
+
+        teams = main.auction_state.teams
+        opponents = [c for c in teams if c != MY_TEAM]
+        assert len(opponents) > 2, "the threshold below is meaningless with fewer"
+        assert all(teams[c].physical_max_bid == MAX_SALARY for c in opponents), (
+            "a fresh league starts with every opponent able to bid the maximum — "
+            "that starting point is what makes the ceiling inert early"
+        )
+
+        at_cap = []
+        for n, code in enumerate(opponents, start=1):
+            squeeze(code, self.PIN_LINE)
+            assert teams[code].physical_max_bid < MAX_SALARY, (
+                f"{code} still reaches the cap after being squeezed; the pin "
+                f"line moved and this test is measuring nothing"
+            )
+            if compute_market_ceiling(teams).market_ceiling == MAX_SALARY:
+                at_cap.append(n)
+
+        # Two rich opponents are enough to pin it, so it survives every squeeze
+        # but the last two. Reading `highest` instead of `second` here would
+        # extend this by exactly one entry.
+        assert at_cap == list(range(1, len(opponents) - 1))
+
+    def test_the_last_rich_opponent_does_not_hold_the_cap_alone(self, client):
+        """The single case the walk above turns on, stated on its own.
+
+        The walk asserts a whole sequence, so a mutant that shifts the
+        transition fails it without saying which end moved. This one names the
+        state: one opponent at the cap, every other priced out, and the ceiling
+        is the richest of the *poor* teams — because the rich one would have to
+        drop out for anyone to win, and the price stops where the second bidder
+        does.
+        """
+        import main
+
+        from tests.helpers import squeeze
+
+        teams = main.auction_state.teams
+        rich, *poor = [c for c in teams if c != MY_TEAM]
+        for code in poor:
+            squeeze(code, self.PIN_LINE)
+
+        info = compute_market_ceiling(teams)
+        assert teams[rich].physical_max_bid == MAX_SALARY
+        assert info.highest_bidder == rich
+        assert info.market_ceiling < MAX_SALARY
+        assert info.market_ceiling == max(teams[c].physical_max_bid for c in poor)
 
 
 class TestComputeMarketPrice:

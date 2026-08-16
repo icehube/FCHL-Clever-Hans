@@ -28,13 +28,23 @@
            team_panel.html's two roster tables and nowhere else; `dom_id` mints
            ONE id per player, so a second copy would duplicate it and htmx's
            OOB resolve (`querySelectorAll("#"+id)`) would swap both. #}
+        {# `|list` is belt-and-braces, not decoration: `selectattr` returns a
+           GENERATOR, and `{% if %}` on a generator is always truthy — so a
+           candidates expression that is not a container renders an empty
+           <select> instead of the note below. `sort` happens to materialize
+           today, which is exactly why the redundancy is worth its line: the
+           sort is the part someone would question, not the filter. #}
         {% set candidates = team.all_players|selectattr('can_be_bought_out')|sort(attribute='projected_points')|list %}
         {% if candidates %}
         {# The empty first option is load-bearing: without it the top candidate
            is pre-selected, and choosing him fires no `change` at all — the
            first click on the most likely buyout in the list would do nothing.
            `disabled` so it cannot be re-chosen once a check has run. #}
-        <select name="player_name"
+        {# Named, like every other control the 2026-08-15 a11y pass touched. It
+           replaced buttons whose visible text WAS their name; measured in
+           Chrome after the swap, the select reported role=combobox with an
+           empty name and no name source at all. #}
+        <select name="player_name" aria-label="Check a buyout"
                 hx-get="/buyout-check" hx-trigger="change"
                 hx-target="#buyout-panel" hx-swap="outerHTML"
                 class="select select-xs select-bordered w-full mb-2">

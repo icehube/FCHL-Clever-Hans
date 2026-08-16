@@ -1470,6 +1470,78 @@ class TestTheBuyoutPicker:
             f"first option is {first!r} — a pre-selected real candidate"
         )
 
+    def test_a_name_the_markup_escapes_still_round_trips(self, client):
+        """`buyout_options` must hand back `Player.name`, not the escaped form.
+
+        Jinja escapes the attribute, so an apostrophe name comes out of the
+        panel as `Ryan O&#39;Reilly` and compares unequal to every `p.name` the
+        eligibility tests check it against. The direction that matters is the
+        silent one: `test_ineligible_players_are_not_offered` asks
+        `p.name in offered`, so an illegally-offered apostrophe player is simply
+        not found and the guard reports clean. Two such names are in the pool
+        today and one pick makes one BOT's, group 3 and eligible.
+
+        The app was never affected — the browser unescapes before htmx reads
+        `select.value` — which is why nothing on screen would have shown it.
+        """
+        import main
+        from markupsafe import escape
+
+        victim = next(
+            (n for n in main.auction_state.available_players
+             if str(escape(n)) != n),
+            None,
+        )
+        if victim is None:
+            pytest.skip("no pool name today contains a character Jinja escapes")
+
+        assign(client, victim, main.MY_TEAM, 1.0)
+        p = main.auction_state.teams[main.MY_TEAM].find_player(victim)
+        assert p.can_be_bought_out, (
+            f"{victim} drafted as group {p.group} — pick a different probe"
+        )
+        assert victim in buyout_options(client.get("/").text)
+
+    def test_a_team_with_nothing_to_buy_out_says_so(self, client):
+        """The `{% else %}` branch, which nothing reached: BOT always has
+        candidates, so the whole thing was dead code that read as handled.
+
+        It also guards the materializer. `selectattr` returns a GENERATOR and
+        `{% if %}` on one is always truthy, so a `candidates` that is not a
+        container renders an empty `<select>` here — a control that looks
+        broken — while every other test stays green. Today `sort` supplies the
+        materializing (it returns a list; the trailing `|list` is belt-and-
+        braces for the day someone asks why a dropdown needs sorting), so the
+        mutation this dies on is dropping BOTH, not the `|list` alone.
+
+        Groups are edited in place rather than by buying fifteen players out,
+        which would be fifteen MILP solves for a one-line branch. `client` is
+        function-scoped and resets, so the mutation does not leak.
+        """
+        import main
+
+        bot = main.auction_state.teams[main.MY_TEAM]
+        for p in bot.all_players:
+            if p.can_be_bought_out:
+                p.group = "A"
+        assert not any(p.can_be_bought_out for p in bot.all_players)
+
+        panel = section_of(client.get("/").text, "buyout-panel")
+        assert "<select" not in panel, "an empty picker is a control that looks broken"
+        assert "No group 2/3 players" in panel
+
+    def test_the_picker_is_named(self, client):
+        """It replaced buttons whose visible text was their accessible name.
+
+        Measured in Chrome after the swap: role=combobox, name '', no name
+        source — so a screen reader announces an unlabelled combo box. Same gap
+        the close buttons, the League State done glyph and the two filter groups
+        were fixed for.
+        """
+        panel = section_of(client.get("/").text, "buyout-panel")
+        select = re.search(r"<select[^>]*>", panel).group(0)
+        assert "aria-label=" in select, f"the picker has no name: {select!r}"
+
     def test_the_picker_carries_no_buyout_dots(self, client):
         """The `bo-` placeholders live in team_panel.html's roster tables only.
 

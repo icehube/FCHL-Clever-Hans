@@ -14,6 +14,7 @@ play.
 
 import json
 import re
+from html import unescape
 from typing import Any
 
 from config import SALARY_CAP
@@ -160,9 +161,21 @@ def buyout_options(html: str) -> list[str]:
     tables, so a whole-page match would report players the Analyzer never
     offered. The empty placeholder option is dropped — it is a prompt, not a
     candidate.
+
+    **Unescaped, and that is not tidiness.** Jinja autoescapes the attribute, so
+    `Ryan O'Reilly` comes back as `Ryan O&#39;Reilly` and compares unequal to the
+    `Player.name` every caller checks it against. Two such names are in the pool
+    today and one `/assign` makes one BOT's (drafted group 3, eligible), at which
+    point `test_ineligible_players_are_not_offered` stops being able to fail: an
+    illegally-offered apostrophe player is simply not found in the list, and the
+    test reports clean. The app was never affected — the browser unescapes before
+    htmx reads `select.value` — so this could only ever have shown up as a guard
+    quietly going hollow.
     """
     panel = section_of(html, "buyout-panel")
-    return [n for n in re.findall(r'<option value="([^"]*)"', panel) if n]
+    return [
+        unescape(n) for n in re.findall(r'<option value="([^"]*)"', panel) if n
+    ]
 
 
 def squeeze(code: str, headroom: float) -> None:

@@ -2672,6 +2672,50 @@ class TestTheLogsPanel:
         )
 
 
+class TestFilterGroupsAreDistinguishable:
+    """Two filter groups, and both start with a button reading "All".
+
+    Unlabelled, the bar announces "All, F, D, G, All, RFA, UFA" and nothing
+    tells the two Alls apart — the group name is the only thing that does.
+    Same class of gap as the `&times;` close buttons and the League State done
+    glyph, both labelled after a grill found them.
+    """
+
+    def _bar(self, client) -> str:
+        html = section_of(client.get("/").text, "bid-limits")
+        start = html.index("flex flex-wrap items-center")
+        return html[start:html.index('<div id="player-chart-container"', start)]
+
+    def test_both_groups_carry_a_name(self, client):
+        bar = self._bar(client)
+        assert 'aria-label="Filter by position"' in bar
+        assert 'aria-label="Filter by contract status"' in bar
+
+    def test_every_group_of_filter_buttons_is_labelled(self, client):
+        """The rule, not the two instances — a third group must be named too.
+
+        Written this way because the failure is silent: an unnamed group looks
+        identical on screen and only a screen reader can tell.
+        """
+        bar = self._bar(client)
+        groups = re.findall(r"<div[^>]*class=\"flex gap-1\"[^>]*>", bar)
+        assert len(groups) >= 2, f"expected the two filter groups, found {groups}"
+        unnamed = [g for g in groups if "aria-label=" not in g]
+        assert not unnamed, (
+            f"{len(unnamed)} filter group(s) have no accessible name: {unnamed}"
+        )
+
+    def test_the_ambiguity_is_real(self, client):
+        """Guards the premise. If the duplicate "All" ever goes away, the two
+        tests above stop protecting anything and should be reconsidered rather
+        than left as decoration."""
+        bar = self._bar(client)
+        assert bar.count(">All</button>") == 2, (
+            "the two groups no longer both start with All — re-read whether "
+            "the group labels are still what disambiguates them"
+        )
+
+
 class TestEverySortableColumnCanActuallySort:
     """`sortTable` compares cell text, so a column with none is an inert control.
 

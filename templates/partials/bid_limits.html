@@ -3,7 +3,11 @@
     {# flex-wrap because this bar gained a second button group: without it the
        three RFA buttons push the legend past the panel edge at the narrow end. #}
     <div class="flex flex-wrap items-center gap-4 text-xs mb-2">
-        <div class="flex gap-1">
+        {# Both groups are labelled because both start with a button reading
+           "All". Unlabelled, the bar announces "All, F, D, G, All, RFA, UFA"
+           and the two Alls are indistinguishable — the group name is what
+           disambiguates them. #}
+        <div class="flex gap-1" role="group" aria-label="Filter by position">
             <button class="btn btn-xs btn-primary" onclick="filterPosition('all')" data-pos="all">All</button>
             <button class="btn btn-xs btn-outline" onclick="filterPosition('F')" data-pos="F">F</button>
             <button class="btn btn-xs btn-outline" onclick="filterPosition('D')" data-pos="D">D</button>
@@ -13,7 +17,7 @@
            nomination turn is 1 RFA + 1 UFA, so "show me the UFAs" is exactly as
            real a need as the other half and a toggle cannot express it.
            Composes with the position group — see applyPlayerFilters(). #}
-        <div class="flex gap-1">
+        <div class="flex gap-1" role="group" aria-label="Filter by contract status">
             <button class="btn btn-xs btn-primary" onclick="filterRfa('all')" data-rfa="all">All</button>
             <button class="btn btn-xs btn-outline" onclick="filterRfa('rfa')" data-rfa="rfa">RFA</button>
             <button class="btn btn-xs btn-outline" onclick="filterRfa('ufa')" data-rfa="ufa">UFA</button>

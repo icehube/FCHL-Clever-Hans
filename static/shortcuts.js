@@ -170,24 +170,79 @@ document.addEventListener('click', function(e) {
     }
 });
 
-/* Filter available players by position */
-function filterPosition(pos) {
+/* Available Players filters — position and RFA status, composed.
+
+   Both selections funnel through applyPlayerFilters(), which is the ONLY thing
+   that writes row.style.display. Two filters each writing it directly would
+   fight: whichever ran last would win and silently discard the other, so
+   picking F after RFA would quietly show non-RFA forwards.
+
+   The state lives here rather than in the DOM because the DOM does not keep it.
+   /assign returns all_panels.html into #app, which re-renders bid_limits.html
+   from the template — inline styles gone, buttons back to All — so before
+   2026-08-16 every filter was wiped by every sale. Over 150+ picks that is
+   constant, and it hits the RFA filter hardest, since hunting the RFA half of
+   a nomination turn is exactly what you are doing when picks land.
+
+   Deliberately unlike the Logs tabs, which DO reset on a swap: a tab is a place
+   you are looking, a filter is a search you are in the middle of. */
+var playerFilters = {pos: 'all', rfa: 'all'};
+
+function applyPlayerFilters() {
     var tbody = document.querySelector('#bid-limits tbody');
     if (!tbody) return;
     tbody.querySelectorAll('tr').forEach(function(row) {
-        row.style.display = (pos === 'all' || row.dataset.position === pos) ? '' : 'none';
+        // `is-rfa` is already on the row and already load-bearing for CSS (the
+        // yellow left border, style.css). Reading it beats adding a data-rfa
+        // attribute that restates the same fact in a second place.
+        var isRfa = row.classList.contains('is-rfa');
+        var okPos = playerFilters.pos === 'all' || row.dataset.position === playerFilters.pos;
+        var okRfa = playerFilters.rfa === 'all'
+            || (playerFilters.rfa === 'rfa' ? isRfa : !isRfa);
+        row.style.display = (okPos && okRfa) ? '' : 'none';
     });
-    document.querySelectorAll('[data-pos]').forEach(function(b) {
-        b.classList.remove('btn-primary');
-        b.classList.add('btn-outline');
-    });
-    var active = document.querySelector('[data-pos="' + pos + '"]');
-    if (active) {
-        active.classList.add('btn-primary');
-        active.classList.remove('btn-outline');
-    }
+    syncFilterButtons('data-pos', playerFilters.pos);
+    syncFilterButtons('data-rfa', playerFilters.rfa);
+    // Last, and not optional: the # column is rendered 1..N by Jinja, so a
+    // filtered table shows the original numbering with gaps until this runs.
     renumberRows(tbody);
 }
+
+function syncFilterButtons(attr, active) {
+    document.querySelectorAll('[' + attr + ']').forEach(function(b) {
+        var on = b.getAttribute(attr) === active;
+        b.classList.toggle('btn-primary', on);
+        b.classList.toggle('btn-outline', !on);
+    });
+}
+
+function filterPosition(pos) {
+    playerFilters.pos = pos;
+    applyPlayerFilters();
+}
+
+function filterRfa(rfa) {
+    playerFilters.rfa = rfa;
+    applyPlayerFilters();
+}
+
+/* Re-apply the filters to a freshly swapped table.
+
+   Two guards, both load-bearing. The early-out keeps the common case free —
+   with no filter set there is nothing to restore, and 705 style writes per
+   swap would be pure waste on the request path. The target check is because
+   htmx:afterSwap fires for EVERY swap, including #bid-panel on each bid-check
+   and #team-panel on each /team-view, neither of which touches this table.
+
+   Keying on the swapped subtree is safe: bid_limits.html is included only by
+   all_panels.html, and nothing in the app targets #bid-limits directly. */
+document.body.addEventListener('htmx:afterSwap', function(e) {
+    if (playerFilters.pos === 'all' && playerFilters.rfa === 'all') return;
+    var swapped = e.detail && e.detail.target;
+    if (!swapped || !swapped.querySelector) return;
+    if (!swapped.querySelector('#bid-limits tbody')) return;
+    applyPlayerFilters();
+});
 
 /* Keep the Assign button's price label in step with the live price input.
    The button posts #bid-price's value at submit time, so a label left at the

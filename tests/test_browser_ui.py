@@ -1233,3 +1233,124 @@ class TestASalaryCorrectionIsOneEdit:
             f"{[c.description for c in added]}"
         )
         assert "→" in added[0].description and name in added[0].description
+
+
+class TestAvailablePlayerFilters:
+    """Position and RFA compose, and neither survives being wiped by a pick.
+
+    Browser-only of necessity: the filtering is JavaScript. The pre-existing
+    coverage (`test_htmx_interactions.py:406`, `test_dry_run.py:281`) asserts
+    only that `data-position` attributes EXIST — nothing had ever exercised a
+    filter, which is how the reset went unnoticed.
+    """
+
+    def _rows(self, page):
+        """(visible, visible-and-RFA, total) for the available-players table."""
+        return page.evaluate("""() => {
+            const trs = [...document.querySelectorAll('#bid-limits tbody tr')];
+            const vis = trs.filter(r => r.style.display !== 'none');
+            return {
+                visible: vis.length,
+                visibleRfa: vis.filter(r => r.classList.contains('is-rfa')).length,
+                visiblePositions: [...new Set(vis.map(r => r.dataset.position))].sort(),
+                total: trs.length,
+                totalRfa: trs.filter(r => r.classList.contains('is-rfa')).length,
+            };
+        }""")
+
+    def _active(self, page, attr):
+        return page.evaluate(
+            "attr => { const b = document.querySelector('[' + attr + '].btn-primary');"
+            "          return b ? b.getAttribute(attr) : null; }", attr)
+
+    def test_rfa_and_ufa_partition_the_pool(self, page, live_server):
+        _open(page, live_server)
+        base = self._rows(page)
+        assert base["totalRfa"] > 0, "no RFAs in the pool; this proves nothing"
+        assert base["visible"] == base["total"], "expected an unfiltered start"
+
+        page.click('[data-rfa="rfa"]')
+        rfa = self._rows(page)
+        assert rfa["visible"] == rfa["visibleRfa"] == base["totalRfa"], (
+            f"RFA filter shows {rfa['visible']} rows, {rfa['visibleRfa']} of them "
+            f"RFA, against {base['totalRfa']} RFAs in the pool"
+        )
+
+        page.click('[data-rfa="ufa"]')
+        ufa = self._rows(page)
+        assert ufa["visibleRfa"] == 0, f"{ufa['visibleRfa']} RFA rows leaked into UFA"
+        # The complement, so neither side can quietly drop rows.
+        assert rfa["visible"] + ufa["visible"] == base["total"], (
+            f"RFA({rfa['visible']}) + UFA({ufa['visible']}) != {base['total']}"
+        )
+
+    def test_position_and_rfa_compose(self, page, live_server):
+        """The case a naive second filter fails: whichever ran last would win."""
+        _open(page, live_server)
+        page.click('[data-pos="F"]')
+        page.click('[data-rfa="rfa"]')
+
+        r = self._rows(page)
+        assert r["visible"] > 0, "F+RFA matched nothing; pick a livelier fixture"
+        assert r["visiblePositions"] == ["F"], (
+            f"F+RFA shows positions {r['visiblePositions']} — the RFA filter "
+            f"overwrote the position filter"
+        )
+        assert r["visible"] == r["visibleRfa"], (
+            f"{r['visible'] - r['visibleRfa']} non-RFA forwards are showing — "
+            f"the position filter overwrote the RFA filter"
+        )
+
+    def test_a_pick_does_not_clear_the_filter(self, page, live_server):
+        """/assign re-renders the whole table from the template.
+
+        Before 2026-08-16 that wiped both the inline row styles and the button
+        state, so every sale dropped you back to All — worst exactly when you
+        are hunting the RFA half of a nomination turn.
+        """
+        _open(page, live_server)
+        page.click('[data-pos="F"]')
+        page.click('[data-rfa="rfa"]')
+        before = self._rows(page)
+
+        target = pool_top()[0]
+        _start_bid(page, target, price="2.0", bidders="BOT")
+        with page.expect_response(re.compile(r"/assign")):
+            page.click("#bid-panel form[hx-vals] button[type='submit']")
+        page.wait_for_timeout(600)
+
+        after = self._rows(page)
+        assert after["visiblePositions"] == ["F"], (
+            f"after a pick the table shows {after['visiblePositions']} — the "
+            f"filter was wiped by the swap"
+        )
+        assert after["visible"] == after["visibleRfa"], "RFA half of the filter was lost"
+        assert after["visible"] in (before["visible"], before["visible"] - 1), (
+            f"{before['visible']} -> {after['visible']} rows; expected the drafted "
+            f"player to leave and nothing else to change"
+        )
+        # The buttons must agree with what the rows are doing. Restoring
+        # visibility while the buttons read "All" is its own bug — you would
+        # believe you were seeing the whole pool.
+        assert self._active(page, "data-pos") == "F", "the position button reset"
+        assert self._active(page, "data-rfa") == "rfa", "the RFA button reset"
+
+    def test_the_number_column_renumbers_after_a_restore(self, page, live_server):
+        """Jinja writes # as 1..N, so a filtered table needs renumberRows."""
+        _open(page, live_server)
+        page.click('[data-rfa="rfa"]')
+
+        target = pool_top()[0]
+        _start_bid(page, target, price="2.0", bidders="BOT")
+        with page.expect_response(re.compile(r"/assign")):
+            page.click("#bid-panel form[hx-vals] button[type='submit']")
+        page.wait_for_timeout(600)
+
+        nums = page.evaluate("""() => [...document.querySelectorAll('#bid-limits tbody tr')]
+            .filter(r => r.style.display !== 'none')
+            .map(r => r.cells[0].textContent.trim())""")
+        assert nums, "no visible rows after the pick"
+        assert nums == [str(i + 1) for i in range(len(nums))], (
+            f"the # column reads {nums[:6]}… — renumberRows did not run after "
+            f"the filter was re-applied"
+        )

@@ -161,18 +161,17 @@ was wrong and the same premise would sink the follow-up:
 
 **Available Players**
 
-- **RFA filter.** Rows already carry the data (`is-rfa`), and this extends the
-  existing `filterPosition()` / `data-position` pattern rather than adding a new
-  one.
+All three items in this section and the one below closed 2026-08-16 (see
+`CHANGELOG.md`). The RFA filter was built; **both bid-panel tooltips already
+existed** and are recorded here rather than deleted, because this is the second
+time a want in this list turned out to be built already (the Buyout Analyzer,
+2026-08-06) and the cost each time is a re-investigation:
 
-**Bid panel**
+- Sigma — `player_chart.html`, on the chart's meta line, and already required
+  BY NAME in `TestTooltipsStayInsideTheirPanel`.
+- Marginal value — `bid_panel.html`, in the `.bid-details` row.
 
-- **Tooltip on Sigma**, explaining that it is the spread of the price
-  distribution (a function of the predicted log-price, not of points) and that a
-  wide sigma means the model is unsure rather than that the player is expensive.
-- **Tooltip on marginal value vs. price**, explaining that marginal value is
-  what this player adds to the *optimal roster* — so it can sit below the model
-  price on a good player the roster does not need, and that is the tool working.
+Check the template before filing a tooltip want.
 
 **Trade form**
 

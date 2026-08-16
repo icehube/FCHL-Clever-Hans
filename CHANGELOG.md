@@ -20,6 +20,30 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-16]
+
+### Added
+
+- **An RFA/UFA filter in Available Players, and filters now survive a pick.** Three states rather than an "RFA only" toggle, because per the CBA a nomination turn is 1 RFA + 1 UFA — "show me the UFAs" is exactly as real a need as the other half. Rows needed no new attribute: `is-rfa` is already on the `<tr>` and already load-bearing for the yellow left border, so reading the class beats restating the same fact in a `data-rfa`.
+
+  Both selections funnel through one `applyPlayerFilters()`, which is the only thing that writes `row.style.display`. Two filters each writing it directly would fight — whichever ran last would win and silently discard the other, so picking F after RFA would quietly show non-RFA forwards. That is the mutation `test_position_and_rfa_compose` exists for.
+
+### Fixed
+
+- **Every Available Players filter was wiped by every pick, and had been since the position filter was written.** `/assign` returns `all_panels.html` into `#app`, which re-renders `bid_limits.html` from the template: inline row styles gone, buttons back to All. Over a 150+ pick draft that is constant, and it would have hit the new RFA filter hardest, since hunting the RFA half of a nomination turn is exactly what you are doing when picks land. The filter state now lives in a JS variable re-applied on `htmx:afterSwap`, guarded twice — an early-out when nothing is filtered, so the common case costs nothing, and a check that the swapped subtree actually contains the table, since `afterSwap` also fires for every `#bid-panel` and `#team-panel` swap and re-styling 705 rows on each would be waste on the request path.
+
+  Deliberately unlike the Logs tabs, which reset on purpose so a pick lands you back on Auction. A tab is a place you are looking; a filter is a search you are in the middle of.
+
+  Button state is restored alongside visibility. Restoring the rows while the buttons still read "All" is its own bug — you would believe you were seeing the whole pool — and `test_a_pick_does_not_clear_the_filter` asserts both halves.
+
+- **The filter bar got `flex-wrap`, and it made the panel *less* likely to force its column.** Measured: min-content **283px → 139px**, because a wrapping flex container is bounded by its widest item rather than by the sum of them. Grid overflow stayed 0 at 375/1024/1280. Without the wrap, three more buttons on a `flex items-center gap-4` with no wrapping would have pushed the legend past the panel edge at the narrow end.
+
+### Investigated
+
+- **Two of the three wants picked up for this batch were already built**, which is the second time that has happened (the Buyout Analyzer closed the same way on 2026-08-06). The bid panel's marginal-value tooltip matches its want almost word for word, down to "A big gap either way is the tool working, not a mispricing", and the Sigma tooltip lives on the price chart's meta line and is *already placement-checked by name* in `TestTooltipsStayInsideTheirPanel` — a live bid auto-loads the chart into the bid panel's own mount, which is why a suite that never clicks a player name still measures it. `BACKLOG.md` now records where both live rather than just deleting the bullets, so a third re-investigation is not needed.
+
+- **Nothing had ever exercised a filter.** The pre-existing coverage asserts that `data-position` attributes exist (`test_htmx_interactions.py`, `test_dry_run.py`) and stops there — the filtering is JavaScript, so `TestClient` cannot reach it. That is how the reset survived unnoticed. `TestAvailablePlayerFilters` is browser-only for the same reason, and all four of its tests go red against the matching mutation.
+
 ## [2026-08-15c]
 
 ### Fixed

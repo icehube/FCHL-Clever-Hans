@@ -43,6 +43,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from config import MAX_SALARY, MIN_SALARY, ROSTER_SIZE, MY_TEAM  # noqa: E402
 from market import compute_live_ceiling  # noqa: E402
+from state import AuctionState  # noqa: E402
 
 # The idle ceiling is the SECOND-highest opponent max, so it only leaves
 # MAX_SALARY once at most one opponent can still reach the cap. A team reaches
@@ -50,7 +51,7 @@ from market import compute_live_ceiling  # noqa: E402
 PIN_LINE = MAX_SALARY - MIN_SALARY
 
 
-def _pinning_teams(state) -> list[tuple[str, float]]:
+def _pinning_teams(state: AuctionState) -> list[tuple[str, float]]:
     """Opponents still able to bid the league maximum, with their spendable."""
     return [
         (t.code, round(t.spendable_budget, 1))
@@ -59,7 +60,7 @@ def _pinning_teams(state) -> list[tuple[str, float]]:
     ]
 
 
-def _live_survey(state) -> tuple[int, int, int, int]:
+def _live_survey(state: AuctionState) -> tuple[int, int, int, int]:
     """How often a live matchup's ceiling falls below the league maximum.
 
     Every 1-rival and 2-rival combination, not a sample: there are only 10 and
@@ -78,7 +79,7 @@ def _live_survey(state) -> tuple[int, int, int, int]:
     return solo, len(codes), duo, len(pairs)
 
 
-def _next_buyer(state):
+def _next_buyer(state: AuctionState) -> tuple[str | None, int]:
     """The still-drafting team with the most holes, or None when the draft ends."""
     open_teams = [
         (t.code, ROSTER_SIZE - len(t.roster_players))
@@ -90,7 +91,7 @@ def _next_buyer(state):
     return max(open_teams, key=lambda x: x[1])
 
 
-def _price(state, code: str, spots: int, name: str, drain: bool) -> float:
+def _price(state: AuctionState, code: str, spots: int, name: str, drain: bool) -> float:
     """What this buyer pays — the two spending models the flags select between.
 
     `room` is the commissioner's rule, not ours: the league software refuses a
@@ -106,6 +107,35 @@ def _price(state, code: str, spots: int, name: str, drain: bool) -> float:
     return max(MIN_SALARY, min(wanted, room, MAX_SALARY))
 
 
+def _health(state: AuctionState) -> list[str]:
+    """Anything a full-length auction could break that a ceiling number hides.
+
+    `tests/test_dry_run.py` stops at 40 picks and points here for full length,
+    so these have to be checked rather than assumed — a run that reported a
+    tidy ceiling curve while the MILP had gone Infeasible at pick 90 would be
+    worse than no run at all.
+    """
+    bad: list[str] = []
+    if main.milp_solution is not None and main.milp_solution.status != "Optimal":
+        bad.append(f"MILP {main.milp_solution.status}")
+    # Over-cap is LEGAL in this app — the league permits it and buyouts resolve
+    # it (owner decision 2026-08-06), so this is not an app invariant. It is a
+    # harness one: `_price` clamps every bid to `room`, so a negative budget
+    # here means the simulated auction did something the commissioner would
+    # have refused, and the run's numbers describe an auction that cannot happen.
+    bad += [
+        f"{t.code} budget {t.remaining_budget:.1f}"
+        for t in state.teams.values()
+        if t.remaining_budget < 0
+    ]
+    bad += [
+        f"{t.code} roster {len(t.roster_players)}"
+        for t in state.teams.values()
+        if len(t.roster_players) > ROSTER_SIZE
+    ]
+    return bad
+
+
 def run(drain: bool, every: int) -> None:
     label = "DRAIN — buyers pay what they can afford" if drain else \
             "BASELINE — buyers pay the tool's market price"
@@ -118,6 +148,8 @@ def run(drain: bool, every: int) -> None:
         at_cap = picks = 0
         seen: set[float] = set()
         first_bind = None
+        steps: list[tuple[int, float]] = []
+        unhealthy: list[str] = []
 
         print(f"  {'pick':>5} {'idle':>7} {'pinning teams':>14} {'1-rival':>9} {'2-rival':>9}")
         while True:
@@ -127,10 +159,18 @@ def run(drain: bool, every: int) -> None:
 
             ceiling = main.market_info.market_ceiling
             seen.add(round(ceiling, 1))
+            # Every value the ceiling actually took, with the pick it took it
+            # on. Reading the step sequence off the checkpoint rows instead is
+            # how "at the floor by pick 60" got into the docs when the measured
+            # answer was pick 43 — the checkpoints were 20 apart.
+            if not steps or steps[-1][1] != round(ceiling, 1):
+                steps.append((picks, round(ceiling, 1)))
             if ceiling >= MAX_SALARY:
                 at_cap += 1
             elif first_bind is None:
                 first_bind = (picks, round(ceiling, 1))
+
+            unhealthy += [f"pick {picks}: {b}" for b in _health(state)]
 
             if picks % every == 0:
                 solo, n_solo, duo, n_duo = _live_survey(state)
@@ -151,7 +191,8 @@ def run(drain: bool, every: int) -> None:
         print(f"\n  picks                 : {picks}")
         print(f"  idle ceiling at MAX   : {at_cap}/{picks}"
               f"  ({100 * at_cap / picks:.0f}% of the draft)")
-        print(f"  distinct idle ceilings: {sorted(seen)[:10]}")
+        print(f"  distinct idle ceilings: {sorted(seen)}")
+        print(f"  ceiling steps         : {' -> '.join(f'{c}M@{p}' for p, c in steps)}")
         print(f"  first pick it bound   : {first_bind or 'never'}")
         print(f"  league cap            : spent ${spent:.1f}M of ${total:.1f}M"
               f"  ({100 * (total - spent) / total:.0f}% unspent)")
@@ -161,6 +202,21 @@ def run(drain: bool, every: int) -> None:
         )
         print(f"  richest at the end    : {left[:3]}")
         print(f"  still able to bid max : {_pinning_teams(state) or 'none'}")
+
+        # The app still has to WORK after 165 picks, not just report a number.
+        # These are what test_dry_run.py's docstring points here for, so they
+        # run every time rather than living in a throwaway triage script.
+        after = {
+            path: client.get(path).status_code
+            for path in ("/", "/nominate", "/buyout-indicators")
+        }
+        broken = {p: c for p, c in after.items() if c != 200}
+        # Count first, then a sample — one Infeasible MILP tends to persist for
+        # every pick after it, and 100 near-identical lines would bury the pick
+        # number that matters. Never print the sample without the count.
+        health = "clean" if not unhealthy else f"{len(unhealthy)} problems, first: {unhealthy[:3]}"
+        print(f"  health during the run : {health}")
+        print(f"  endpoints after it    : {broken or 'all 200 ' + str(list(after))}")
 
 
 if __name__ == "__main__":

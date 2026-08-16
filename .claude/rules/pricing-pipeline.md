@@ -60,7 +60,9 @@ market_price = min(model_price, market_ceiling)
 | the tool's own market price | **0 of 165 picks** | never | 18% ($59.4M of $337.7M) |
 | what the reserve rule allows | **133 of 165 picks** | pick 32, at $7.3M | 0% |
 
-In the drain run the ceiling steps $11.4M -> $7.3M -> $4.5M -> $0.5M and is at the floor by pick 60. So the layer is **not** inert -- it binds readily once the money is gone. The pinned run is the artefact: paying exactly the model price is the one behaviour the model cannot be wrong about, so it leaves 18% of the cap unspent and two rich teams keep the ceiling at `MAX_SALARY` on their own. A real draft is somewhere between, and which end it lands nearer decides how much Layer 2 contributes to *planning* -- see `BACKLOG.md`. **Do not restate either run as "the" behaviour of the ceiling.**
+In the drain run the ceiling steps `11.4M@0 -> 7.3M@32 -> 4.5M@40 -> 0.5M@43` and never moves again. So the layer is **not** inert -- it binds readily, and reaches the floor in a quarter of a draft, once the money is gone. The pinned run is the artefact: paying exactly the model price is the one behaviour the model cannot be wrong about, so it leaves 18% of the cap unspent and **three** teams (JHN $19.8M, GVR $14.1M, VPP $12.0M) finish above the line -- one more than the two the second-highest rule needs. A real draft is somewhere between, and which end it lands nearer decides how much Layer 2 contributes to *planning* -- see `BACKLOG.md`. **Do not restate either run as "the" behaviour of the ceiling.**
+
+Quote the step sequence from the instrument's `ceiling steps` line, never off its checkpoint rows -- those are `--every` picks apart and land wherever the interval happens to land. Reading the floor off a `--every 20` run is how "by pick 60" got into this file when the measured answer was pick 43.
 
 The threshold underneath both numbers: the ceiling is the second-highest of ten, so it holds at `MAX_SALARY` until **all but one** opponent is priced out -- not until the league is broke. Pinned by `tests/test_market.py::TestWhenTheCeilingLeavesTheCap`.
 

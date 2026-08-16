@@ -6,12 +6,17 @@ Tests interaction between all systems (optimizer, market, nominations, toasts,
 OOB swaps, atomic saves) in a single continuous flow.
 
 40 is a deliberate stopping point, not an oversight. A full-length auction is
-165 open active spots, and `tests/measure_ceiling.py` runs one on demand —
-verified 2026-08-16: MILP `Optimal` throughout, no negative budget, no roster
-over 24, and `GET /`, `/nominate` and the buyout scan all still 200 at the end.
-Doing it here too would add ~15s to the suite to re-assert what the instrument
-already answers. What 40 buys is the *interaction* coverage above, which needs
-a mid-auction, not an endgame.
+165 open active spots, and `tests/measure_ceiling.py` runs one on demand under
+either spending model, reporting a `health during the run` line (MILP status,
+negative budgets, rosters over 24 — checked every pick) and an `endpoints after
+it` line (`GET /`, `/nominate`, `/buyout-indicators`). Both clean 2026-08-16.
+Doing it here too would add ~15s to the suite to re-assert that. What 40 buys
+is the *interaction* coverage above, which needs a mid-auction, not an endgame.
+
+Those checks only exist because this docstring claimed them first: the version
+committed earlier the same day cited them as verified when the instrument
+measured nothing but the ceiling. If you add a claim here, add the assertion
+there.
 """
 
 import json

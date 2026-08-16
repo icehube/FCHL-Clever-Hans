@@ -207,6 +207,9 @@ class TestWhenTheCeilingLeavesTheCap:
     PIN_LINE = MAX_SALARY - MIN_SALARY
 
     def test_the_cap_holds_until_all_but_one_opponent_is_priced_out(self, client):
+        # Imported in-body, not at module scope: this file is otherwise pure
+        # unit tests over hand-built TeamStates, and importing `main` at
+        # collection would pull the whole app in for every one of them.
         import main
 
         from tests.helpers import squeeze
@@ -235,15 +238,23 @@ class TestWhenTheCeilingLeavesTheCap:
         assert at_cap == list(range(1, len(opponents) - 1))
 
     def test_the_last_rich_opponent_does_not_hold_the_cap_alone(self, client):
-        """The single case the walk above turns on, stated on its own.
+        """One opponent at the cap, every other priced out — and it is not enough.
 
-        The walk asserts a whole sequence, so a mutant that shifts the
-        transition fails it without saying which end moved. This one names the
-        state: one opponent at the cap, every other priced out, and the ceiling
-        is the richest of the *poor* teams — because the rich one would have to
-        drop out for anyone to win, and the price stops where the second bidder
-        does.
+        This started out justified as "the walk fails without saying which end
+        moved", which mutation testing disproved: highest-instead-of-second,
+        lowest-instead-of-second and a reversed sort all redden this and the
+        walk together. What it actually adds is `highest_bidder` — only this
+        and `test_done_team_changes_ceiling` catch a MarketInfo that reports
+        the wrong team as the top bidder, and the walk reads nothing but the
+        ceiling. Keep the identity assertions; they are the coverage.
+
+        The behaviour: the rich opponent would have to drop out for anyone to
+        win, so the price stops where the second bidder does — the richest of
+        the poor teams, not the cap.
         """
+        # Imported in-body, not at module scope: this file is otherwise pure
+        # unit tests over hand-built TeamStates, and importing `main` at
+        # collection would pull the whole app in for every one of them.
         import main
 
         from tests.helpers import squeeze

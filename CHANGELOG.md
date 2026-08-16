@@ -20,6 +20,34 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-15f]
+
+### Changed
+
+- **Both trade forms use checkbox lists instead of `<select multiple>`.** The last of the 2026-08-07 wants — *"both sides are cramped and the multi-select affordance is not obvious; this is the panel most likely to be used under time pressure during a break"* — and "cramped" understated it. Measured at the 1280px width the draft is run at, with both `<details>` forced open:
+
+  | Control | Rendered | Shows | Widest option needs | Clipped by |
+  |---|---|---|---|---|
+  | Evaluator / I Give | 183px | 5 of 49 | 316px | **157px** |
+  | Between / sends | 120px | 3 of 49 | 229px | **133px** |
+  | Between / to team | 120px | — | 198px | **102px** |
+
+  `Tony DeAngelo (NCM) (D, $3.0M, 11pts) (M)` rendered as about `Tony DeAngelo (NCM) (D…` — the salary and the points, the entire reason the label exists, past the edge. Still clipped by 104/97/66px at 1600, so not a narrow-viewport artifact. After: every list 379px at 1280 and 485px at 1600, content fitting inside with grid overflow 0 at 1024/1280/1600.
+
+  **Stacking to one column is what buys the width**, not the checkboxes: the panels are 415px at 1280, so `grid-cols-2` and `grid-cols-3` were dividing that into 183px and 120px. Unconditional rather than a breakpoint, because two columns of the 521px panel at 1600 is still only 236px against 316px.
+
+  The affordance half was the other half of the want and is what the checkboxes answer. A plain click in a `<select multiple>` **silently discards every prior selection**, and in a 3-row window onto 49 options there is nothing on screen to notice it by. Each block now carries a running `N selected · $X.XM`, so the state is visible without scrolling the list.
+
+  **Checkboxes sharing a `name` serialize exactly like a multi-select**, so `/trade-evaluate` — already `form.getlist("give_player")` — was not touched at all, and its existing tests passing unmodified is the equivalence proof rather than a new assertion. `/trade-between` moved from a comma-joined hidden field to `list[str] = Form([])`, deleting `updateTradeHidden` and two hidden inputs. That was never a live bug — no name in the pool has a comma and `_disambiguated_names` cannot add one — just a hand-rolled encoding where the form already had one.
+
+  **The two JS-built halves became one builder**, which closes the tracked "(M)" finding at the cause rather than by testing two copies. (No `file:line` for it here on purpose — a resolved write-up describes code that has moved, and the line it cited now points at something unrelated while still resolving, which is exactly the rot `test_backlog_refs.py` cannot catch.) `loadTeamPlayers` (inline in the template) and `loadTradePartner` (`shortcuts.js`) differed only in the value and whether the label carried points, and the duplicated `(M)` suffix in them was the tracked finding — deleting either left the suite green. `trade_panel.html` now has no inline `<script>` at all.
+
+  Four of the six unnamed controls filed earlier the same day are named here, and the guard is written as the general rule — every `.choice-list` and every `<select>` in either form must carry an `aria-label` — so a fifth list added later is caught. Each `<label class="choice-row">` names its own checkbox by wrapping it. That leaves one control outstanding, the bid panel's price input.
+
+  One thing the tests found rather than reasoning: after stacking, the widest row still wanted **395px against a 377px list**, because the rows inherited larger text than the `select-sm` they replaced. `.choice-row` is `text-xs`. And one accepted rough edge, measured rather than assumed: at **1024px** the widest Give row wants 305px against a 293px list and scrolls 12px inside its own container — the draft runs at 1280–1600, and scrolling 12px is a different class of thing from clipping 157px in silence.
+
+  `white-space: nowrap` on the rows is safe only because of the scroll container: `overflow-y: auto` forces `overflow-x` to compute to `auto` (CSS Overflow §3.2), so a long row scrolls inside the list and can never set its grid column's min-content. Without it this would be the 2026-08-11 off-screen-panel bug again.
+
 ## [2026-08-15e]
 
 ### Changed

@@ -1489,6 +1489,11 @@ class TestTradeChoiceLists:
         the whole reason for the label, off the edge. `.choice-list` scrolls
         rather than clips, so a regression shows up as scrollWidth > clientWidth
         instead of as silently truncated text.
+
+        The 1280px `page` viewport is deliberate, not incidental: at 1024 the
+        widest Give row wants 305px against a 293px list and scrolls 12px. That
+        is measured and accepted — 1280–1600 is the draft, and scrolling 12px is
+        a different class of thing from clipping 157px.
         """
         _open(page, live_server)
         self._open_forms(page)

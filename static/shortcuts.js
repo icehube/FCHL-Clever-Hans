@@ -289,36 +289,85 @@ function auctionTeamClick(btn) {
     htmx.trigger(document.getElementById('bid-form'), 'submit');
 }
 
-/* Sync a multi-select's selected values into a hidden CSV input
-   (used by the Trade Between Teams form). */
-function updateTradeHidden(sel, hiddenId) {
-    var vals = [];
-    for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].selected) vals.push(sel.options[i].value);
+/* "N selected · $X.XM" beneath a .choice-list.
+
+   Half the answer to "the multi-select affordance is not obvious": a
+   `<select multiple>` scrolls your picks out of sight, so you could not tell
+   what you had chosen — or that a plain click had just discarded it. */
+function updateTradeSummary(input) {
+    var block = input.closest('.choice-block');
+    if (!block) return;
+    var out = block.querySelector('.choice-summary');
+    if (!out) return;
+    var picked = block.querySelectorAll('.choice-list input:checked');
+    if (!picked.length) {
+        out.textContent = 'None selected';
+        return;
     }
-    document.getElementById(hiddenId).value = vals.join(',');
+    var total = 0;
+    picked.forEach(function(el) { total += parseFloat(el.dataset.salary || 0); });
+    out.textContent = picked.length + ' selected · $' + total.toFixed(1) + 'M';
 }
 
-/* Load the partner team's roster into the trade-receive multi-select. */
-function loadTradePartner(teamCode, viewTeamCode) {
-    if (!teamCode) return;
+/* Fill a .choice-list with a team's roster as checkboxes.
+
+   ONE builder for both fetched lists. The Trade Evaluator's "I Receive" and the
+   Trade Between Teams form's "Receives" were two copies of this that differed
+   only in the checkbox value and whether the label carried points — and the
+   duplicated "(M)" suffix in them was a tracked finding, because deleting
+   either copy left the suite green. Two copies of a label rule is how the two
+   halves of one app come to describe the same player differently.
+
+   opts.json: the Evaluator posts the whole player as JSON, because a received
+   player is not on any roster of ours to look up by name. The Between form
+   posts a bare name, which its own endpoint resolves against the partner's
+   roster. */
+function loadTradeChoices(teamCode, listId, opts) {
+    var list = document.getElementById(listId);
+    if (!list) return;
+    if (!teamCode) {
+        list.innerHTML = '<p class="text-xs opacity-60 p-1">Select a team first</p>';
+        updateTradeSummaryFor(list);
+        return;
+    }
     fetch('/team-players/' + teamCode)
         .then(function(r) { return r.json(); })
         .then(function(players) {
-            var sel = document.getElementById('trade-partner-players-' + viewTeamCode);
-            sel.innerHTML = '';
+            players.sort(function(a, b) { return b.projected_points - a.projected_points; });
+            list.innerHTML = '';
             players.forEach(function(p) {
-                var opt = document.createElement('option');
-                opt.value = p.name;
+                var row = document.createElement('label');
+                row.className = 'choice-row';
+                var box = document.createElement('input');
+                box.type = 'checkbox';
+                box.className = 'checkbox checkbox-xs';
+                box.name = opts.field;
+                box.value = opts.json ? JSON.stringify(p) : p.name;
+                box.dataset.salary = p.salary;
+                box.addEventListener('change', function() { updateTradeSummary(box); });
+                var text = document.createElement('span');
                 /* "(M)" as everywhere else. /team-players returns all_players,
-                   so minors arrive here whether or not this label says so —
-                   and an unmarked one misdescribes the trade, because a group
-                   A-E minor costs the receiving team his full salary the
-                   moment he lands on the active roster. */
-                opt.textContent = p.name + ' (' + p.position + ', $' + p.salary.toFixed(1) + 'M)'
+                   so minors arrive here whether or not this label says so — and
+                   an unmarked one misdescribes the trade, because a group A-E
+                   minor costs the receiving team his full salary the moment he
+                   lands on the active roster. */
+                text.textContent = p.name + ' (' + p.position + ', $' + p.salary.toFixed(1) + 'M'
+                    + (opts.withPoints ? ', ' + p.projected_points + 'pts' : '') + ')'
                     + (p.is_minor ? ' (M)' : '');
-                sel.appendChild(opt);
+                row.appendChild(box);
+                row.appendChild(text);
+                list.appendChild(row);
             });
+            updateTradeSummaryFor(list);
         });
+}
+
+/* Reset a list's summary when its contents are replaced wholesale — the
+   checkboxes that were counted no longer exist, so the old count would be a
+   claim about players who are not on screen. */
+function updateTradeSummaryFor(list) {
+    var block = list.closest('.choice-block');
+    var out = block && block.querySelector('.choice-summary');
+    if (out) out.textContent = 'None selected';
 }
 

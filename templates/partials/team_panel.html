@@ -209,32 +209,45 @@
 
     <div class="divider my-1"></div>
     <h4 class="font-semibold text-xs mb-1">Trade Between Teams</h4>
+    {# One column, not three. At 1280 this panel is 415px, so `grid-cols-3` gave
+       each control 120px against labels wanting 229px — more than half of every
+       name/salary clipped, and the team names too ("JHN — Johannesburg
+       Israeleafs" needs 198px).
+
+       The checkboxes post `players_from_a` / `players_from_b` directly, so the
+       two hidden inputs and the `updateTradeHidden` that comma-joined names
+       into them are both gone. #}
     <form hx-post="/trade-between" hx-target="#app" hx-swap="innerHTML">
         <input type="hidden" name="team_a" value="{{ viewed_team.code }}">
-        <input type="hidden" name="players_from_a" id="trade-from-a-{{ viewed_team.code }}" value="">
-        <input type="hidden" name="players_from_b" id="trade-from-b-{{ viewed_team.code }}" value="">
-        <div class="grid grid-cols-3 gap-2">
-            <div>
+        <div class="flex flex-col gap-2">
+            <div class="choice-block">
                 <label class="text-xs opacity-70">{{ viewed_team.code }} sends:</label>
-                <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto"
-                        onchange="updateTradeHidden(this, 'trade-from-a-{{ viewed_team.code }}')">
+                <div class="choice-list" role="group" aria-label="Players {{ viewed_team.code }} sends">
                     {# all_players, same as the Trade Evaluator and the buyout
                        list. This is the OTHER trade form and it had the same
                        defect: measured 2026-08-08, BOT could offer 12 of its 49
                        players here. Widening only the Evaluator left this half
                        of the app still unable to record a legal trade — and
                        worse, /team-players already feeds the "Receives" side
-                       below (shortcuts.js loadTradePartner), so one side of
-                       this one form listed minors while the other could not. #}
+                       below, so one side of this one form listed minors while
+                       the other could not. #}
                     {% for p in viewed_team.all_players|sort(attribute='projected_points', reverse=True) %}
-                    <option value="{{ p.name }}">{{ player_label(p, with_points=false) }}{% if p.is_minor %} (M){% endif %}</option>
+                    <label class="choice-row">
+                        <input type="checkbox" class="checkbox checkbox-xs" name="players_from_a"
+                               value="{{ p.name }}" data-salary="{{ p.salary }}"
+                               onchange="updateTradeSummary(this)">
+                        <span>{{ player_label(p, with_points=false) }}{% if p.is_minor %} (M){% endif %}</span>
+                    </label>
                     {% endfor %}
-                </select>
+                </div>
+                <p class="choice-summary text-xs opacity-70 mt-1">None selected</p>
             </div>
             <div>
-                <label class="text-xs opacity-70">To team:</label>
-                <select name="team_b" required class="select select-bordered select-xs bg-base-200 w-full"
-                        onchange="loadTradePartner(this.value, '{{ viewed_team.code }}')">
+                <label class="text-xs opacity-70" for="trade-partner-{{ viewed_team.code }}">To team:</label>
+                <select name="team_b" required id="trade-partner-{{ viewed_team.code }}"
+                        aria-label="Trade partner team"
+                        class="select select-bordered select-xs bg-base-200 w-full"
+                        onchange="loadTradeChoices(this.value, 'trade-partner-players-{{ viewed_team.code }}', {field: 'players_from_b', json: false, withPoints: false})">
                     <option value="">Select...</option>
                     {% for code in nomination_order %}
                     {% if code != viewed_team.code %}
@@ -243,12 +256,13 @@
                     {% endfor %}
                 </select>
             </div>
-            <div>
+            <div class="choice-block">
                 <label class="text-xs opacity-70">Receives:</label>
-                <select multiple size="3" class="select select-bordered select-xs bg-base-200 w-full h-auto" id="trade-partner-players-{{ viewed_team.code }}"
-                        onchange="updateTradeHidden(this, 'trade-from-b-{{ viewed_team.code }}')">
-                    <option disabled>Select a team first</option>
-                </select>
+                <div class="choice-list" id="trade-partner-players-{{ viewed_team.code }}"
+                     role="group" aria-label="Players {{ viewed_team.code }} receives">
+                    <p class="text-xs opacity-60 p-1">Select a team first</p>
+                </div>
+                <p class="choice-summary text-xs opacity-70 mt-1">None selected</p>
             </div>
         </div>
         <button type="submit" class="btn btn-primary btn-xs mt-2">Execute Trade</button>

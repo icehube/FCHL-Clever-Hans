@@ -89,6 +89,43 @@
     z-index: 1;
 }
 
+/* Multi-pick player lists in both trade forms.
+
+   These replaced `<select multiple>` on 2026-08-15. Measured at 1280px before
+   the change, the four selects rendered 120–183px wide against options wanting
+   229–316px, so every label was clipped past the position — the salary and the
+   points, which are the whole reason the label exists, were off the edge. A
+   plain click also silently discarded every prior pick, in a 3-row window onto
+   49 options.
+
+   `nowrap` is safe here and load-bearing: `overflow-y: auto` forces
+   `overflow-x` to compute to `auto` (CSS Overflow §3.2, same mechanism the
+   comment above .table-scroll-x describes), so a long row scrolls INSIDE the
+   list and can never set its grid column's min-content. Without the scroll
+   container it would be the 2026-08-11 off-screen-panel bug again. */
+.choice-list {
+    max-height: 180px;   /* ~7 rows, against the 3 and 5 the selects showed */
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--input-bg);
+}
+.choice-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0.35rem;
+    cursor: pointer;
+    white-space: nowrap;
+    /* text-xs, matching the `select-sm`/`select-xs` these rows replaced and
+       everything else in both panels. Not cosmetic: at inherited size the
+       widest row measured 395px against a 377px list, so it still scrolled
+       after the stacking fix. */
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+}
+.choice-row:hover { background: var(--bg-hover); }
+
 /* Player table row highlights */
 tr.in-optimal { background: rgba(158, 206, 106, 0.12) !important; }
 tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }

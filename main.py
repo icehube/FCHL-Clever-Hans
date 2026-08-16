@@ -1688,12 +1688,20 @@ async def trade_between(
     request: Request,
     team_a: str = Form(...),
     team_b: str = Form(...),
-    players_from_a: str = Form(""),
-    players_from_b: str = Form(""),
+    players_from_a: list[str] = Form([]),
+    players_from_b: list[str] = Form([]),
 ):
-    """Execute a trade between two teams. Atomic: all names must resolve."""
-    names_a = [n.strip() for n in players_from_a.split(",") if n.strip()]
-    names_b = [n.strip() for n in players_from_b.split(",") if n.strip()]
+    """Execute a trade between two teams. Atomic: all names must resolve.
+
+    Repeated form values, one per ticked checkbox, since the form's two
+    `<select multiple>`s became `.choice-list`s on 2026-08-15. That removed a
+    comma-joined hidden field and the `updateTradeHidden` that wrote it — which
+    was never a live bug (no name in the pool has a comma, and
+    `_disambiguated_names` cannot add one), just a hand-rolled encoding where
+    the form already had one.
+    """
+    names_a = [n.strip() for n in players_from_a if n.strip()]
+    names_b = [n.strip() for n in players_from_b if n.strip()]
     if not names_a and not names_b:
         return _toast(
             _render(request, "partials/all_panels.html"),

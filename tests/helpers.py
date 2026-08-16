@@ -178,6 +178,34 @@ def buyout_options(html: str) -> list[str]:
     ]
 
 
+def trade_choices(html: str, aria_label: str) -> dict[str, str]:
+    """One `.choice-list`'s offer, as {checkbox value: visible label}.
+
+    Addressed by the group's `aria-label` rather than by an id or a position,
+    because two of the four lists are rendered per-viewed-team and the other two
+    are filled by JS — the name of the group is the only stable handle, and
+    naming them is a requirement anyway (four of them had no accessible name at
+    all until 2026-08-15).
+
+    Unescaped, for the reason `buyout_options` documents: Jinja escapes the
+    attribute, so `Ryan O'Reilly` would compare unequal to `Player.name` and a
+    membership check against it silently stops being able to fail.
+
+    Naive slicing to the next `</div>`, like `section_of` — a `.choice-list`
+    holds only `<label>` rows, and a real parser is a dependency the offline
+    requirements.txt cannot carry.
+    """
+    start = html.find(f'aria-label="{aria_label}"')
+    assert start != -1, f'no group labelled "{aria_label}" in the response'
+    block = html[start:html.index("</div>", start)]
+    return {
+        unescape(v): unescape(re.sub(r"\s+", " ", label)).strip()
+        for v, label in re.findall(
+            r'<input[^>]*\bvalue="([^"]*)"[^>]*>\s*<span>(.*?)</span>', block, re.S
+        )
+    }
+
+
 def squeeze(code: str, headroom: float) -> None:
     """Set `code`'s penalties so exactly `headroom` of cap space remains.
 

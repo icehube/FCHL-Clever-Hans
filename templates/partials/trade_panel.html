@@ -5,9 +5,15 @@
             <span class="collapse-chevron">▶</span> Trade Evaluator
         </summary>
 
+        {# One column, not two. The panel is 415px at the 1280px width the draft
+           runs at, so `grid-cols-2` gave each side 183px against options wanting
+           316px — every label clipped past the position, with the salary and the
+           points off the edge. Stacking is what buys the width; two columns of
+           the 521px panel at 1600 is still only 236px, so this is unconditional
+           rather than a breakpoint. #}
         <form hx-post="/trade-evaluate" hx-target="#trade-panel" hx-swap="outerHTML" hx-encoding="multipart/form-data">
-            <div class="grid grid-cols-2 gap-3">
-                <div>
+            <div class="flex flex-col gap-3">
+                <div class="choice-block">
                     <h3 class="font-semibold text-sm mb-1">I Give</h3>
                     {# all_players, not roster_players: a minor-league player is
                        tradeable and his salary is on cap for group 2/3, so
@@ -15,18 +21,34 @@
                        Marked "(M)" inline and sorted with everyone else, the
                        same convention buyout_panel.html uses — a trade reads
                        differently when the player lands on the active roster,
-                       which is where /trade-between puts him. #}
-                    <select name="give_player" multiple size="5" class="select select-bordered select-sm bg-base-300 w-full h-auto">
+                       which is where /trade-between puts him.
+
+                       Checkboxes sharing a `name` serialize exactly like the
+                       `<select multiple>` this replaced, which is why
+                       /trade-evaluate (form.getlist) needed no change at all.
+                       The <label> wrapper is what names each box — the row text
+                       becomes its accessible name — and the group carries the
+                       name for the set, same construction as the Available
+                       Players filter bar. #}
+                    <div class="choice-list" role="group" aria-label="Players I give">
                         {% for p in team.all_players|sort(attribute='projected_points', reverse=True) %}
-                        <option value="{{ p.name }}">{{ player_label(p) }}{% if p.is_minor %} (M){% endif %}</option>
+                        <label class="choice-row">
+                            <input type="checkbox" class="checkbox checkbox-xs" name="give_player"
+                                   value="{{ p.name }}" data-salary="{{ p.salary }}"
+                                   onchange="updateTradeSummary(this)">
+                            <span>{{ player_label(p) }}{% if p.is_minor %} (M){% endif %}</span>
+                        </label>
                         {% endfor %}
-                    </select>
+                    </div>
+                    <p class="choice-summary text-xs opacity-70 mt-1">None selected</p>
                 </div>
-                <div>
+                <div class="choice-block">
                     <h3 class="font-semibold text-sm mb-1">I Receive</h3>
                     <div class="mb-1">
-                        <label class="text-xs opacity-70">From team:</label>
-                        <select id="trade-source-team" name="source_team" onchange="loadTeamPlayers(this.value)" class="select select-bordered select-xs bg-base-300 w-full">
+                        <label class="text-xs opacity-70" for="trade-source-team">From team:</label>
+                        <select id="trade-source-team" name="source_team" aria-label="Trade partner"
+                                onchange="loadTradeChoices(this.value, 'trade-receive-list', {field: 'receive_player', json: true, withPoints: true})"
+                                class="select select-bordered select-xs bg-base-300 w-full">
                             <option value="">Select team...</option>
                             {% for code, t in teams.items() %}
                             {% if code != my_team %}
@@ -35,9 +57,10 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <select name="receive_player" multiple size="5" id="trade-receive-select" class="select select-bordered select-sm bg-base-300 w-full h-auto">
-                        <option disabled>Select a team first</option>
-                    </select>
+                    <div class="choice-list" id="trade-receive-list" role="group" aria-label="Players I receive">
+                        <p class="text-xs opacity-60 p-1">Select a team first</p>
+                    </div>
+                    <p class="choice-summary text-xs opacity-70 mt-1">None selected</p>
                 </div>
             </div>
             <button type="submit" class="btn btn-primary btn-sm mt-2">Evaluate Trade</button>
@@ -91,26 +114,9 @@
         {% endif %}
     </details>
 </section>
-
-<script>
-async function loadTeamPlayers(teamCode) {
-    const select = document.getElementById('trade-receive-select');
-    if (!teamCode) {
-        select.innerHTML = '<option disabled>Select a team first</option>';
-        return;
-    }
-    const resp = await fetch('/team-players/' + teamCode);
-    const players = await resp.json();
-    select.innerHTML = '';
-    players.sort((a, b) => b.projected_points - a.projected_points);
-    for (const p of players) {
-        const opt = document.createElement('option');
-        opt.value = JSON.stringify(p);
-        // The "(M)" the Jinja list above adds, built again here because this
-        // half of the form is rendered by JS and the two must read alike.
-        const minors = p.is_minor ? ' (M)' : '';
-        opt.textContent = `${p.name} (${p.position}, $${p.salary.toFixed(1)}M, ${p.projected_points}pts)${minors}`;
-        select.appendChild(opt);
-    }
-}
-</script>
+{# No inline <script> here any more. This file and shortcuts.js carried two
+   copies of the same fetch-and-build — differing only in the option value and
+   whether the label showed points — and the duplicated "(M)" suffix in them is
+   the BACKLOG finding this closes. One `loadTradeChoices` in shortcuts.js now
+   serves both, so the two halves of the app cannot describe a minor
+   differently. #}

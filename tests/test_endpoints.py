@@ -14,6 +14,7 @@ from tests.helpers import (
     assign,
     buyout_options,
     pool_top,
+    trade_choices,
     section_of,
     squeeze,
     toast_of,
@@ -2434,29 +2435,25 @@ class TestTheTradeFormCanSeeTheMinors:
     def test_the_give_list_offers_them_marked(self, client):
         """The "I Give" side, rendered by Jinja — same list, different half."""
         minor = self._a_minor("BOT")
-        panel = section_of(client.get("/").text, "trade-panel")
+        offered = trade_choices(
+            section_of(client.get("/").text, "trade-panel"), "Players I give"
+        )
 
-        def option_for(name: str) -> str | None:
-            m = re.search(
-                rf'<option value="{re.escape(html.escape(name))}">(.*?)</option>',
-                panel, re.S)
-            return m.group(1) if m else None
-
-        offered = option_for(minor.name)
-        assert offered is not None, (
+        assert minor.name in offered, (
             f"{minor.name} is in BOT's minors and cannot be offered in a trade"
         )
-        assert "(M)" in offered, f"nothing marks {minor.name} as a minor: {offered!r}"
+        assert "(M)" in offered[minor.name], (
+            f"nothing marks {minor.name} as a minor: {offered[minor.name]!r}"
+        )
 
         # The marker has to mean something, or it is noise on every row.
         import main
         active = main.auction_state.teams["BOT"].roster_players[0]
-        control = option_for(active.name)
-        # Found FIRST, then checked: `"(M)" not in None-or-empty` is true for a
-        # row that is simply absent, so without this the control could stop
+        # Membership FIRST, then the marker: `"(M)" not in ""` is true for a row
+        # that is simply absent, so without this the control could stop
         # controlling anything and still read as a passing assertion.
-        assert control is not None, f"{active.name} is missing from the Give list"
-        assert "(M)" not in control, (
+        assert active.name in offered, f"{active.name} is missing from the Give list"
+        assert "(M)" not in offered[active.name], (
             f"{active.name} is on the active roster and must not be marked"
         )
 
@@ -2474,20 +2471,83 @@ class TestTheTradeFormCanSeeTheMinors:
         bot = main.auction_state.teams["BOT"]
         panel = section_of(client.get("/").text, "team-panel")
 
-        block = re.search(r"<select[^>]*trade-from-a-BOT[^>]*>(.*?)</select>",
-                          panel, re.S)
-        assert block, "the Trade Between Teams 'sends' list is not on the page"
-        sends = block.group(1)
+        sends = trade_choices(panel, "Players BOT sends")
 
-        assert sends.count("<option") == len(bot.all_players), (
-            f"the sends list offers {sends.count('<option')} of "
-            f"{len(bot.all_players)} players"
+        assert len(sends) == len(bot.all_players), (
+            f"the sends list offers {len(sends)} of {len(bot.all_players)} players"
         )
-        opt = re.search(
-            rf'<option value="{re.escape(html.escape(minor.name))}">(.*?)</option>',
-            sends, re.S)
-        assert opt, f"{minor.name} cannot be offered in the Trade Between form"
-        assert "(M)" in opt.group(1), f"nothing marks {minor.name}: {opt.group(1)!r}"
+        assert minor.name in sends, (
+            f"{minor.name} cannot be offered in the Trade Between form"
+        )
+        assert "(M)" in sends[minor.name], (
+            f"nothing marks {minor.name}: {sends[minor.name]!r}"
+        )
+
+    def test_no_control_in_either_trade_form_is_unnamed(self, client):
+        """Stated as the general rule, not as four specific labels.
+
+        Both forms went from `<select multiple>` to checkbox lists on
+        2026-08-15, and four of their six controls had no accessible name at all
+        before that — measured in Chrome, `role=combobox`/`group` with an empty
+        name and no name source. A fifth list added later is the case a
+        label-by-label assertion would wave through, and it is invisible on
+        screen either way.
+
+        Each `<label class="choice-row">` names its own checkbox by wrapping it,
+        so only the GROUPS and the two remaining `<select>`s need naming here.
+        """
+        page = client.get("/").text
+        forms = section_of(page, "trade-panel") + section_of(page, "team-panel")
+
+        unnamed = [
+            tag for tag in re.findall(r'<(?:select|div class="choice-list")[^>]*>', forms)
+            if "aria-label=" not in tag
+        ]
+        assert not unnamed, f"controls with no accessible name: {unnamed}"
+
+    def test_the_between_form_takes_repeated_values(self, client):
+        """One field per ticked box, which is what checkboxes post.
+
+        Replaced a comma-joined hidden input. Deliberately a TWO-for-one: a
+        1-for-1 exercises the same code path as the old single string and would
+        pass against an endpoint that still read only the first value.
+        """
+        import main
+
+        give = [p.name for p in main.auction_state.teams["SRL"].roster_players[:2]]
+        get_ = [main.auction_state.teams["MAC"].roster_players[0].name]
+
+        r = client.post("/trade-between", data={
+            "team_a": "SRL", "team_b": "MAC",
+            "players_from_a": give, "players_from_b": get_,
+        })
+        assert r.status_code == 200
+        mac = main.auction_state.teams["MAC"]
+        assert all(mac.find_player(n) is not None for n in give), (
+            f"MAC did not receive both of {give} — only the first value was read"
+        )
+        assert main.auction_state.teams["SRL"].find_player(get_[0]) is not None
+
+    def test_an_empty_submission_still_reports_no_players(self, client):
+        """The "No players selected" branch, reached BOTH ways.
+
+        Unticked checkboxes post nothing at all, so the live form sends no field
+        and this checks `Form([])` really defaults to `[]`. A caller that sends
+        an explicit empty value is the other shape — every pre-2026-08-15 test
+        does, and there it arrives as `[""]`, which is truthy and would sail
+        past the guard unfiltered. Both, because they exercise different code:
+        the default and the `if n.strip()`.
+        """
+        for label, payload in (
+            ("field omitted", {}),
+            ("explicit empty", {"players_from_a": "", "players_from_b": ""}),
+        ):
+            r = client.post(
+                "/trade-between", data={"team_a": "BOT", "team_b": "SRL", **payload}
+            )
+            assert toast_of(r).get("message") == "No players selected for trade", (
+                f"{label}: the empty-trade guard did not fire"
+            )
 
     def test_a_traded_keeper_is_acquired_by_the_team_that_gets_him(self, client):
         """`/trade-between` reuses the roster object; `execute_trade` rebuilds.

@@ -1422,3 +1422,139 @@ class TestTheBuyoutPickerIsOneRow:
             f"#buyout-panel is {height:.0f}px tall with {n} candidates; the "
             f"picker exists so it does not grow with the roster"
         )
+
+
+# ---------------------------------------------------------------- trade forms
+
+
+class TestTradeChoiceLists:
+    """The `<select multiple>`s that became checkbox lists on 2026-08-15.
+
+    Four things here are out of `TestClient`'s reach: whether a rendered label
+    fits its column, whether ticking boxes actually posts, whether the fetched
+    halves label a minor, and whether a second click keeps the first pick.
+    """
+
+    LISTS = [
+        ("#trade-panel", "Players I give"),
+        ("#trade-panel", "Players I receive"),
+        ("#team-panel", "Players BOT sends"),
+        ("#team-panel", "Players BOT receives"),
+    ]
+
+    def _open_forms(self, page):
+        page.eval_on_selector_all(
+            "#trade-panel details, #team-panel details", "els => els.forEach(e => e.open = true)"
+        )
+        page.wait_for_selector("#trade-panel .choice-list")
+
+    def _pick_partner(self, page, select_sel, list_sel):
+        """Choose a partner and wait for the fetched list to actually arrive."""
+        code = page.eval_on_selector(select_sel, "el => el.options[1].value")
+        with page.expect_response(re.compile(r"/team-players/")):
+            page.select_option(select_sel, code)
+        page.wait_for_selector(f"{list_sel} input[type=checkbox]")
+        return code
+
+    def test_two_picks_post_and_the_verdict_names_both(self, page, live_server):
+        """Checkboxes sharing a name serialize like the multi-select did.
+
+        TWO on purpose: one would exercise the same path as a single value and
+        pass against a form that dropped everything after the first.
+        """
+        _open(page, live_server)
+        self._open_forms(page)
+
+        names = page.eval_on_selector_all(
+            "#trade-panel input[name=give_player]",
+            "els => els.slice(0, 2).map(e => e.value)",
+        )
+        assert len(names) == 2, "BOT has fewer than two tradeable players"
+        for n in names:
+            page.check(f'#trade-panel input[name=give_player][value="{n}"]')
+
+        with page.expect_response(re.compile(r"/trade-evaluate")):
+            page.click("#trade-panel button[type=submit]")
+        page.wait_for_selector("#trade-panel table")
+
+        given = page.text_content("#trade-panel .grid")
+        for n in names:
+            assert n in given, f"{n} was ticked but is not in the evaluated trade"
+
+    def test_no_list_needs_horizontal_scrolling(self, page, live_server):
+        """The measurement that motivated the change.
+
+        Before: 120–183px controls against options wanting 229–316px, so every
+        label was clipped past the position — the salary and points, which are
+        the whole reason for the label, off the edge. `.choice-list` scrolls
+        rather than clips, so a regression shows up as scrollWidth > clientWidth
+        instead of as silently truncated text.
+        """
+        _open(page, live_server)
+        self._open_forms(page)
+        self._pick_partner(page, "#trade-source-team", "#trade-receive-list")
+        self._pick_partner(page, "#team-panel select[name=team_b]",
+                           "#team-panel .choice-list[id^=trade-partner-players]")
+
+        over = page.evaluate("""() => [...document.querySelectorAll('.choice-list')]
+            .map(l => ({name: l.getAttribute('aria-label'),
+                        client: l.clientWidth, scroll: l.scrollWidth}))
+            .filter(r => r.scroll > r.client + 1)""")
+        assert not over, f"labels still do not fit: {over}"
+
+    def test_both_fetched_lists_mark_a_minor(self, page, live_server):
+        """One builder serves both, so this covers what two copies did not.
+
+        The duplicated "(M)" was a tracked finding precisely because deleting
+        either copy left the suite green.
+        """
+        _open(page, live_server)
+        self._open_forms(page)
+
+        import main
+        for select_sel, list_sel in (
+            ("#trade-source-team", "#trade-receive-list"),
+            ("#team-panel select[name=team_b]",
+             "#team-panel .choice-list[id^=trade-partner-players]"),
+        ):
+            code = self._pick_partner(page, select_sel, list_sel)
+            minors = {p.name for p in main.auction_state.teams[code].minor_players}
+            if not minors:
+                continue
+            rows = page.eval_on_selector_all(
+                f"{list_sel} .choice-row",
+                "els => els.map(e => e.textContent.trim())",
+            )
+            marked = {r for r in rows if "(M)" in r}
+            assert marked, f"{list_sel} marks none of {code}'s {len(minors)} minors"
+            for name in minors:
+                assert any(r.startswith(name) and "(M)" in r for r in rows), (
+                    f"{name} is in {code}'s minors but unmarked in {list_sel}"
+                )
+
+    def test_a_second_pick_keeps_the_first(self, page, live_server):
+        """The stated complaint: a plain click in a `<select multiple>` silently
+        discards every prior selection, in a 3-row window onto 49 options where
+        you cannot see what you just lost.
+
+        Trivially true of checkboxes — which is the point. It fails against the
+        control this replaced, and the summary line is what makes the state
+        visible without scrolling.
+        """
+        _open(page, live_server)
+        self._open_forms(page)
+
+        boxes = "#trade-panel input[name=give_player]"
+        names = page.eval_on_selector_all(boxes, "els => els.slice(0, 2).map(e => e.value)")
+        page.check(f'{boxes}[value="{names[0]}"]')
+        page.check(f'{boxes}[value="{names[1]}"]')
+
+        checked = page.eval_on_selector_all(
+            boxes, "els => els.filter(e => e.checked).map(e => e.value)")
+        assert checked == names, f"picking the second lost the first: {checked}"
+
+        summary = page.text_content("#trade-panel .choice-summary")
+        assert summary.startswith("2 selected"), f"summary reads {summary!r}"
+
+        page.uncheck(f'{boxes}[value="{names[0]}"]')
+        assert page.text_content("#trade-panel .choice-summary").startswith("1 selected")

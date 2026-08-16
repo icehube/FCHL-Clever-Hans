@@ -68,7 +68,13 @@
 
         {% if trade_result is defined and trade_result %}
         {% set verdict_class = 'success' if trade_result.recommendation == 'accept' else 'error' %}
-        <div class="mt-3 p-3 rounded-lg bg-{{ verdict_class }}/10 border border-{{ verdict_class }}/30">
+        {# `trade-verdict` is a hook, not a style: it names "the answer" so a
+           test does not have to reach for a layout class that happens to sit
+           there. Measured — a test that read `#trade-panel .grid` for this went
+           GREEN against an endpoint dropping half the trade the moment the form
+           wrapper regained a `grid`, because the form lists all 49 players and
+           "the name is in there" is then trivially true. #}
+        <div class="trade-verdict mt-3 p-3 rounded-lg bg-{{ verdict_class }}/10 border border-{{ verdict_class }}/30">
             <div class="text-xs mb-2 grid grid-cols-2 gap-3">
                 <div>
                     <div class="opacity-70">I give:</div>

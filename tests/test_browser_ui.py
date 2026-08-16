@@ -1448,12 +1448,30 @@ class TestTradeChoiceLists:
         )
         page.wait_for_selector("#trade-panel .choice-list")
 
-    def _pick_partner(self, page, select_sel, list_sel):
+    def _pick_partner(self, page, select_sel, list_sel, code=None):
         """Choose a partner and wait for the fetched list to actually arrive."""
-        code = page.eval_on_selector(select_sel, "el => el.options[1].value")
+        if code is None:
+            code = page.eval_on_selector(select_sel, "el => el.options[1].value")
         with page.expect_response(re.compile(r"/team-players/")):
             page.select_option(select_sel, code)
         page.wait_for_selector(f"{list_sel} input[type=checkbox]")
+        return code
+
+    @staticmethod
+    def _a_team_with_minors(exclude=("BOT",)):
+        """A partner whose roster actually exercises the "(M)" marker.
+
+        Derived rather than taken from `options[1]`: two of the eleven teams
+        have no minors at all today, so the convenient first option is one
+        roster change from turning a marker test into one that checks nothing.
+        """
+        import main
+        code = next(
+            (c for c, t in main.auction_state.teams.items()
+             if c not in exclude and t.minor_players),
+            None,
+        )
+        assert code, "no team has minor-league players — the fixture is wrong"
         return code
 
     def test_two_picks_post_and_the_verdict_names_both(self, page, live_server):
@@ -1475,9 +1493,16 @@ class TestTradeChoiceLists:
 
         with page.expect_response(re.compile(r"/trade-evaluate")):
             page.click("#trade-panel button[type=submit]")
-        page.wait_for_selector("#trade-panel table")
+        page.wait_for_selector(".trade-verdict")
 
-        given = page.text_content("#trade-panel .grid")
+        # `.trade-verdict`, never a layout selector. This read `#trade-panel
+        # .grid` until the grill: the form lists all 49 players, so the moment
+        # anything in the form carries a `grid` class it matches first and
+        # "the name is in there" is true no matter what came back. Measured —
+        # an endpoint keeping only the FIRST ticked player went red here and
+        # green again with `grid` restored on the form wrapper, which is where
+        # it was until this batch.
+        given = page.text_content(".trade-verdict")
         for n in names:
             assert n in given, f"{n} was ticked but is not in the evaluated trade"
 
@@ -1512,30 +1537,37 @@ class TestTradeChoiceLists:
 
         The duplicated "(M)" was a tracked finding precisely because deleting
         either copy left the suite green.
+
+        The partner is chosen for HAVING minors rather than taken from
+        `options[1]`. It used to `continue` past a partner with none, so with
+        MAC or HSM (zero minors today) first in either list, a half — or the
+        whole test — would have silently checked nothing and passed.
         """
+        import main
         _open(page, live_server)
         self._open_forms(page)
 
-        import main
+        code = self._a_team_with_minors()
+        minors = {p.name for p in main.auction_state.teams[code].minor_players}
+        checked = 0
         for select_sel, list_sel in (
             ("#trade-source-team", "#trade-receive-list"),
             ("#team-panel select[name=team_b]",
              "#team-panel .choice-list[id^=trade-partner-players]"),
         ):
-            code = self._pick_partner(page, select_sel, list_sel)
-            minors = {p.name for p in main.auction_state.teams[code].minor_players}
-            if not minors:
-                continue
+            self._pick_partner(page, select_sel, list_sel, code=code)
             rows = page.eval_on_selector_all(
                 f"{list_sel} .choice-row",
                 "els => els.map(e => e.textContent.trim())",
             )
-            marked = {r for r in rows if "(M)" in r}
-            assert marked, f"{list_sel} marks none of {code}'s {len(minors)} minors"
+            assert rows, f"{list_sel} loaded no rows for {code}"
             for name in minors:
                 assert any(r.startswith(name) and "(M)" in r for r in rows), (
                     f"{name} is in {code}'s minors but unmarked in {list_sel}"
                 )
+            checked += 1
+
+        assert checked == 2, "both fetched lists must be exercised, not one"
 
     def test_a_second_pick_keeps_the_first(self, page, live_server):
         """The stated complaint: a plain click in a `<select multiple>` silently

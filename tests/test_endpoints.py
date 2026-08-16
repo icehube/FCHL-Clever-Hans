@@ -2495,14 +2495,24 @@ class TestTheTradeFormCanSeeTheMinors:
 
         Each `<label class="choice-row">` names its own checkbox by wrapping it,
         so only the GROUPS and the two remaining `<select>`s need naming here.
+
+        Every `<div>` is examined and then filtered on its class list, rather
+        than matched as `<div class="choice-list"`. The literal form was written
+        first and only worked because today's markup happens to put `class`
+        first with nothing else in it: `<div id="x" class="choice-list">` and
+        `<div class="choice-list mb-2">` both slipped through, which is the
+        exact "fifth list added later" case this claims to catch.
         """
         page = client.get("/").text
         forms = section_of(page, "trade-panel") + section_of(page, "team-panel")
 
-        unnamed = [
-            tag for tag in re.findall(r'<(?:select|div class="choice-list")[^>]*>', forms)
-            if "aria-label=" not in tag
+        controls = [
+            tag for tag in re.findall(r"<(?:select|div)\b[^>]*>", forms)
+            if tag.startswith("<select")
+            or re.search(r'class="[^"]*\bchoice-list\b', tag)
         ]
+        assert controls, "found no trade controls at all — the selector rotted"
+        unnamed = [t for t in controls if "aria-label=" not in t]
         assert not unnamed, f"controls with no accessible name: {unnamed}"
 
     def test_the_between_form_takes_repeated_values(self, client):

@@ -20,7 +20,31 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
-## [2026-08-16]
+## [2026-08-15e]
+
+### Changed
+
+- **The Buyout Analyzer's candidate list is a picker, not a row of ~15 buttons.** Owner decision 2026-08-08, which superseded the 2026-08-06 call closing this as already-built on the grounds that buttons beat a dropdown. What changed is the count, and it is now measured at the width the draft is actually run at rather than argued: at **1280px each label is too wide to share the 415px column**, so the fifteen buttons sat on fifteen rows — 468px of list inside a **587px** panel. Worse at the draft width than at 1600px (398px, nine rows), and growing, since the candidate set is `all_players|selectattr('can_be_bought_out')` and BOT drafts group 2/3 players all day.
+
+  After: **149px at both 1280 and 1600**, a 27px picker. The number that matters is not the 75% cut but that it is now *the same at both widths and independent of the candidate count* — the panel no longer grows with the roster. `test_the_open_panel_stays_short` pins it at under 250px, generously, and goes red against a revert to the buttons.
+
+  The name moved from a path segment to a query parameter — `GET /buyout-check?player_name=` — and that is what lets the picker be a bare `<select name="player_name">` with **no wrapper, no submit button and no JS**: htmx sends a triggering select's own value on a GET. That last claim is about htmx's runtime rather than about markup, so it was confirmed in Chrome and not reasoned: renaming the select's `name` attribute is one of the mutations the browser test dies on. (`hx-trigger="change"` turns out to be redundant — it is already htmx's default for a `<select>` — and is kept only for symmetry with the salary input beside it, which is explicit for the same non-reason.)
+
+  Three details each fix a specific way this breaks, and each has its own test. The **empty first option is load-bearing**: without it the top candidate is pre-selected and choosing him fires no `change`, so the first click on the most likely buyout would do nothing. That one is asserted in the endpoint suite rather than the browser on purpose — Playwright's `select_option` dispatches `change` unconditionally, so the harness that looks like the right place to catch it physically cannot. The **checked player is re-selected** on render, because the response replaces the whole panel including the select, and without it the box snaps back to the placeholder while a verdict for someone else sits underneath it. And the **empty case says so in words**, because an empty `<select>` is a control that looks broken, where the old flex div correctly rendered nothing at all.
+
+  Two corrections to the backlog entry, both of which changed the work:
+
+  **The dots are not in the Analyzer, and moving them in would be the defect.** The entry said that if the list collapsed to a `<select>` the dots would "need somewhere to live". They already have somewhere: the `bo-` placeholders are in `team_panel.html`'s active-roster and minors tables, and the Analyzer's buttons never carried one — so collapsing it touches the scan not at all. Duplicating them into the picker would collide, since `_dom_id` mints exactly one id per player and htmx resolves an out-of-band target with `querySelectorAll("#"+id)`. `test_the_picker_carries_no_buyout_dots` now pins the decision rather than leaving the next reader to re-derive it.
+
+  **The path form carried an encoding hazard the entry did not mention.** `hx-get="/buyout-check/{{ p.name }}"` was the one place in the app a raw player name went into a URL unencoded — the two other name-in-path call sites both use `|urlencode`. Not currently exploitable: none of the 953 loaded names carries `#?%&+`. But `_disambiguated_names`' last-resort tier is ` (#n)`, a `#` never reaches the server at all, and the panel would then answer "not found" about a player sitting on the roster in front of you. A data refresh is exactly what turns that tier on. The query parameter removes it structurally rather than needing a `|urlencode` patch that the next template could forget.
+
+- **The offered set has one reader.** Three tests learned which players the Analyzer offers by string-matching each button's URL (`f"/buyout-check/{p.name}" in html`), which coupled them to the markup *and* to the route shape — and this change moved both. `tests/helpers.buyout_options` replaces them, scoped to `#buyout-panel` because the same names appear in the roster tables beside it.
+
+- **The "one expression" invariant is finally stated as one equality.** CLAUDE.md has said since 2026-08-07 that the scan, the dots and this list deliberately read the same `all_players|selectattr('can_be_bought_out')`, but the tests only covered ineligible-are-absent and minors-are-present — neither notices an eligible *active* player going missing, which is the direction the 2026-08-07 bug failed in (11 of BOT's 15 hidden, indistinguishable on screen from "no buyout helps"). `test_it_offers_exactly_the_eligible_set` asserts set equality and dies against a `roster_players` copy.
+
+- **The previous batch was filed under `## [2026-08-16]`.** Every commit in it landed on the 15th; corrected to `2026-08-15d`, matching the a/b/c convention the rest of the file uses for same-day batches.
+
+## [2026-08-15d]
 
 ### Added
 

@@ -112,21 +112,24 @@ entry that closes, and one had already closed by then.)
 
 **Buyout Analyzer**
 
-- **A list, not a row of ~15 buttons.** Owner decision 2026-08-08, and it
-  supersedes the 2026-08-06 judgment recorded in the UI/UX section above, which
-  closed this as already-built on the grounds that buttons beat a dropdown (no
-  open-then-select). What changed is the count: the candidate set is
-  `all_players|selectattr('can_be_bought_out')`, so it grows with the roster and
-  keeps growing all draft — the button row already wraps, and open-then-select
-  costs less than hunting a name in a wrapped block. The list has to keep reading
-  that same expression, per CLAUDE.md — the scan, the dots and this list are
-  deliberately one expression, and a `roster_players` copy is the 2026-08-07 bug
-  that silently hid 11 of BOT's 15 eligible players. Two constraints that come
-  with it: the buyout **dots** are per-player OOB swap targets keyed by
-  `main._dom_id`, so if the list collapses to a `<select>` the dots need somewhere
-  to live (per-option text, or the list stays expanded and only the *actions*
-  collapse); and it stays BOT-only, since `_recompute_buyout_indicators` scores
-  against BOT's MILP total.
+Landed 2026-08-15 (see `CHANGELOG.md`). Two corrections worth keeping, because
+both are the kind of thing the next want will hit. The entry said the buyout
+**dots** would "need somewhere to live" if the list collapsed to a `<select>`;
+they never lived in the Analyzer at all — they are in `team_panel.html`'s two
+roster tables, and duplicating them into a picker would collide on `_dom_id`.
+And it did not mention what turned out to be the only real defect in there:
+`hx-get="/buyout-check/{{ p.name }}"` was the one place in the app a raw player
+name went into a URL unencoded.
+
+One thing was deliberately **not** built, and would be the follow-up if the
+picker ever reads as thin: each option showing its scan verdict.
+`buyout_indicators` is already in the template context, but
+`/buyout-indicators` returns only the OOB dot spans with `hx-swap="none"` — so
+the labels would be right on page load and silently stale the moment you scan,
+which is worse than absent. Making them live means the picker joins the scan's
+out-of-band response, and it would then re-render mid-scan and drop whatever
+the operator had selected. The roster table's dots answer "who"; the picker
+answers "what would it cost".
 
 **Logs**
 

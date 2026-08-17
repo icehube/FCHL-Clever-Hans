@@ -1167,6 +1167,8 @@ class TestRenderingWhenTheOptimizerFails:
         is the one word that tells the operator whether to look at the cap or
         the pool.
         """
+        import main
+
         self._degrade()
         panel = section_of(client.get("/").text, "team-panel")
         assert "optimizer" in panel.lower(), (
@@ -1174,8 +1176,6 @@ class TestRenderingWhenTheOptimizerFails:
             "nothing in it to say why — the explanation is in #bid-panel, a "
             "different grid column and a scroll away on mobile"
         )
-        import main
-
         assert main.milp_solution.status in panel, (
             f"the note does not name the status ({main.milp_solution.status}), "
             f"so it says something is wrong without saying what"
@@ -1218,13 +1218,24 @@ class TestRenderingWhenTheOptimizerFails:
         writes it, so without this call the panel is still BOT's — and a mutant
         that dropped `is_my_team` would leak BOT into BOT and pass, the same way
         the move to a global once disarmed `TestPanelContextIsolation`.
+
+        Anchored on the **← My Team** link, which `team_panel.html` renders only
+        when `not viewed_team.is_my_team`, so it is positive proof of whose panel
+        this is. `opponent in panel` — the first version — proves nothing:
+        measured, BOT's OWN panel contains every opponent's code, because the
+        Trade Between form lists all eleven in a `<select>`. That is the exact
+        trap `section_of`'s own docstring documents, and slicing the panel out
+        does not help when the string is inside the slice.
         """
         import main
 
         self._degrade()
         opponent = next(c for c in main.auction_state.teams if c != main.MY_TEAM)
         panel = section_of(client.get(f"/team-view/{opponent}").text, "team-panel")
-        assert opponent in panel, f"{opponent}'s panel never rendered"
+        assert "← My Team" in panel, (
+            f"the panel on screen is not an opponent's — /team-view/{opponent} "
+            f"did not move the view, so this asserts nothing about the gate"
+        )
         assert "optimizer" not in panel.lower(), (
             f"{opponent}'s panel reports BOT's optimizer status as though it "
             f"described them"

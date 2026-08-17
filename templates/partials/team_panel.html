@@ -90,7 +90,16 @@
        Gated on `status`, NEVER on "no targets". A finished BOT has empty
        targets too — every player in `milp.roster` is already owned — and
        telling a team that just filled its roster that the optimizer failed
-       would be a worse bug than the one this fixes. #}
+       would be a worse bug than the one this fixes.
+
+       The `if milp else "unavailable"` is belt-and-braces, and is recorded as
+       such so it is not mistaken for a case someone hit: traced 2026-08-17,
+       `milp_solution` has exactly one writer (`_recompute`), which `lifespan`
+       calls unguarded before yielding, and `_context` passes it on every
+       render — the one `_render` path that could bypass `_context` has no
+       callers. So no request can reach this line with `milp` falsy, and the
+       fallback is untestable by construction. It mirrors the `and milp` already
+       in the arm above rather than standing on its own reasoning. #}
     {% elif viewed_team.is_my_team %}
     <p class="text-xs opacity-60 mb-2">
         No projection or buy list — optimizer {{ milp.status if milp else "unavailable" }}.

@@ -20,6 +20,27 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-17]
+
+### Fixed
+
+- **A failed optimizer took BOT's whole buy list off screen without saying so.** `team_panel.html` gates both the Optimal Projected Points headline and every MILP target row on `milp.status == "Optimal"`, so an Infeasible solve removed them — measured 2026-08-13 at **12 of 63 rows and ~5.6KB**, with the word "Optimizer" appearing nowhere inside `#team-panel`. The badge that explains it renders in `#bid-panel`, which is `.area-auction`: **grid column 1 against the team panel's column 3** at 1024px+, and a long scroll away in the 1-col mobile layout. So your own roster lost its plan while the reason sat at the other end of the screen.
+
+  Reachable through ordinary draft-day play, which is what moved this up the list. Not through *bidding* — the commissioner refuses any bid that would leave a team unable to fill 24 (owner decision 2026-08-06) — but buyout penalties, `/trade-between` and `/adjust-salary` all raise cap load and **warn rather than refuse**; $20.5M of penalties on a fresh BOT reaches it. A buyout is a draft-day action, and this is what the panel did immediately afterwards.
+
+  **The original entry framed the fix as "a second warning that duplicates a message already on screen", and that framing was the reason it sat deferred for four days. It is not a second warning.** The two panels are answering different questions — `#bid-panel` says the *numbers* are floor fallbacks, `#team-panel` says the *content* is missing — so the fix is a quiet empty state (`text-xs opacity-60`, the idiom `buyout_panel.html` and `trade_panel.html` already use for "nothing here, and why") where the headline was. Two yellow alerts side by side saying nearly the same thing is the wallpaper failure `test_a_solvable_optimizer_shows_no_warning` exists to prevent from the other direction. The note is self-sufficient rather than pointing at the Bid Advisor, because that panel has no visible heading to send anyone to.
+
+  Gated on `status`, never on "no targets": a *finished* BOT has empty targets too, since every player in `milp.roster` is already owned, and telling a team that just filled its roster that the optimizer failed would be worse than the original bug. Gated on `is_my_team` in both arms — the MILP is BOT-only, same reasoning as the buyout dots, so an opponent's panel says nothing rather than reporting BOT's optimizer as though it described them.
+
+  Three tests, and **the mutation map is not the one the plan predicted** — recorded because the plan's table was wrong and the docstrings were corrected against measurement, not reasoning. `test_the_team_panel_says_why_the_buy_list_is_gone` uniquely kills deleting the `elif`. `test_a_solvable_optimizer_leaves_the_team_panel_quiet` uniquely kills splitting the note out into a separate `if viewed_team.is_my_team` — the obvious "simplification", which stays BOT-only but stops being exclusive with the healthy headline. `test_an_opponents_panel_stays_silent_about_bots_optimizer` uniquely kills both `elif` → `{% else %}` and dropping `is_my_team`; neither is visible while the view is on BOT, which is why it has to `GET /team-view` first.
+
+### Changed
+
+- **Re-anchored the opponent-editable-panel backlog entry**, whose two line references had drifted: the entry moved from line 120 to 152, and the salary-box line it cites in prose moved to 179. The second was **already stale before this change**, pointing 17 lines off, and `tests/test_backlog_refs.py` was green on it the whole time — because for a non-`.py` path that test only asserts the file exists and the line is in range (`line <= total`), then returns. There are no symbols to anchor a template to, so **every** template reference in `BACKLOG.md` is checked for existence and nothing else; drift inside one is invisible. Filed as a test-infrastructure finding rather than fixed here.
+
+  A first version of this entry blamed the missing `templates/partials/` prefix instead. That was wrong — the bare form is collected and does resolve — and it mattered, because it would have sent the next person to add a prefix and believe the reference was then verified.
+
+
 ## [2026-08-16]
 
 ### Investigated

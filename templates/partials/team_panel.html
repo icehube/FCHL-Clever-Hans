@@ -63,6 +63,38 @@
         <strong>Optimal Projected Points: {{ "%.0f"|format(milp.total_points) }}</strong>
         (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
     </div>
+    {# An EMPTY STATE, not a second warning. A failed MILP takes both the
+       headline above and every target row out of the table below (measured
+       2026-08-13: 12 of 63 rows, ~5.6KB), and until this line the word
+       "Optimizer" appeared nowhere in this panel — the badge that explains it
+       renders in `#bid-panel`, which is grid column 1 against this panel's
+       column 3, and a long scroll away on mobile. So your own roster lost its
+       buy list while the reason sat at the other end of the screen.
+
+       Deliberately quiet (`text-xs opacity-60`, the idiom buyout_panel.html and
+       trade_panel.html already use for "nothing here, and why") rather than a
+       copy of the bid panel's `alert-warning`. The two are answering different
+       questions and both are on screen together at 1024px+: the bid panel says
+       the NUMBERS are floor fallbacks, this says the CONTENT is missing. Two
+       yellow alerts saying nearly the same thing is the wallpaper failure
+       `test_a_solvable_optimizer_shows_no_warning` exists to prevent from the
+       other direction.
+
+       Self-sufficient on purpose — no "see the Bid Advisor", because that panel
+       has no visible heading to send anyone to.
+
+       `is_my_team` is repeated rather than hoisted: the MILP is BOT-only (same
+       reasoning as the buyout dots), so an opponent's panel must say nothing
+       rather than report BOT's optimizer as though it described them.
+
+       Gated on `status`, NEVER on "no targets". A finished BOT has empty
+       targets too — every player in `milp.roster` is already owned — and
+       telling a team that just filled its roster that the optimizer failed
+       would be a worse bug than the one this fixes. #}
+    {% elif viewed_team.is_my_team %}
+    <p class="text-xs opacity-60 mb-2">
+        No projection or buy list — optimizer {{ milp.status if milp else "unavailable" }}.
+    </p>
     {% endif %}
 
     {# Combined roster: keeper + acquired (+ MILP targets only when BOT). #}

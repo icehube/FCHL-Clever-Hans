@@ -1031,12 +1031,15 @@ class TestBidCheckOnAPlayerItCannotFind:
 
 
 class TestRenderingWhenTheOptimizerFails:
-    """A failed MILP changes TWO panels, and only one of them says so.
+    """A failed MILP changes TWO panels, and each has to say so in its own words.
 
     `bid_panel.html` warns that every bid number is a floor fallback,
     deliberately OUTSIDE the `bid_advice` gate, so it qualifies the panel whether
-    or not a bid is live. `team_panel.html` gates its headline number and its
-    whole buy list on the same status and just drops them. Both halves are
+    or not a bid is live. `team_panel.html` drops its headline number and its
+    whole buy list, and since 2026-08-17 leaves a quiet empty-state note where
+    they were — **not** a copy of the bid panel's alert. The two are on screen
+    together at 1024px+ and are answering different questions: one says the
+    numbers are fallbacks, the other says the content is gone. Both halves are
     covered here — the class was badge-only for the first hour of its life, and
     closing the "MILP-infeasible rendering" backlog item on that basis was an
     over-claim. Untested until
@@ -1102,14 +1105,18 @@ class TestRenderingWhenTheOptimizerFails:
         assert "Optimizer" not in page
 
     def test_the_team_panel_stops_showing_a_buy_list(self, client):
-        """The other half of a failed MILP — and the half that explains nothing.
+        """The other half of a failed MILP: the buy list has to GO.
 
         `team_panel.html` gates both the Optimal Projected Points headline and
         every MILP *target* row on `status == "Optimal"`, so an Infeasible solve
-        silently strips the buy list out of BOT's own panel: measured 2026-08-13
-        at 12 of 63 rows and ~5.6KB, with the word "Optimizer" appearing nowhere
-        inside that panel — the badge that explains it is in `#bid-panel`, a
-        different grid column.
+        strips the buy list out of BOT's own panel — 12 of 63 rows and ~5.6KB,
+        measured 2026-08-13. That removal is correct: there is no solution, and
+        the prices beside those names would be floor fallbacks dressed as a plan.
+
+        What was wrong until 2026-08-17 is that it happened SILENTLY, with the
+        word "Optimizer" nowhere inside this panel. That half is now covered by
+        `test_the_team_panel_says_why_the_buy_list_is_gone` — this test still
+        owns the removal, and the two fail for opposite reasons.
 
         Asserted on the target NAMES rather than on a row count or the styling
         class that marks them, so a restyle cannot quietly make this vacuous.
@@ -1145,6 +1152,82 @@ class TestRenderingWhenTheOptimizerFails:
             "the optimizer failed but the panel is still recommending buys, so "
             "the prices and points beside them are floor fallbacks presented as "
             "a plan"
+        )
+
+    def test_the_team_panel_says_why_the_buy_list_is_gone(self, client):
+        """The panel that lost the content is the panel that has to explain it.
+
+        Sliced with `section_of` and NOT optional: `#bid-panel` carries
+        "Optimizer Infeasible" on the same page, so a whole-page assertion here
+        would pass against the bug — the entire finding was that the two live in
+        different grid columns.
+
+        Asserts the status word too, not just "optimizer". A note that says
+        something went wrong without saying what is a shrug, and `milp.status`
+        is the one word that tells the operator whether to look at the cap or
+        the pool.
+        """
+        self._degrade()
+        panel = section_of(client.get("/").text, "team-panel")
+        assert "optimizer" in panel.lower(), (
+            "BOT's own panel dropped its projection and its whole buy list with "
+            "nothing in it to say why — the explanation is in #bid-panel, a "
+            "different grid column and a scroll away on mobile"
+        )
+        import main
+
+        assert main.milp_solution.status in panel, (
+            f"the note does not name the status ({main.milp_solution.status}), "
+            f"so it says something is wrong without saying what"
+        )
+
+    def test_a_solvable_optimizer_leaves_the_team_panel_quiet(self, client):
+        """A note that is always up is wallpaper — the mirror of the bid-panel guard.
+
+        Anchored on the panel having rendered its healthy headline before
+        asserting absence, for the reason spelled out in
+        `test_a_solvable_optimizer_shows_no_warning`: a bare absence assertion
+        goes green on an error page.
+
+        What this uniquely kills — measured, because the first version of this
+        docstring guessed and guessed wrong — is the note being split out of the
+        `elif` into a **separate `if viewed_team.is_my_team`**, the obvious
+        "simplification". That keeps it BOT-only, so the opponent test below
+        still passes, but it stops being exclusive with the healthy headline and
+        the note then shows on every solve. Turning the `elif` into `{% else %}`
+        or dropping its `is_my_team` are NOT this test's mutants; both are
+        invisible while the view is on BOT and belong to the opponent test.
+        """
+        import main
+
+        assert main.milp_solution.status == "Optimal", main.milp_solution.status
+        panel = section_of(client.get("/").text, "team-panel")
+        assert "Optimal Projected Points" in panel, "the panel never rendered"
+        assert "optimizer" not in panel.lower()
+
+    def test_an_opponents_panel_stays_silent_about_bots_optimizer(self, client):
+        """BOT's optimizer says nothing about a rival, so their panel must not either.
+
+        `_recompute` solves for BOT alone, exactly like the buyout dots — an
+        opponent's panel has no projection and no buy list whether or not the
+        MILP is healthy, so a note about a failed solve there describes nothing
+        the operator is looking at.
+
+        The `GET /team-view` is the mechanism, not ceremony. Since 2026-08-07 the
+        view lives in `main._viewed_team` and `/team-view` is the only thing that
+        writes it, so without this call the panel is still BOT's — and a mutant
+        that dropped `is_my_team` would leak BOT into BOT and pass, the same way
+        the move to a global once disarmed `TestPanelContextIsolation`.
+        """
+        import main
+
+        self._degrade()
+        opponent = next(c for c in main.auction_state.teams if c != main.MY_TEAM)
+        panel = section_of(client.get(f"/team-view/{opponent}").text, "team-panel")
+        assert opponent in panel, f"{opponent}'s panel never rendered"
+        assert "optimizer" not in panel.lower(), (
+            f"{opponent}'s panel reports BOT's optimizer status as though it "
+            f"described them"
         )
 
 

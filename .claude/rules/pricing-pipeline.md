@@ -55,10 +55,14 @@ market_price = min(model_price, market_ceiling)
 
 **How often that `min` actually fires depends entirely on how fast the league spends**, and the two ends of the range are far apart -- measured 2026-08-16 over a full 165-pick auction by `tests/measure_ceiling.py`:
 
-| buyers pay | ceiling binds | first bind | league cap unspent |
+| buyers pay | ceiling below `MAX` | **actually changed a price** | league cap unspent |
 |---|---|---|---|
-| the tool's own market price | **0 of 165 picks** | never | 18% ($59.4M of $337.7M) |
-| what the reserve rule allows | **133 of 165 picks** | pick 32, at $7.3M | 0% |
+| the tool's own market price | 0 of 165 picks | **0 of 165**, never | 18% ($59.4M of $337.7M) |
+| what the reserve rule allows | 133 of 165 picks | **122 of 165**, from pick 43 | 0% |
+
+**Those are two different measurements and the second is the one that means "Layer 2 did something".** `ceiling < MAX_SALARY` says the ceiling moved; `market_price < model_price` says it moved *past a player's model price* and changed what the MILP planned on. `tests/measure_ceiling.py` reports the first (live, per pick), `tests/measure_spend.py` reports the second (from the logged `model_price`/`market_price` on every `draft` record). Cross-checked on the same run 2026-08-17, which is why both columns are here.
+
+The gap between them is the interesting part: in the drain run **the ceiling changed nothing until it hit the $0.5M floor at pick 43.** The intermediate steps -- $7.3M at pick 32, $4.5M at pick 40 -- were below `MAX_SALARY` and above every remaining model price, because a top-down draft has already sold the players those ceilings would have capped. So 133 overstates when the layer started mattering by 11 picks, and every one of the 122 is the floor case. A first pass predicted the price-changing count would be *much* smaller than 133 on the grounds that 563 of 705 players sit at the floor; that reasoning was wrong about the magnitude -- once the ceiling itself reaches the floor it caps essentially everything, so the counts converge.
 
 In the drain run the ceiling steps `11.4M@0 -> 7.3M@32 -> 4.5M@40 -> 0.5M@43` and never moves again. So the layer is **not** inert -- it binds readily, and reaches the floor in a quarter of a draft, once the money is gone. The pinned run is the artefact: paying exactly the model price is the one behaviour the model cannot be wrong about, so it leaves 18% of the cap unspent and **three** teams (JHN $19.8M, GVR $14.1M, VPP $12.0M) finish above the line -- one more than the two the second-highest rule needs. A real draft is somewhere between, and which end it lands nearer decides how much Layer 2 contributes to *planning* -- see `BACKLOG.md`. **Do not restate either run as "the" behaviour of the ceiling.**
 

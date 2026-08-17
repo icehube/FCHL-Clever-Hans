@@ -20,6 +20,28 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-17b]
+
+### Added
+
+- **`tests/measure_spend.py` — a reader for the spend curve the app has been recording all along.** Two `engine/market` findings were parked on "needs a real draft's numbers". They were not blocked on collection: every `/assign` logs a `TransactionRecord` carrying `salary`, `model_price` **and** `market_price`, captured before the player leaves the pool, and the log is serialized with the state. Nothing read it back. Both entries stay open — what changed is their blocker, from "collect the numbers" to "run the reader".
+
+  **It measures a sharper quantity than `measure_ceiling.py`, and the difference is the finding.** That instrument counts a bind as `ceiling < MAX_SALARY`; this one counts `market_price < model_price`, i.e. the ceiling moved *past a player's model price* and changed what the MILP planned on. Cross-checked on the same synthetic drafts 2026-08-17:
+
+  | buyers pay | ceiling below `MAX` | changed a price |
+  |---|---|---|
+  | the tool's own market price | 0 of 165 | 0 of 165, never |
+  | what the reserve rule allows | 133 of 165 | **122 of 165, from pick 43** |
+
+  The baseline agreeing at zero is the correctness evidence — two independent paths, one over live `market_info` per pick and one over logged records, and a ceiling pinned at `MAX_SALARY` can never sit below a model price. The drain run is where they diverge: **the ceiling changed nothing until it reached the $0.5M floor at pick 43**, because the intermediate steps ($7.3M at pick 32, $4.5M at pick 40) were above every remaining model price — a top-down draft has already sold the players those ceilings would have capped. So `.claude/rules/pricing-pipeline.md`'s "133 of 165" overstated when Layer 2 started mattering by 11 picks, and it now carries both columns with what each one means.
+
+  **The prediction that motivated this was wrong about the magnitude.** The plan argued the price-changing count would be *much* smaller than 133 because 563 of 705 players sit at the $0.5M floor. It is 122 — barely smaller — because once the ceiling itself reaches the floor it caps essentially everything. The mechanism was real, the conclusion drawn from it was not, and the counts converge for a reason the original reasoning missed.
+
+  Three deliberate constraints, each load-bearing: it **never imports `main`**, so unlike the other two instruments it cannot touch a live draft even in principle rather than relying on a temp-dir redirect; it parses with `state._transaction_from_dict` instead of hand-copying nine key names (the hazard CLAUDE.md names for the backfills); and it **allowlists `transaction_type == "draft"`**, because a trade's `salary` is not a clearing price and `/trade-between` writes `"SRL→MAC"` into `team_code`, which would attribute spend to a team that does not exist. Records with `model_price <= 0` are excluded from the ceiling statistics and the count reported — `_log_transaction` defaults both prices to `0`, so a zero is missing data, and `market_price=0 < model_price=5` would otherwise read as a bind.
+
+  Unlike `measure_layout.py` and `measure_ceiling.py`, the logic is a pure `summarize()` with **a real pytest test** (`tests/test_measure_spend.py`, 5 tests, 6 mutations verified). That split is deliberate: `measure_layout.py` could not see a stale selector for two days, and `measure_ceiling.py`'s numbers now appear in four documents unchecked, both because their logic only exists inside a `__main__` nothing runs.
+
+
 ## [2026-08-17]
 
 ### Fixed

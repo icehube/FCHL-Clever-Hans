@@ -3373,6 +3373,48 @@ class TestExactStandingsOnDemand:
             f"estimate — a count exists precisely so this case is visible"
         )
 
+    def test_a_solver_that_raises_is_logged_and_costs_only_that_team(
+        self, monkeypatch, caplog, client
+    ):
+        """The `except Exception` path, which no other test reaches.
+
+        `test_an_unsolvable_opponent...` covers a solve that returns non-Optimal;
+        this covers one that blows up. Broad-catching it is right — a solver
+        failing on one opponent must not cost the other nine — but a silent skip
+        is not, because the marker can say `exact 9/10` and never which team or
+        why. So the log line IS the error handling, and it is asserted.
+        """
+        import logging as _logging
+
+        import main
+        from optimizer import solve_optimal_roster as real_solve
+
+        victim = self._live_opponents()[0]
+        estimate = self._figure(section_of(client.get("/").text, "league-state"), victim)
+
+        def exploding(team, *a, **kw):
+            if team.code == victim:
+                raise RuntimeError("CBC fell over")
+            return real_solve(team, *a, **kw)
+
+        monkeypatch.setattr(main, "solve_optimal_roster", exploding)
+        with caplog.at_level(_logging.WARNING):
+            assert client.get("/solve-standings").status_code == 200
+
+        assert victim in caplog.text and "CBC fell over" in caplog.text, (
+            f"the failure was swallowed without naming the team or the cause: "
+            f"{caplog.text!r}"
+        )
+        others = [c for c in self._live_opponents() if c != victim]
+        assert all(c in main.exact_projections for c in others), (
+            f"one team's exception cost the others: solved "
+            f"{sorted(main.exact_projections)} of {sorted(self._live_opponents())}"
+        )
+        page = section_of(client.get("/").text, "league-state")
+        assert self._figure(page, victim) == estimate, (
+            f"{victim} moved off its estimate despite never being solved"
+        )
+
     def test_with_every_opponent_done_the_column_is_exact_already(self, client):
         """The state that caught the marker branching on the wrong count.
 

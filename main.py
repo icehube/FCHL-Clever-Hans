@@ -565,7 +565,7 @@ def _log_change(kind: str, team_code: str, description: str) -> None:
     ))
 
 
-def _recompute_exact_projections():
+def _recompute_exact_projections() -> None:
     """Solve every LIVE OPPONENT's optimal roster. Called only from /solve-standings.
 
     The heuristic in `_context` exists because 11 MILPs per action is
@@ -596,7 +596,16 @@ def _recompute_exact_projections():
             continue
         try:
             sol = solve_optimal_roster(t, auction_state.available_players, market_prices)
-        except Exception:
+        except Exception as e:
+            # Broad on purpose — a solver blowing up on one opponent must not
+            # cost the other nine — but never silent. The basis marker reveals
+            # that a cell is still an estimate (`exact 9/10`) and cannot say
+            # which team or why, so this is the only place that failure is
+            # diagnosable.
+            logging.warning(
+                "No exact projection for %s: %s: %s — that team keeps its "
+                "estimate and the Proj column says so", code, type(e).__name__, e,
+            )
             continue
         if sol.status == "Optimal":
             exact_projections[code] = int(sol.total_points)

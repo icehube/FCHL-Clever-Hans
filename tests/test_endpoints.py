@@ -3373,6 +3373,111 @@ class TestExactStandingsOnDemand:
             f"estimate — a count exists precisely so this case is visible"
         )
 
+    def _badge(self, html: str, code: str) -> int | None:
+        """BOT's rank badge, read out of the same span as its figure.
+
+        Inside the figure's span deliberately: the badge has to travel WITH the
+        number, so reading it from anywhere else would not notice if it stopped.
+        """
+        span = re.search(rf'id="proj-{code}">(.*?)</span></td>|id="proj-{code}">(.*?)$',
+                         html, re.S)
+        assert span, f"no proj-{code} span"
+        found = re.search(r"#(\d+)", span.group(1) or span.group(2) or "")
+        return int(found.group(1)) if found else None
+
+    def test_the_rank_badge_agrees_with_the_figures_beside_it(self, client):
+        """The badge is the reason this feature exists, and nothing covered it.
+
+        Measured 2026-08-18: deleting the badge from `macros/standings.html`
+        passed all twelve tests in this class. A scan changes every team's rank,
+        so a fragment that swaps the number without the badge leaves an
+        authoritative "#2" describing figures that are no longer on screen —
+        which is the original bug wearing a different hat.
+
+        Stated as an invariant over what is RENDERED rather than against an
+        expected number: BOT's badge must be BOT's position among the figures in
+        the table. True in every state, so it needs no fixture and cannot rot
+        when `players.csv` is replaced.
+        """
+        import main
+
+        for stage in ("before the scan", "after the scan"):
+            if stage == "after the scan":
+                client.get("/solve-standings")
+            page = section_of(client.get("/").text, "league-state")
+            figures = {c: int(v) for c, v in
+                       re.findall(r'id="proj-([A-Z]{3})">\s*(\d+)', page)}
+            assert len(figures) == len(main.auction_state.nomination_order)
+            mine = figures[main.MY_TEAM]
+            expected = sorted(figures.values(), reverse=True).index(mine) + 1
+            assert self._badge(page, main.MY_TEAM) == expected, (
+                f"{stage}: the badge reads #{self._badge(page, main.MY_TEAM)} "
+                f"while BOT's {mine} is {expected}th of "
+                f"{sorted(figures.values(), reverse=True)}"
+            )
+
+    def test_the_scans_own_fragment_carries_the_badge(self, client):
+        """Read the SWAP PAYLOAD, not the page rendered after it.
+
+        The two are not the same evidence and this is the gap that proved it. A
+        mutant that emitted the badge inline but omitted it from the out-of-band
+        fragment passed every other test here, because they re-fetch `GET /` and
+        get a fresh inline render. A browser does not: htmx replaces the span
+        with what the response contains, so the badge would simply disappear from
+        the live DOM until some later full-panel swap put it back.
+
+        So this asserts the fragment BOT will actually receive, and that its rank
+        agrees with the figures in the same response.
+        """
+        import main
+
+        body = client.get("/solve-standings").text
+        figures = {c: int(v) for c, v in
+                   re.findall(r'id="proj-([A-Z]{3})"[^>]*>\s*(\d+)', body)}
+        assert len(figures) == len(main.auction_state.nomination_order), (
+            f"the response carries {len(figures)} figures"
+        )
+        mine = figures[main.MY_TEAM]
+        expected = sorted(figures.values(), reverse=True).index(mine) + 1
+        badge = re.search(rf'id="proj-{main.MY_TEAM}"[^>]*>.*?#(\d+)', body, re.S)
+        assert badge, (
+            "the scan's fragment for BOT carries no rank badge, so the swap "
+            "would remove it from the page it is meant to update"
+        )
+        assert int(badge.group(1)) == expected, (
+            f"the fragment says #{badge.group(1)} while BOT's {mine} is "
+            f"{expected}th of the figures in the same response"
+        )
+
+    def test_on_the_endgame_scenario_the_scan_moves_the_badge(self, client):
+        """The case the feature was built for, on the state that produces it.
+
+        `endgame-ceiling-binds` is a pinned scenario whose shape
+        `tests/test_scenarios.py` guards (BOT plus exactly two live opponents),
+        so this is not a `players.csv` fingerprint — but the direction is
+        asserted rather than the literal rank, which would be one.
+
+        Measured 2026-08-17: the badge read #2 while BOT was #1, because the
+        estimate handed a live opponent 146 points it could not reach. That is
+        the same failure the done-team projection fix removed in its own form,
+        and it is what the scan is for.
+        """
+        import main
+
+        client.post("/load-scenario", data={"name": "endgame-ceiling-binds"})
+        before = self._badge(section_of(client.get("/").text, "league-state"),
+                             main.MY_TEAM)
+        client.get("/solve-standings")
+        page = section_of(client.get("/").text, "league-state")
+        after = self._badge(page, main.MY_TEAM)
+        assert after is not None and before is not None
+        assert after < before, (
+            f"BOT's badge went #{before} -> #{after} across the scan; on this "
+            f"scenario the estimate flatters a live opponent, so solving it "
+            f"exactly must move BOT UP"
+        )
+        assert main.exact_projections, "the scan solved nobody on this scenario"
+
     def test_a_solver_that_raises_is_logged_and_costs_only_that_team(
         self, monkeypatch, caplog, client
     ):

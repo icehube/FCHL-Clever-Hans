@@ -2754,8 +2754,12 @@ class TestDoneTeamsAreNotProjectedForward:
     this was wrong on draft day, in the second half, every time.
     """
 
+    # Proj is read off its `proj-<CODE>` span rather than by counting cells: the
+    # span is what GET /solve-standings swaps, so it is now the one place the
+    # figure lives, and a positional regex broke the moment it was introduced.
+    # Pts is still the bare cell immediately before it.
     _CELLS = re.compile(
-        r"<td>(\d+)</td>\s*<td class=\"font-semibold[^\"]*\">(\d+)", re.S
+        r"<td>(\d+)</td>\s*<td class=\"font-semibold[^\"]*\"><span id=\"proj-\w+\">(\d+)", re.S
     )
 
     def _proj(self, html: str, code: str) -> tuple[int, int]:

@@ -1,0 +1,22 @@
+{# What basis the Proj column's figures were computed on, in its own file because
+   two responses have to render it: GET / (and every panel swap) inline, and
+   GET /solve-standings out-of-band.
+
+   The span is UNCONDITIONAL and only `hx-swap-oob` is conditional, the same rule
+   buyout_scan.html follows: a swap target that disappears with its contents can
+   only be swapped in one direction, so it would go exact and never come back.
+
+   And it MUST come back. `_recompute()` empties `exact_projections` on every
+   mutation, so one pick returns the whole column to estimates — a marker that
+   stayed on "exact" would be the silent-staleness failure CLAUDE.md names for the
+   buyout picker's labels, on a number that carries a rank badge.
+
+   A COUNT, not a boolean: an Infeasible opponent solve keeps its estimate, so
+   "exact" alone would mislabel the one cell that is still a guess. #}
+<span id="proj-basis"{% if basis_oob is defined and basis_oob %} hx-swap-oob="true"{% endif %} class="text-[10px] font-normal opacity-60 block">
+    {%- if standings_basis and standings_basis.exact -%}
+    exact {{ standings_basis.exact }}/{{ standings_basis.total }}
+    {%- else -%}
+    estimated
+    {%- endif -%}
+</span>

@@ -1,5 +1,20 @@
 <section class="card bg-base-200 shadow-md p-4" id="league-state">
-    <h2 class="card-title text-accent text-base mb-2">League State</h2>
+    {# The button sits in the header, not in the table, for the reason the
+       min-content note below spells out: all 12 columns are floored by their own
+       header text, so anything added inside one widens the widest table in the
+       app. Here it costs the panel nothing.
+
+       `hx-swap="none"` — the response is out-of-band fragments only, exactly
+       like the buyout Scan button. Ungated, because unlike the buyout dots every
+       target it swaps (one span per team, plus the basis marker) renders
+       unconditionally, so it can never fire into an empty document. #}
+    <div class="flex items-center justify-between gap-2 mb-2">
+        <h2 class="card-title text-accent text-base">League State</h2>
+        <button hx-get="/solve-standings" hx-swap="none" class="btn btn-xs btn-accent btn-outline"
+                title="Replace every opponent's estimated Proj with a real optimizer solve (~1s). Any pick returns them to estimates.">
+            Solve Standings
+        </button>
+    </div>
     {% set any_penalties = teams.values()|selectattr('penalties', 'gt', 0)|list|length > 0 %}
     {# 12 columns (11 when no team carries a penalty), min-content 868px — still
        the widest thing in the app, and the
@@ -30,16 +45,32 @@
                 <th data-sort-col="{{ 7 if any_penalties else 6 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Spendable</th>
                 <th data-sort-col="{{ 8 if any_penalties else 7 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
                 <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
-                {# The two Proj figures are NOT computed the same way, and the
-                   tooltip has to say so — read as one sortable column beside a
-                   rank badge they look comparable. Your own is the MILP
-                   optimum; an opponent's is a heuristic that costs no solve
-                   (11 extra MILPs per action is what it avoids). Measured
-                   2026-08-08 on a fresh state they were 5 points apart and the
-                   rank was identical either way, which is why this is labelled
-                   rather than made comparable — see BACKLOG.md. #}
+                {# The two Proj figures are NOT computed the same way until you
+                   ask them to be, and the tooltip has to say so — read as one
+                   sortable column beside a rank badge they look comparable.
+                   Yours is the MILP optimum; an opponent's is a heuristic that
+                   costs no solve, because 11 extra MILPs per action is what it
+                   avoids.
+
+                   This comment used to justify labelling rather than fixing, on
+                   "measured 2026-08-08, 5 points apart and the rank identical
+                   either way". That measurement compared the two RULES ON BOT,
+                   whose figure never uses the heuristic — so it could not see
+                   the error it was quoted to bound. Re-measured 2026-08-17
+                   against a real per-team MILP: the estimate runs +68 mean and
+                   +193 worst (+14.2%) on a fresh league, overstates the
+                   achievable optimum for 6 of 10 opponents, and moves 9 of 10
+                   teams in rank order (GVR 3rd -> 8th). In the endgame scenario
+                   BOT's own badge read #2 when BOT was #1 — the same class of
+                   error as the done-team bug fixed 2026-08-13.
+
+                   Three cheaper estimators were measured and all three are
+                   WORSE (mean |err| 94 for this one against 147/176/401), so
+                   the only thing better than the heuristic is the solve itself.
+                   Hence the button rather than a new formula. See BACKLOG.md. #}
                 <th data-sort-col="{{ 10 if any_penalties else 9 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">
-                    <span class="tooltip tooltip-bottom" data-tip="Projected points once the roster is filled. Computed two ways: YOURS is the optimizer's actual best roster within your real budget, everyone else's is a quick estimate that assumes they can afford their best available players — so opponents read slightly optimistic, more so as budgets tighten.">Proj</span>
+                    <span class="tooltip tooltip-bottom" data-tip="Projected points once the roster is filled. YOURS is the optimizer's actual best roster within your real budget. An opponent's is a quick estimate that can read either side of what they can actually reach — measured up to 14% high — until you press Solve Standings, which replaces every opponent's figure with a real optimizer solve. Any pick returns the column to estimates.">Proj</span>
+                    {% include "partials/standings_basis.html" %}
                 </th>
                 <th>Done</th>
             </tr>
@@ -76,7 +107,13 @@
             <td>${{ "%.1f"|format(t.physical_max_bid) }}M</td>
             {% set proj = projections.get(code, {}) if projections is defined else {} %}
             <td>{{ proj.get("current", 0) }}</td>
-            <td class="font-semibold {% if code == my_team %}text-info{% endif %}">{{ proj.get("projected", 0) }}{% if code == my_team and proj.get("rank") %} <span class="badge badge-info badge-xs">#{{ proj.rank }}</span>{% endif %}</td>
+            {# The figure lives in a span so GET /solve-standings can swap it:
+               a `<td>` has no table context at the top level of a response, and
+               the badge has to move with the number because a solve changes
+               everyone's rank. Kept character-for-character in step with
+               standings_cells.html — htmx matches the target by id, so the two
+               only agree if they say the same thing. #}
+            <td class="font-semibold {% if code == my_team %}text-info{% endif %}"><span id="proj-{{ code }}">{{ proj.get("projected", 0) }}{% if code == my_team and proj.get("rank") %} <span class="badge badge-info badge-xs">#{{ proj.rank }}</span>{% endif %}</span></td>
             <td>
                 <form hx-post="/team-done" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ code }}">

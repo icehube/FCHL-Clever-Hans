@@ -381,6 +381,16 @@ templates.env.filters["dom_id"] = _dom_id
 
 buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 
+# Exact projected points per LIVE OPPONENT, from a real MILP solve, filled only
+# by GET /solve-standings and cleared by _recompute(). Empty means "nobody has
+# asked", which is the normal state and the reason the heuristic in _context
+# stays: 10 solves cost ~1.3s and no draft action can afford that.
+#
+# Keyed by team code, and absence is meaningful — a team missing from here falls
+# back to the estimate rather than to zero, which is what makes an Infeasible
+# opponent solve harmless.
+exact_projections: dict[str, int] = {}
+
 
 # Marginal values for the current state epoch, keyed by player name. Cleared
 # wholesale by _recompute() rather than versioned: a version counter has the
@@ -486,6 +496,12 @@ def _recompute():
     last_trade_eval = None
     _marginal_cache.clear()
     _counterfactual_cache.clear()
+    # Same sentence as the two caches above, and it is the whole reason the
+    # exact standings are safe to cache at all: they are per-team MILP optima
+    # over this roster, this budget and these market prices. A stale one is the
+    # worst of the three to read, because the Proj column carries a rank badge —
+    # a number that looks authoritative and describes a state that is gone.
+    exact_projections.clear()
     market_info = compute_market_ceiling(auction_state.teams)
     all_market = compute_all_market_prices(
         auction_state.available_players, model_prices, auction_state.teams,
@@ -547,6 +563,43 @@ def _log_change(kind: str, team_code: str, description: str) -> None:
         team_code=team_code,
         description=description,
     ))
+
+
+def _recompute_exact_projections():
+    """Solve every LIVE OPPONENT's optimal roster. Called only from /solve-standings.
+
+    The heuristic in `_context` exists because 11 MILPs per action is
+    unaffordable; this is the same answer computed properly, on request, the way
+    the Buyout Analyzer's Scan button already trades ~15 solves for a click.
+
+    Two teams are skipped and neither is an optimization:
+
+    * a **done** team's roster is FINAL, so its projection is what it has — the
+      same rule `_context` applies first, and solving it would invent purchases
+      it has sworn off (the 2026-08-13 bug, worth +673 to +1101 points a team);
+    * **BOT's** figure is already `milp_solution.total_points`, the identical
+      solve over the identical inputs.
+
+    So the cost falls as the draft progresses — measured 2026-08-17, 10 solves
+    (~1265ms) on a fresh league against 2 (~250ms) in the endgame scenario,
+    because by then eight teams are done.
+
+    A non-Optimal solve leaves the team OUT of the dict rather than storing a
+    zero, so it keeps showing the estimate. Reporting a team as 0 points because
+    a solver failed is worse than reporting it approximately.
+    """
+    # Cleared in place, not rebound: `_recompute()` clears the same dict, and one
+    # object with two owners is easier to reason about than two bindings.
+    exact_projections.clear()
+    for code, t in auction_state.teams.items():
+        if t.is_done or code == MY_TEAM:
+            continue
+        try:
+            sol = solve_optimal_roster(t, auction_state.available_players, market_prices)
+        except Exception:
+            continue
+        if sol.status == "Optimal":
+            exact_projections[code] = int(sol.total_points)
 
 
 def _recompute_buyout_indicators():
@@ -742,6 +795,16 @@ def _context(request: Request) -> dict:
             projected = current
         elif code == MY_TEAM and milp_solution and milp_solution.status == "Optimal":
             projected = int(milp_solution.total_points)
+        elif code in exact_projections:
+            # Somebody clicked Solve Standings and nothing has changed since —
+            # `_recompute()` empties this dict on every mutation, so a hit here
+            # is always a solve against the world currently on screen.
+            #
+            # Ordered AFTER the two branches above rather than first, because
+            # neither can be improved on: a done team's roster is final, and
+            # BOT's figure is already the same solve. Only live opponents are in
+            # here, and only they read the estimate below.
+            projected = exact_projections[code]
         else:
             # Only unfilled STARTER slots add points — bench scores nothing
             starter_slots = sum(t.roster_needs.values())
@@ -759,6 +822,17 @@ def _context(request: Request) -> dict:
             else:
                 projected = current
         projections[code] = {"current": current, "projected": projected}
+
+    # What BASIS the figures above were computed on, as a count rather than a
+    # boolean. A bare "exact" would overstate the one case that matters: if an
+    # opponent's solve came back Infeasible it keeps its estimate, and a column
+    # labelled exact while one cell is not is the same silent-staleness problem
+    # the label exists to prevent. `total` is the live opponents — the only teams
+    # a solve can say anything new about.
+    live_opponents = sum(
+        1 for c, t in auction_state.teams.items() if not t.is_done and c != MY_TEAM
+    )
+    standings_basis = {"exact": len(exact_projections), "total": live_opponents}
 
     # Add rank (sorted by projected descending)
     for rank, (code, _) in enumerate(
@@ -824,6 +898,7 @@ def _context(request: Request) -> dict:
         "buyout_indicators": buyout_indicators,
         "market_prices": market_prices,
         "projections": projections,
+        "standings_basis": standings_basis,
         "default_bidders": default_bidders,
         # Both read by base.html only, so they reach the screen on a full page
         # load and not on htmx partial swaps — which is what keeps them on
@@ -1311,6 +1386,25 @@ async def buyout_indicators_endpoint(request: Request):
     _recompute_buyout_indicators()
     ctx = _context(request)
     return _render(request, "partials/buyout_dots.html", ctx)
+
+
+@app.get("/solve-standings", response_class=HTMLResponse)
+async def solve_standings(request: Request):
+    """Replace the Proj column's estimates with real per-team MILP optima.
+
+    Manual, and out-of-band only, for the same reason the buyout Scan button is:
+    the work costs ~1.3s on a fresh league and every draft action would pay it.
+    `hx-swap="none"` on the trigger, so the ONLY thing this response does is swap
+    the `proj-<CODE>` spans and the basis marker — nothing else in League State
+    moves, and nothing outside it is touched.
+
+    A GET that mutates only a derived cache: no snapshot, nothing saved to disk,
+    and `/undo` has nothing to revert, because no draft record changed. That is
+    also why it does not go through `_recompute()` — which would empty the dict
+    it just filled.
+    """
+    _recompute_exact_projections()
+    return _render(request, "partials/standings_cells.html", _context(request))
 
 
 @app.post("/reset", response_class=HTMLResponse)

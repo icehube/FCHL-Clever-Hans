@@ -1,0 +1,30 @@
+{# The out-of-band response to GET /solve-standings: the Proj figures and the
+   basis marker, and nothing else.
+
+   SPANS, not the `<td>`s they sit in. A bare `<td>` at the top level of a
+   response has no table context to be parsed in, so wrapping the figure is what
+   makes this swappable at all — the same reason buyout_dots.html swaps spans
+   into placeholder spans rather than replacing cells.
+
+   The id is the TEAM CODE, raw, with no `dom_id` filter. Codes are three
+   uppercase letters, already legal CSS identifiers; the filter exists for player
+   names, which carry backticks, parentheses and the ` (TEAM POS)` suffixes the
+   disambiguator adds. Running it here would only mean two expressions that have
+   to agree character for character (see the `bo-` dots) for no gain.
+
+   Every team gets a fragment, including done teams and BOT, because every team
+   has a target: league_state.html renders all 11 spans unconditionally. That is
+   the opposite of the buyout dots, which exist for BOT only and needed the Scan
+   button gated to match. Their figures come back unchanged — a done team's
+   roster is final and BOT's was already a MILP optimum — but the RANK badge is
+   recomputed from everyone's new numbers, and that badge is on BOT's row.
+
+   `nomination_order` for the loop, matching league_state.html's own iteration:
+   it carries all 11 teams (done teams are dropped by `next_nominator`, not from
+   this list), so the two agree by construction rather than by coincidence. #}
+{% for code in nomination_order %}
+{% set proj = projections.get(code, {}) %}
+<span id="proj-{{ code }}" hx-swap-oob="true">{{ proj.get("projected", 0) }}{% if code == my_team and proj.get("rank") %} <span class="badge badge-info badge-xs">#{{ proj.rank }}</span>{% endif %}</span>
+{% endfor %}
+{% set basis_oob = true %}
+{% include "partials/standings_basis.html" %}

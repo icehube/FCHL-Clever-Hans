@@ -67,6 +67,8 @@
                 <option value="" disabled selected>Scenario...</option>
                 <option value="goalie-asymmetry">Goalie asymmetry (others have 2G, BOT has 1)</option>
                 <option value="endgame-ceiling-binds">Endgame (most teams done, ceiling binds, stars unsold)</option>
+                <option value="endgame-last-goalie">Endgame (one spot, one goalie you can afford)</option>
+                <option value="endgame-sole-bidder">Endgame (everyone else is broke, you win uncontested)</option>
             </select>
             <button hx-post="/reset" hx-target="#app" hx-swap="innerHTML" hx-confirm="Reset to fresh state from CSV? All auction progress will be lost." class="btn btn-xs btn-outline btn-error" title="Reset to fresh state">
                 Reset

@@ -8,11 +8,13 @@ import pytest
 import market
 import optimizer
 import scenarios
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM
+from config import MAX_SALARY, MIN_SALARY, MY_TEAM, ROSTER_SIZE, SALARY_INCREMENT
 from data_loader import build_initial_state
 from price_model import load_model_params, predict_all_prices
 
 ENDGAME = "endgame-ceiling-binds"
+LAST_GOALIE = "endgame-last-goalie"
+SOLE_BIDDER = "endgame-sole-bidder"
 
 
 def _priced(state):
@@ -200,6 +202,319 @@ class TestEndgameCeilingBinds:
                    [(p.name, p.salary) for p in b.all_players], f"{code} differs"
             assert a.is_done == b.is_done, f"{code} is_done differs"
         assert first.available_players.keys() == second.available_players.keys()
+
+
+class TestEndgameLastGoalie:
+    """One spot, a goalie need, and nothing in the pool BOT can afford instead.
+
+    Two engine semantics meet here and both used to be pinned only against
+    synthetic players: a must-have is valued at the physical max, and forcing a
+    player into the LAST spot is Optimal rather than Infeasible.
+
+    Figures are derived from the loaded state, never quoted: `players.csv` is
+    replaced before every draft, which moves every price in the pool.
+    """
+
+    def _target(self, state, price):
+        """The must-have: the only goalie left that BOT can pay for."""
+        affordable = [
+            n for n, p in state.available_players.items()
+            if p.position == "G" and price[n] <= state.teams[MY_TEAM].remaining_budget
+        ]
+        assert len(affordable) == 1, (
+            f"{len(affordable)} affordable goalies ({affordable}) — with more "
+            f"than one, excluding any single goalie still leaves a legal roster "
+            f"and there is no must-have to value"
+        )
+        return affordable[0]
+
+    def test_bot_has_one_spot_and_needs_a_goalie(self):
+        bot = scenarios.load(LAST_GOALIE).teams[MY_TEAM]
+        assert bot.total_spots_remaining == 1, (
+            f"{bot.total_spots_remaining} spots left — the `spots == 0` branch "
+            f"only fires when the forced player fills the roster exactly"
+        )
+        assert bot.roster_needs == {"F": 0, "D": 0, "G": 1}, (
+            f"needs are {bot.roster_needs}; anything else and the MILP can fill "
+            f"the last seat with a skater, so no goalie is a must-have"
+        )
+        assert not bot.is_done
+
+    def test_bots_budget_is_below_the_league_maximum(self):
+        """Otherwise the claim this scenario makes cannot be measured.
+
+        `physical_max_bid` clamps at MAX_SALARY, so a must-have on a team sitting
+        at the cap returns the same number whether the must-have branch fired or
+        the clamp did — and it is WHICH that this scenario exists to show.
+        """
+        bot = scenarios.load(LAST_GOALIE).teams[MY_TEAM]
+        assert MIN_SALARY <= bot.physical_max_bid < MAX_SALARY, (
+            f"BOT's physical max is ${bot.physical_max_bid}M"
+        )
+
+    def test_the_goalies_still_on_the_board_are_out_of_reach(self):
+        """The pool keeps goalies — they just cost more than BOT's whole budget.
+
+        This is the difference between "goaltending is gone" and the state a real
+        endgame reaches, and it is the load-bearing half: one cheap goalie left
+        behind is a legal alternative, and the marginal drops back to a binary
+        search over points.
+        """
+        state = scenarios.load(LAST_GOALIE)
+        model, _, _ = _priced(state)
+        target = self._target(state, model)
+        others = {
+            n: model[n] for n, p in state.available_players.items()
+            if p.position == "G" and n != target
+        }
+        assert others, "no goalies left at all — the pool should still show them"
+        budget = state.teams[MY_TEAM].remaining_budget
+        assert min(others.values()) > budget, (
+            f"cheapest alternative is ${min(others.values())}M against a "
+            f"${budget}M budget"
+        )
+
+    def test_without_him_there_is_no_legal_roster(self):
+        state = scenarios.load(LAST_GOALIE)
+        model, live, _ = _priced(state)
+        bot = state.teams[MY_TEAM]
+        without = optimizer.solve_optimal_roster(
+            bot, state.available_players, live,
+            excluded_players={self._target(state, model)},
+        )
+        assert without.status == "Infeasible", (
+            f"solving without him is {without.status} — the must-have branch in "
+            f"compute_marginal_value is reached only when it is Infeasible"
+        )
+
+    def test_forcing_him_fills_the_roster_exactly(self):
+        """The other semantic: spots == 0 is a complete roster, not a failure.
+
+        Asserted through the shape of the answer rather than just its status,
+        because that branch never runs the MILP — it returns an empty roster and
+        the forced salary as the whole cost. Returning Infeasible here is what
+        used to floor-price every player in the pool once one spot was left.
+        """
+        state = scenarios.load(LAST_GOALIE)
+        model, live, _ = _priced(state)
+        forced = optimizer.solve_optimal_roster(
+            state.teams[MY_TEAM], state.available_players, live,
+            forced_players={self._target(state, model): MIN_SALARY},
+        )
+        assert forced.status == "Optimal", f"forcing him is {forced.status}"
+        assert forced.roster == [], "the spots == 0 branch selects nobody else"
+        assert forced.total_cost == pytest.approx(MIN_SALARY)
+
+    def test_he_is_worth_every_dollar_bot_can_pay(self):
+        state = scenarios.load(LAST_GOALIE)
+        model, live, info = _priced(state)
+        bot = state.teams[MY_TEAM]
+        target = self._target(state, model)
+        marginal = optimizer.compute_marginal_value(
+            state.available_players[target], bot, state.available_players, live,
+        )
+        assert marginal == pytest.approx(bot.physical_max_bid), (
+            f"marginal is ${marginal}M against a ${bot.physical_max_bid}M "
+            f"physical max — a must-have is worth everything we can pay"
+        )
+        assert marginal > model[target], (
+            f"${marginal}M is not above his ${model[target]}M model price, so "
+            f"this scenario says nothing the market layer does not"
+        )
+        rec = optimizer.compute_bid_recommendation(
+            state.available_players[target], bot, state.available_players, live,
+            info, current_price=MIN_SALARY, marginal_value=marginal,
+        )
+        assert rec.action == "BID"
+        assert rec.value_cap == pytest.approx(bot.physical_max_bid)
+
+    def test_every_opponent_can_still_be_solved(self):
+        """Their creases are filled on purpose, and this is why.
+
+        An opponent still needing goalies with none in reach solves Infeasible,
+        and `main._recompute_exact_projections` then keeps its ESTIMATE — so the
+        League State Proj column would quietly stop being exact for that team on
+        a scenario that has nothing to do with projections.
+        """
+        state = scenarios.load(LAST_GOALIE)
+        _, live, _ = _priced(state)
+        unsolved = {
+            code: optimizer.solve_optimal_roster(
+                team, state.available_players, live,
+            ).status
+            for code, team in state.teams.items()
+            if code != MY_TEAM
+        }
+        assert set(unsolved.values()) == {"Optimal"}, unsolved
+
+    def test_loading_it_twice_gives_the_same_state(self):
+        first, second = scenarios.load(LAST_GOALIE), scenarios.load(LAST_GOALIE)
+        for code in first.teams:
+            a, b = first.teams[code], second.teams[code]
+            assert [(p.name, p.salary) for p in a.all_players] == \
+                   [(p.name, p.salary) for p in b.all_players], f"{code} differs"
+        assert first.available_players.keys() == second.available_players.keys()
+
+
+class TestEndgameSoleBidder:
+    """Nobody left who can raise a bid — so whatever BOT bids, it has won.
+
+    The 2026-08-05 report on the real pool: with the live ceiling collapsed to
+    the floor, an advisor capping on `ceiling + increment` recommends DROP on a
+    bargain. Everything here is derived from the loaded state; `players.csv` moves
+    under it before every draft.
+    """
+
+    def _opponents(self, state):
+        return {c: t for c, t in state.teams.items() if c != MY_TEAM}
+
+    def test_every_opponent_is_full_and_cannot_reach_the_floor(self):
+        """A full 24 under $0.5M is the ONLY legal way to price a team out.
+
+        With a spot open the commissioner's reserve rule guarantees the team can
+        still bid MIN_SALARY, so `physical_max_bid` cannot fall below it — which
+        is why the fill to 24 is not decoration.
+        """
+        state = scenarios.load(SOLE_BIDDER)
+        for code, team in self._opponents(state).items():
+            assert team.roster_count == ROSTER_SIZE, (
+                f"{code} has {team.roster_count} players and "
+                f"{team.total_spots_remaining} spots, so it can bid the floor"
+            )
+            assert team.physical_max_bid < MIN_SALARY, (
+                f"{code} can still bid ${team.physical_max_bid}M"
+            )
+
+    def test_no_opponent_is_marked_done(self):
+        """Done would produce the same verdict for entirely the wrong reason.
+
+        `bid_panel.html` filters the bidder grid on `is_done` alone, so a done
+        team disappears from it while a cap-full one stays clickable. The bug
+        this state covers is the clickable one: WIN rendering with no Assign
+        button because the advisor and the button disagreed about who was left.
+        Mark them done instead and every other test in this class still passes.
+        """
+        state = scenarios.load(SOLE_BIDDER)
+        done = [c for c, t in self._opponents(state).items() if t.is_done]
+        assert not done, f"{done} are done, so they leave the bidder grid entirely"
+
+    def test_nobody_can_outbid_bot(self):
+        state = scenarios.load(SOLE_BIDDER)
+        everyone = list(state.teams)
+        assert market.live_opponents(everyone, state.teams) == [], (
+            "with the whole grid toggled on, not one team may raise the price"
+        )
+        assert market.bid_winner(everyone, state.teams) == MY_TEAM
+        assert market.compute_live_ceiling(everyone, state.teams) == MIN_SALARY
+
+    def test_the_market_falls_back_to_the_floor(self):
+        """Zero demand = floor price, and this is the only loadable state showing it."""
+        state = scenarios.load(SOLE_BIDDER)
+        model, live, info = _priced(state)
+        assert info.demand_count == 0 and info.floor_demand is True, info
+        assert info.market_ceiling == MIN_SALARY
+        assert set(live.values()) == {MIN_SALARY}, (
+            f"market prices should all be the floor, got "
+            f"{sorted(set(live.values()))[:5]}"
+        )
+        assert max(model.values()) > MIN_SALARY, (
+            "the pool still has players the MODEL prices above the floor — "
+            "otherwise the ceiling is not what flattened them"
+        )
+
+    def test_bot_can_still_act(self):
+        state = scenarios.load(SOLE_BIDDER)
+        bot = state.teams[MY_TEAM]
+        assert not bot.is_done
+        assert bot.total_spots_remaining >= 1, "no spot left to win a player into"
+        assert MIN_SALARY <= bot.physical_max_bid < MAX_SALARY, (
+            f"BOT's physical max is ${bot.physical_max_bid}M; at the league "
+            f"maximum a value cap equal to it proves nothing about which "
+            f"constraint bound"
+        )
+        _, live, _ = _priced(state)
+        assert optimizer.solve_optimal_roster(
+            bot, state.available_players, live,
+        ).status == "Optimal"
+
+    def _best_left(self, state, live):
+        """The player worth winning, and what he is worth."""
+        player = max(state.available_players.values(), key=lambda p: p.projected_points)
+        return player, optimizer.compute_marginal_value(
+            player, state.teams[MY_TEAM], state.available_players, live,
+        )
+
+    def test_a_bargain_is_a_win_not_a_drop(self):
+        """The reported bug, on real data: value binds, the collapsed ceiling does not.
+
+        Checked at three prices below the cap including the floor, because the
+        pre-fix failure was price-dependent: `min(value_cap, ceiling + increment)`
+        capped max_bid at $0.6M, so every price above that inverted to DROP.
+        """
+        state = scenarios.load(SOLE_BIDDER)
+        _, live, info = _priced(state)
+        player, marginal = self._best_left(state, live)
+        assert marginal > round(info.market_ceiling + SALARY_INCREMENT, 1), (
+            f"{player.name} is worth ${marginal}M — for this state to say "
+            f"anything he has to be worth more than the collapsed ceiling"
+        )
+        for price in (MIN_SALARY, round(marginal / 2, 1), marginal):
+            rec = optimizer.compute_bid_recommendation(
+                player, state.teams[MY_TEAM], state.available_players, live, info,
+                current_price=price, bot_uncontested=True, marginal_value=marginal,
+            )
+            assert rec.action == "WIN", (
+                f"${price}M on a ${marginal}M player is {rec.action} — the "
+                f"advisor is capping on a ceiling nobody can reach"
+            )
+            assert rec.max_bid == pytest.approx(rec.value_cap)
+            assert rec.stop_status == "uncontested"
+
+    def test_overpaying_still_drops(self):
+        """The other side of the uncontested `<=`: at value it is a win, above it is not."""
+        state = scenarios.load(SOLE_BIDDER)
+        _, live, info = _priced(state)
+        player, marginal = self._best_left(state, live)
+        rec = optimizer.compute_bid_recommendation(
+            player, state.teams[MY_TEAM], state.available_players, live, info,
+            current_price=round(marginal + SALARY_INCREMENT, 1),
+            bot_uncontested=True, marginal_value=marginal,
+        )
+        assert rec.action == "DROP"
+
+    def test_loading_it_twice_gives_the_same_state(self):
+        first, second = scenarios.load(SOLE_BIDDER), scenarios.load(SOLE_BIDDER)
+        for code in first.teams:
+            a, b = first.teams[code], second.teams[code]
+            assert [(p.name, p.salary) for p in a.all_players] == \
+                   [(p.name, p.salary) for p in b.all_players], f"{code} differs"
+        assert first.available_players.keys() == second.available_players.keys()
+
+
+@pytest.mark.parametrize("name", sorted(scenarios.SCENARIOS))
+def test_no_scenario_builds_a_state_the_league_forbids(name):
+    """Every scenario is a position a real auction could actually have reached.
+
+    The reserve rule is the one that matters: the commissioner software refuses
+    any bid that would leave a team unable to fill a full roster at MIN_SALARY,
+    so `remaining_budget < spots * MIN_SALARY` is unreachable through legal
+    bidding — and a scenario that produces it would be testing the engine against
+    an auction the league cannot hold. The others are structural: over 24 on the
+    active roster puts a 25th player in the starting-lineup calculation, and BOT
+    marked done means every panel it is supposed to exercise renders nothing.
+    """
+    state = scenarios.load(name)
+    for code, team in state.teams.items():
+        assert team.remaining_budget >= team.total_spots_remaining * MIN_SALARY, (
+            f"{code} has ${team.remaining_budget}M for "
+            f"{team.total_spots_remaining} spots — the commissioner would have "
+            f"refused the bid that got it here"
+        )
+        assert team.remaining_budget >= 0, f"{code} is over the cap"
+        assert team.roster_count <= ROSTER_SIZE, (
+            f"{code} has {team.roster_count} on the active roster"
+        )
+    assert not state.teams[MY_TEAM].is_done, "BOT must always still be drafting"
 
 
 def _ui_scenario_values() -> set[str]:

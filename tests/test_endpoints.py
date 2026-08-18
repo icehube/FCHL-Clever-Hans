@@ -154,6 +154,44 @@ class TestBidCheck:
             assert "bid-win" in r.text, "should be a WIN — HSM cannot raise the price"
             assert 'name="team" value="BOT"' in r.text, "Assign form must be present"
 
+    def test_the_whole_grid_toggled_on_and_bot_still_wins(self, client):
+        """`endgame-sole-bidder`, the state where nobody left can raise a bid.
+
+        The complement of the test above, which breaks ONE team with
+        `cannot_raise`: here every opponent is genuinely spent out (full 24, under
+        $0.5M of cap, none marked done) and the operator toggles the entire grid
+        on, which is what actually happens mid-auction. Both halves matter — the
+        buttons must still be there to click, since a done team would vanish from
+        the grid and cover none of this, and `live_opponents` has to filter the
+        whole list rather than stop at the first live-looking code.
+        """
+        import main
+
+        client.post("/load-scenario", data={"name": "endgame-sole-bidder"})
+        codes = list(main.auction_state.teams)
+        r = client.post("/bid-check", data={
+            "player": pool_top(1)[0],
+            "bidders": ",".join(codes),
+            "price": str(MIN_SALARY),
+            "highest_bidder": main.MY_TEAM,
+        })
+        # `data-team` exists only on the bidder grid's buttons, and the grid ships
+        # with the advice — a fresh GET / has no bidding session to render one.
+        offered = re.findall(r'data-team="([^"]+)"', r.text)
+        # A set: the grid iterates nomination_order, which is snake-draft order.
+        assert set(offered) == set(codes) and len(offered) == len(codes), (
+            f"grid offers {offered} of {codes} — a spent-out team is not done, "
+            f"so every one of them must stay clickable"
+        )
+        assert "bid-win" in r.text, (
+            f"{len(codes)} bidders toggled on and none can raise the price, so "
+            f"this is a WIN"
+        )
+        assert f'name="team" value="{main.MY_TEAM}"' in r.text, "Assign form present"
+        assert "(no rivals left)" in r.text, (
+            "the forecast should say why there is no figure, not show one"
+        )
+
     def test_uncontested_overpay_still_drops(self, client):
         """No opponents left, but above value — DROP and name the overpay."""
         r = client.post("/bid-check", data={

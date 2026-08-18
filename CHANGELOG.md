@@ -20,6 +20,32 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-17d]
+
+### Added
+
+- **`GET /solve-standings` — the League State Proj column, answered exactly, on a click.** The column is two rules: BOT's figure is `milp_solution.total_points`, a real MILP optimum under BOT's real budget; every opponent's is an estimate in `_context` that costs no solve, because 11 MILPs per action is what it avoids. A manual scan now replaces the opponents' figures with real per-team optima and swaps them in out-of-band — the buyout Scan button's idiom exactly, for the same reason. Measured through the endpoint: **1262ms** on a fresh league (10 solves) and **259ms** in the `endgame-ceiling-binds` scenario (2), because done teams are final and BOT is already solved and neither is asked. The cost therefore *falls* as the draft progresses.
+
+  **The 2026-08-08 decision to label rather than fix rested on a measurement of the wrong thing, and it stood for nine days.** That entry read "measured on a fresh state they were 5 points apart and the rank was identical either way" — computed by comparing the two rules **on BOT**, whose figure never uses the estimate. It could not see the error it was quoted to bound. Re-measured 2026-08-17 against a real per-team MILP for every opponent:
+
+  | | fresh league | endgame scenario |
+  |---|---|---|
+  | estimate vs MILP optimum | **+68 mean, +193 worst (+14.2%)** | +146 / −72 |
+  | overstates the *achievable* optimum | **6 of 10 opponents** | 1 of 2 |
+  | teams whose rank order it moves | **9 of 10** (GVR 3rd → 8th) | — |
+  | BOT's own rank badge | #10 → **#11** exact | **#2 → #1** exact |
+
+  The endgame row is the one that matters, and it is not a new class of bug: the badge said **#2 when BOT was #1**, which is what the done-team projection fix (2026-08-13) removed in its own form — *"the panel said #6 while BOT was first by a distance"*. Note also that an estimate above the MILP optimum is not merely imprecise. The optimum is the most points that roster can reach at those prices; a figure above it describes a team that cannot exist.
+
+  **The entry's own suggested fix is dead, and that is worth keeping.** It read *"the affordability filter still tests players one at a time and never asks whether the team can afford the whole set"*, which reads as a recipe: make the fill budget-aware. Three cheap estimators measured on a fresh league, mean |error| against the per-team optimum — **current 94**, per-slot average 147, points-greedy fill (budget- and position-aware, reserving `MIN_SALARY` per remaining slot) 176, points-per-dollar greedy 401. Every replacement is worse, because a greedy spends the budget on one star and fills the rest at the floor while the current rule's average-of-the-top-3×slots happens to approximate a budget-constrained optimum. Right criticism, wrong conclusion: the affordability filter *is* structurally wrong and there is still no cheap rule that beats it. The only thing better than the estimate is the solve.
+
+  **Staleness is the load-bearing part, not the solve.** `exact_projections.clear()` joins `_recompute()`'s invalidation list, whose existing sentence about values *"derived from the roster, budget and market prices this function is replacing"* covers it verbatim — so one pick returns the whole column to estimates. `#proj-basis` reports which basis is on screen as a **count** (`exact 9/10`), never a boolean: an Infeasible opponent solve leaves that team *absent* from the dict and it keeps its estimate, so "exact" alone would mislabel the one cell that is still a guess. Absence rather than a stored zero is also what keeps a solver failure from putting a plausible last place on the board. The marker is unconditional with only its `hx-swap-oob` attribute conditional, following `buyout_scan.html` — a target that disappears with its contents can only be swapped one way, which is how the Scan button once vanished and never came back.
+
+  Two smaller decisions worth recording. The figures are wrapped in **spans**, not swapped as `<td>`s: a bare cell at the top level of a response has no table context to be parsed in. And the id is the **raw team code** with no `dom_id` filter — three uppercase letters are already a legal CSS identifier, and the filter exists for player names carrying backticks, parentheses and disambiguation suffixes. Unlike the buyout dots the button needs no gating, because all 11 spans render unconditionally, so no swap can miss.
+
+  Seven tests, eight mutations verified dead — and **the mutation that renames the OOB ids survived the first version of the test written to catch it.** That test collected fragments with `id="(proj-[\w-]+)"`, so renaming them to `projection-<CODE>` made all eleven invisible to the very regex looking for them; it saw only the basis marker, whose target was still fine, and passed against 11 dead swaps. It now collects every id carrying `hx-swap-oob` with no assumption about the name, and counts them, because a fragment that is never emitted resolves vacuously. Two existing tests needed re-anchoring, both because they were working: `TestTooltipsStayInsideTheirPanel` requires each tooltip by a text fragment and the Proj tooltip's "Computed two ways" is gone with the rewrite (re-anchored on "Solve Standings" — the mechanism, not a turn of phrase), and `BACKLOG.md`'s `_context` line reference in `main.py` had to move down 53 lines. (Written first as the literal `path:line` pair, which `tests/test_backlog_refs.py` collects out of this file too — so quoting a stale reference in prose *creates* a live one and fails the suite. The same slip is already recorded under 2026-08-17.)
+
+
 ## [2026-08-17c]
 
 ### Fixed

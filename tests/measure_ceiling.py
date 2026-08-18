@@ -157,24 +157,38 @@ def run(drain: bool, every: int) -> None:
             if code is None:
                 break
 
+            # `picks` counts picks COMPLETED, so the sale about to happen is the
+            # (picks + 1)th. Every number that reaches the screen is this 1-based
+            # ordinal, because "pick N" means the Nth pick to every reader of the
+            # docs these figures end up in — and because `measure_spend.py` reads
+            # the same auction back out of the transaction log as 1-based
+            # ordinals, so the two instruments now agree on the pick where the
+            # ceiling started mattering instead of differing by one. The figures
+            # published before 2026-08-17 were the 0-based `picks` value.
+            pick = picks + 1
+
             ceiling = main.market_info.market_ceiling
             seen.add(round(ceiling, 1))
             # Every value the ceiling actually took, with the pick it took it
             # on. Reading the step sequence off the checkpoint rows instead is
             # how "at the floor by pick 60" got into the docs when the measured
-            # answer was pick 43 — the checkpoints were 20 apart.
+            # answer was pick 44 — the checkpoints were 20 apart.
             if not steps or steps[-1][1] != round(ceiling, 1):
-                steps.append((picks, round(ceiling, 1)))
+                steps.append((pick, round(ceiling, 1)))
             if ceiling >= MAX_SALARY:
                 at_cap += 1
             elif first_bind is None:
-                first_bind = (picks, round(ceiling, 1))
+                first_bind = (pick, round(ceiling, 1))
 
-            unhealthy += [f"pick {picks}: {b}" for b in _health(state)]
+            unhealthy += [f"pick {pick}: {b}" for b in _health(state)]
 
-            if picks % every == 0:
+            # `(pick - 1) % every` rather than `pick % every`, so the checkpoint
+            # rows are the same states as before the renumbering — the first one
+            # is the fresh league, which is the row the ceiling's starting value
+            # comes from.
+            if (pick - 1) % every == 0:
                 solo, n_solo, duo, n_duo = _live_survey(state)
-                print(f"  {picks:>5} {ceiling:>6.1f}M {len(_pinning_teams(state)):>10} of 10"
+                print(f"  {pick:>5} {ceiling:>6.1f}M {len(_pinning_teams(state)):>10} of 10"
                       f" {solo:>4}/{n_solo:<4} {duo:>4}/{n_duo:<4}")
 
             name = max(

@@ -108,7 +108,7 @@ class TestSummarizeCountsTheRightRecords:
             _rec("capped", model=9.0, market=6.5),
         ])
         assert s["ceiling_changed_a_price"] == 1
-        assert s["first_bind"] == 1, "the index should point at the capped pick"
+        assert s["first_bind"] == 2, "the SECOND pick is the capped one"
         assert s["bind_gap_max"] == 2.5
         assert s["bind_gap_total"] == 2.5
 
@@ -125,9 +125,10 @@ class TestSummarizeCountsTheRightRecords:
             _rec("unpriced too", model=0.0, market=0.0),
             _rec("capped", model=8.0, market=3.0),
         ])
-        assert s["first_bind"] == 2, (
-            f"first_bind is {s['first_bind']}, which is the index within the "
-            f"priced subset — the report would name the wrong pick"
+        assert s["first_bind"] == 3, (
+            f"first_bind is {s['first_bind']}: it must be a 1-based ordinal over "
+            f"ALL picks. 2 means it indexed the priced subset, 1 or 2 means it is "
+            f"0-based — and the report prints it as 'pick N' either way"
         )
 
     def test_no_bind_reports_none_rather_than_a_pick_number(self):

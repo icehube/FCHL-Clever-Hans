@@ -20,6 +20,21 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-17c]
+
+### Fixed
+
+- **One report called the same pick two different numbers.** `measure_spend.py`'s `first_bind` was a **0-based index** into the pick list, printed as `pick {n}`; `_spend_curve` in the same function labels its rows with `enumerate(picks, start=1)`. Demonstrated on three picks with only the third capped: `first_bind` said `2` while the curve called that same pick `3`. `measure_ceiling.py` shared the 0-based basis (`ceiling steps ... 0.5M@43`, `first pick it bound (32, 7.3)`), so the cross-check between the two instruments was internally valid — but **every figure either one had published was an index labelled as an ordinal**, and those figures had already reached `.claude/rules/pricing-pipeline.md` and two entries here.
+
+  Fixed as one convention across both instruments: **1-based ordinals**, because "pick N" means the Nth pick to every reader of these documents. `measure_ceiling.py` now derives a `pick = picks + 1` at the top of its loop and uses it for the step sequence, the first bind, the health lines and the checkpoint rows — the checkpoint test is `(pick - 1) % every` rather than `pick % every`, deliberately, so the rows are the same *states* as before the renumbering and the first one is still the fresh league, which is where the ceiling's starting value is read from.
+
+  It buys more than tidiness. Re-run both regimes 2026-08-17 and read each saved state back with the reader: the drain run's `first_bind` and the instrument's `0.5M@` step now print **the same number, 44**, so "the two measures are close" became exact agreement on the pick where the ceiling started mattering — two independent paths, one over live `market_info` per pick, one over the serialized transaction log. Everything not a pick label reproduced unchanged (133 of 165, 122 of 165, `$337.7M` of `$337.7M`, the baseline's 18% unspent and JHN $19.8M / GVR $14.1M / VPP $12.0M), which is the evidence that only the labelling moved.
+
+  Restated in `.claude/rules/pricing-pipeline.md` — a live rules document has to carry the current figures — with an explicit note that pre-2026-08-17 quotes were 0-based, so an old number sitting one below a fresh run reads as a renumbering rather than a behaviour change. The `## [2026-08-16]` entry below keeps the numbers it published, with a one-clause pointer instead of a rewrite: **the numbers there are the record of what the run said.** Same-day figures in `## [2026-08-17b]` are corrected in place, since two entries from the same day disagreeing is just an error.
+
+  Two mutants, each verified to die and each killed by `test_first_bind_is_a_pick_ordinal_not_an_index_into_the_priced_subset` specifically: back to 0-based, and a 1-based ordinal over the *priced* subset rather than all picks. The second is the one a cross-check cannot catch — both synthetic drafts have zero unpriced records, so it agrees with the instrument either way.
+
+
 ## [2026-08-17b]
 
 ### Added
@@ -31,9 +46,9 @@ rediscover the same non-problem.
   | buyers pay | ceiling below `MAX` | changed a price |
   |---|---|---|
   | the tool's own market price | 0 of 165 | 0 of 165, never |
-  | what the reserve rule allows | 133 of 165 | **122 of 165, from pick 43** |
+  | what the reserve rule allows | 133 of 165 | **122 of 165, from pick 44** |
 
-  The baseline agreeing at zero is the correctness evidence — two independent paths, one over live `market_info` per pick and one over logged records, and a ceiling pinned at `MAX_SALARY` can never sit below a model price. The drain run is where they diverge: **the ceiling changed nothing until it reached the $0.5M floor at pick 43**, because the intermediate steps ($7.3M at pick 32, $4.5M at pick 40) were above every remaining model price — a top-down draft has already sold the players those ceilings would have capped. So `.claude/rules/pricing-pipeline.md`'s "133 of 165" overstated when Layer 2 started mattering by 11 picks, and it now carries both columns with what each one means.
+  The baseline agreeing at zero is the correctness evidence — two independent paths, one over live `market_info` per pick and one over logged records, and a ceiling pinned at `MAX_SALARY` can never sit below a model price. The drain run is where they diverge: **the ceiling changed nothing until it reached the $0.5M floor at pick 44**, because the intermediate steps ($7.3M at pick 33, $4.5M at pick 41) were above every remaining model price — a top-down draft has already sold the players those ceilings would have capped. So `.claude/rules/pricing-pipeline.md`'s "133 of 165" overstated when Layer 2 started mattering by 11 picks, and it now carries both columns with what each one means.
 
   **The prediction that motivated this was wrong about the magnitude.** The plan argued the price-changing count would be *much* smaller than 133 because most of the pool is floor-priced. It is 122 — barely smaller — because once the ceiling itself reaches the floor it caps essentially everything. The mechanism was real, the conclusion drawn from it was not, and the counts converge for a reason the original reasoning missed.
 
@@ -77,6 +92,8 @@ rediscover the same non-problem.
   |---|---|---|---|---|
   | the tool's own market price | 0 of 165 | never | `[11.4]` | 18% ($59.4M of $337.7M) |
   | what the reserve rule allows (`--drain`) | **133 of 165** | pick 32, $7.3M | `[0.5, 4.5, 7.3, 11.4]` | 0% |
+
+  *(Pick numbers in this entry are the 0-based indices the instrument printed at the time. It was renumbered to 1-based ordinals on 2026-08-17 — a fresh run of the same regime reports 33 and `@1 / @33 / @41 / @44`. Left as published rather than restated, because the numbers are the record of what the run said; the clause is here so nobody reads the one-pick difference as a behaviour change.)*
 
   **The triage that opened this reported only the first row, and concluded Layer 2 contributes nothing to planning. The `--drain` run killed that.** The ceiling binds readily, stepping `11.4M@0 -> 7.3M@32 -> 4.5M@40 -> 0.5M@43` — at the floor in a quarter of a draft. What produces the pinned run is not an inert layer, it is that paying exactly the model price is the one behaviour the model cannot be wrong about: it leaves 18% of the cap unspent, and three teams (JHN $19.8M, GVR $14.1M, VPP $12.0M) finish above the line, one more than the second-highest rule needs. A real draft sits somewhere between the rows, and where it sits is now a measurable question rather than an argued one.
 

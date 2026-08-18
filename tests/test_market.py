@@ -192,7 +192,8 @@ class TestWhenTheCeilingLeavesTheCap:
     property of how fast budgets drain, and `tests/measure_ceiling.py` measures
     it end to end: at model prices it never binds (0 of 165 picks, 18% of the
     league cap unspent), and with the money actually spent it first binds at
-    pick 32 and binds on 133 of 165.
+    pick 33 (a 1-based ordinal — that instrument said 32 until 2026-08-17, when
+    both instruments were renumbered off 0-based indices) and binds on 133 of 165.
 
     This pins the *mechanism* underneath both of those numbers, which is the
     part a future change could move silently. The ceiling is the SECOND-highest

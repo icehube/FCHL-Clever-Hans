@@ -20,9 +20,11 @@ model_price`. The two numbers are not interchangeable and this one is what "the
 market layer did something" actually means.
 
 Measured on the same drain run 2026-08-17: 133 by the first definition, **122**
-by this one — and all 122 start at pick 43, when the ceiling reached the $0.5M
-floor. The $7.3M and $4.5M steps before it capped nothing, because a top-down
-draft has already sold the players they would have caught. Note the counts come
+by this one — and all 122 start at pick 44 (a 1-based ordinal, as everything
+here is), when the ceiling reached the $0.5M floor. `measure_ceiling.py`'s
+`0.5M@` step prints that same 44, which is the point of sharing the convention.
+The $7.3M and $4.5M steps before it capped nothing, because a top-down draft has
+already sold the players they would have caught. Note the counts come
 out close, which is NOT what the reasoning that motivated this file predicted:
 the argument was that most of the pool is floor-priced so most ceilings change
 nothing, and that is true right up until the ceiling itself reaches the floor
@@ -104,12 +106,22 @@ def summarize(records: list[TransactionRecord]) -> dict:
         "spent": round(sum(r.salary for r in picks), 1),
         # The headline: how often the ceiling actually moved a planning price.
         "ceiling_changed_a_price": len(bound),
-        # Indexed into `picks`, NOT `priced`: the report prints this as "pick
-        # N", so it has to be a real draft ordinal. Off `priced` it silently
-        # shifts by however many unpriced records came before it — zero on the
-        # synthetic runs, which is exactly why that bug would have survived.
+        # A 1-BASED ORDINAL over `picks`, and both halves of that matter.
+        #
+        # Over `picks` rather than `priced`, because the report prints it as
+        # "pick N": off `priced` it shifts by however many unpriced records came
+        # before it, which is zero on both synthetic runs and therefore exactly
+        # the bug a cross-check cannot see.
+        #
+        # 1-based because `_spend_curve` labels are 1-based counts, so a 0-based
+        # index here made one report call the same pick two different numbers —
+        # measured on three picks with only the third capped, `first_bind` said
+        # 2 while the curve said 3. `measure_ceiling.py` was 0-based too and its
+        # published figures were indices labelled as ordinals; both are 1-based
+        # now, which is why the reader's first bind and that instrument's floor
+        # step print the SAME number instead of differing by one.
         "first_bind": next(
-            (i for i, r in enumerate(picks)
+            (i for i, r in enumerate(picks, start=1)
              if r.model_price > 0 and r.market_price < r.model_price),
             None,
         ),

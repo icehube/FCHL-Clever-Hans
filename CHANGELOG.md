@@ -20,6 +20,29 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-18]
+
+### Fixed
+
+- **The Proj column's basis marker said "estimated" when every figure on it was exact.** Found by grilling the standings batch from the day before. With every opponent done — reachable late in any draft, and `endgame-ceiling-binds` already has 8 of 10 — `exact_projections` is empty because there is nobody to solve, yet a done team projects its final roster and BOT projects its MILP optimum, so the whole column is exact by construction. Both halves verified rather than argued. The label said the opposite, and pressing Solve Standings performed **zero solves and changed nothing** — a broken-looking button in the one state where the operator most wants the final table.
+
+  The wording was fine; the predicate was wrong. The template branched on how many figures are **exact** (falsy at zero) when the question is whether any figure is still a **guess**. `standings_basis` now carries `estimated` and the template tests that, giving three states: nothing left to estimate → `exact`, a mixed column → `exact 9/10`, nothing solved → `estimated`. A bare `exact` rather than `exact N/N`, because the count only carries information when the column is mixed and `exact 0/0` is worse than saying nothing. What it still does not distinguish, deliberately: a scan in which every solve failed reads the same as never having scanned — honest about the figures, which is what the label is for, where a fourth state would describe history instead.
+
+- **A solver that blew up on one opponent said nothing at all.** `except Exception: continue` dropped the team silently. The marker reveals *that* a cell is still an estimate and can never say which team or why, so nothing was diagnosable. The broad catch stays — one opponent's failure must not cost the other nine, the same stance as `_load_saved_state` — with a `logging.warning` naming the team, the exception type and its message. The path now has a test, which it did not before: the existing unsolvable-opponent test forces a non-Optimal *result*, not an exception.
+
+- **A 1.26s click that looked identical to no click.** Measured: the app styles neither `.htmx-request` nor an `htmx-indicator` anywhere, so Solve Standings (1262ms, 10 solves) and the buyout Scan (~15 solves) gave no feedback at all, and a second click started the whole run again. `hx-disabled-elt="this"` on both buys the visible state and the double-click guard together — confirmed in the vendored bundle rather than assumed (`htmx-1.9.10.min.js`, function `sr`, sets `disabled=""` for the request's duration). Both buttons, stated in the tests as a rule over the pair: one greying while the other sits inert is a worse inconsistency than neither.
+
+### Changed
+
+- **One definition of the Proj figure instead of two.** The id, the number and the rank badge existed inline in `league_state.html` and again in `standings_cells.html`, and htmx matches the out-of-band swap **by id**, so the two had to agree character for character. CLAUDE.md names this hazard for the buyout dots, where the fix shared only the id through the `dom_id` filter and left the markup duplicated across two files. `templates/macros/standings.html` now exports `proj_figure(...)` and both callers use it — the better tool was already in the project (`macros/player.html`, imported by three partials). The existing out-of-band tests are the proof and were not modified.
+
+### Added
+
+- **Tests for the rank badge, which is the reason the scan exists and had none.** Measured: deleting the badge from the macro passed all twelve tests in the class. Three tests now, and the third exists because the second was not enough — a mutant that emitted the badge inline but omitted it from the out-of-band payload passed both of the others, because they re-fetch `GET /` and get a fresh inline render. **A browser does not**: htmx replaces the span with what the response contains, so the badge would vanish from the live DOM until some later full-panel swap restored it. Reading the swap payload is different evidence from reading the page rendered after it, and only one of them is what htmx applies. The first two are invariants over what is rendered (BOT's badge is BOT's position among the figures in the table) rather than expected numbers, so they hold in every state; the endgame one asserts the badge moves **up**, not that it reads `#1`, which would be a `players.csv` fingerprint in the wrong file.
+
+  Also recorded in `BACKLOG.md` rather than fixed: both multi-solve endpoints are `async def` around seconds of synchronous CBC work, so they run on the event loop and every other request queues behind them — including the `/bid-check` that fires while the operator types a price. Pre-existing and file-wide (`/bid-check` is itself `async def` around ~1000ms of cold solving). The fix is deleting a keyword, which is why it is not casual: it moves the handlers onto a threadpool, and the module globals they mutate would then be written off the loop.
+
+
 ## [2026-08-17d]
 
 ### Added

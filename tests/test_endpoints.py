@@ -3285,9 +3285,11 @@ class TestExactStandingsOnDemand:
 
         client.get("/solve-standings")
         after = section_of(client.get("/").text, "league-state")
-        n = len(self._live_opponents())
-        assert self._basis(after) == f"exact {n}/{n}", (
-            f"after a clean scan the marker reads {self._basis(after)!r}"
+        assert self._basis(after) == "exact", (
+            f"after a clean scan the marker reads {self._basis(after)!r}. A bare "
+            f"'exact' rather than 'exact N/N': the count carries information only "
+            f"when the column is mixed, and 'exact 0/0' is worse than nothing in "
+            f"the all-done state"
         )
 
     def test_the_scan_solves_live_opponents_only(self, monkeypatch, client):
@@ -3369,4 +3371,50 @@ class TestExactStandingsOnDemand:
         assert self._basis(page) == f"exact {n - 1}/{n}", (
             f"the marker reads {self._basis(page)!r} while one cell is still an "
             f"estimate — a count exists precisely so this case is visible"
+        )
+
+    def test_with_every_opponent_done_the_column_is_exact_already(self, client):
+        """The state that caught the marker branching on the wrong count.
+
+        A done team projects its final roster and BOT projects its MILP optimum,
+        so with nobody left to solve every figure on screen is exact BY
+        CONSTRUCTION — and both halves of that are asserted here rather than
+        assumed, because the whole finding was that the label disagreed with what
+        the numbers actually were.
+
+        Reachable: the design notes put 3+ early finishers in every draft and
+        `endgame-ceiling-binds` already has 8 of 10 done. Reading it wrong left a
+        Solve Standings button that performed zero solves and changed nothing, in
+        the one state where the operator most wants the final table.
+        """
+        import main
+        from optimizer import solve_optimal_roster
+
+        for code in [c for c in main.auction_state.teams if c != main.MY_TEAM]:
+            client.post("/team-done", data={"team_code": code})
+        assert not self._live_opponents(), "setup failed to retire every opponent"
+
+        page = section_of(client.get("/").text, "league-state")
+        assert self._basis(page) == "exact", (
+            f"the marker reads {self._basis(page)!r} with nothing left to "
+            f"estimate — every figure here is a final roster or a MILP optimum"
+        )
+        for code, team in main.auction_state.teams.items():
+            if team.is_done:
+                assert self._figure(page, code) == team.current_roster_points, (
+                    f"done team {code} is not showing its final roster, so "
+                    f"'exact' would be the wrong label for a different reason"
+                )
+        bot = main.auction_state.teams[main.MY_TEAM]
+        sol = solve_optimal_roster(bot, main.auction_state.available_players,
+                                   main.market_prices)
+        assert self._figure(page, main.MY_TEAM) == int(sol.total_points)
+
+        # And the button cannot change any of it, so it must not claim to have.
+        client.get("/solve-standings")
+        after = section_of(client.get("/").text, "league-state")
+        assert main.exact_projections == {}, "there was nothing to solve"
+        assert self._basis(after) == "exact", (
+            f"pressing the button moved the marker to {self._basis(after)!r} — it "
+            f"performed zero solves, so nothing about the basis changed"
         )

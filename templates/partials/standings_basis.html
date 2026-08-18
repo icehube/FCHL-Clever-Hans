@@ -11,10 +11,26 @@
    stayed on "exact" would be the silent-staleness failure CLAUDE.md names for the
    buyout picker's labels, on a number that carries a rank badge.
 
-   A COUNT, not a boolean: an Infeasible opponent solve keeps its estimate, so
-   "exact" alone would mislabel the one cell that is still a guess. #}
+   It branches on the count of ESTIMATES, never on the count of exact figures.
+   Reading the latter said "estimated" in the state where every figure on screen
+   is exact — all opponents done, so there is nobody to solve and the done teams'
+   finals plus BOT's optimum are all there is (measured 2026-08-18). The question
+   this label answers is "is anything here still a guess", so that is the number
+   to test.
+
+   Three states, and the middle one is why this is a count and not a boolean: an
+   Infeasible opponent keeps its estimate, and `exact` alone would mislabel the
+   one cell that is still a guess.
+
+   What it deliberately does NOT distinguish: a scan in which every solve failed
+   reads the same as never having scanned. That is honest about the figures, which
+   is what the label is for, and a fourth state would describe history rather than
+   what is on screen. The log line in `_recompute_exact_projections` is where a
+   failure is diagnosed. #}
 <span id="proj-basis"{% if basis_oob is defined and basis_oob %} hx-swap-oob="true"{% endif %} class="text-[10px] font-normal opacity-60 block">
-    {%- if standings_basis and standings_basis.exact -%}
+    {%- if standings_basis and not standings_basis.estimated -%}
+    exact
+    {%- elif standings_basis and standings_basis.exact -%}
     exact {{ standings_basis.exact }}/{{ standings_basis.total }}
     {%- else -%}
     estimated

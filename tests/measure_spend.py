@@ -24,9 +24,15 @@ by this one — and all 122 start at pick 43, when the ceiling reached the $0.5M
 floor. The $7.3M and $4.5M steps before it capped nothing, because a top-down
 draft has already sold the players they would have caught. Note the counts come
 out close, which is NOT what the reasoning that motivated this file predicted:
-the argument was that 563 of 705 players sit at the floor so most ceilings
-change nothing, and that is true right up until the ceiling itself reaches the
-floor and caps essentially everything. Right mechanism, wrong magnitude.
+the argument was that most of the pool is floor-priced so most ceilings change
+nothing, and that is true right up until the ceiling itself reaches the floor
+and caps essentially everything. Right mechanism, wrong magnitude.
+
+That argument was also quoting a wrong number — "563 of 705", copied from
+`scenarios.py`, which reproduces under no definition. Re-measured 2026-08-17:
+**534 of 705** where floor means `round(expected_price, 1) == 0.5`. The
+definition has to travel with the figure, because the count runs 0 (no player's
+expected price is exactly `MIN_SALARY`) to 604 (under $1M) depending on it.
 
 Usage:
     .venv/bin/python -m tests.measure_spend                       # live state

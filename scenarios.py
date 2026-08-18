@@ -83,7 +83,7 @@ def _drain(
     * `P > MIN_SALARY` — must make progress. A min-salary player leaves
       `spendable` UNCHANGED (0.5 of budget out, 0.5 of reserve freed), so
       without this the loop never terminates while floor-priced players remain,
-      and 563 of 705 of them are floor-priced.
+      and 534 of 705 of them are floor-priced.
 
     Never picks a player the team could not legally seat either: the
     commissioner refuses a bid that would leave a roster unfillable at
@@ -136,10 +136,18 @@ def _scenario_endgame_ceiling_binds(state: AuctionState) -> None:
       capped nothing — buying top-down removes exactly the players whose model
       price the ceiling would have capped.
     * Reserving the top 40 and draining with mid-tier depth put the ceiling back
-      at $11.4M. The price distribution is far steeper than it looks: 19 players
-      above $4M, 40 above $3M, and 563 of 705 at the $0.5M floor. Reserving 40
+      at $11.4M. The price distribution is far steeper than it looks: 20 players
+      above $4M, 36 above $3M, and **534 of 705 at the $0.5M floor** — floor
+      meaning `round(expected_price, 1) == 0.5`, which has to be stated because
+      the count swings from 0 to 604 across plausible definitions (no player's
+      expected price is exactly MIN_SALARY; 604 are under $1M). Reserving 40
       reserves everything above $3.0M, so teams filled all 24 spots with
       floor-priced depth and still had ~$20M spare.
+
+      These three numbers read 19 / 40 / 563 until 2026-08-17. Re-measured
+      against `data/players.csv`, unchanged since 2026-07-05 — so they were
+      wrong when written here on 2026-08-13, not stale. 563 reproduces under no
+      definition at all.
 
     The distribution is also why this state does not arise by accident — pool
     value is ~$632M against ~$338M of league money for ~165 open spots, so a real

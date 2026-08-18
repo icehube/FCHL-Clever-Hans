@@ -99,8 +99,9 @@ class TestEndgameCeilingBinds:
 
         Two earlier attempts produced ZERO capped rows: draining top-down removes
         exactly the players the ceiling would cap, and reserving the top 40
-        reserves everything over $3.0M (563 of 705 players sit at the floor), so
-        teams fill up on floor-priced depth and stay rich.
+        reserves everything over $3.0M (534 of 705 players sit at the floor,
+        where floor means `round(expected_price, 1) == 0.5`), so teams fill up
+        on floor-priced depth and stay rich.
 
         Measured against the DRAFT-TIME pool, not the surviving one. The first
         version of this asked whether `max(available)` was expensive, which is

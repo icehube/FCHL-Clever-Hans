@@ -275,11 +275,19 @@ def _scenario_endgame_last_goalie(state: AuctionState) -> None:
 
     Three ingredients:
 
-    1. **BOT needs a goalie at all.** Its keepers include two, so the spare goes
-       down to the minors — a real move the app offers (`POST /move-to-minors`),
+    1. **BOT needs a goalie at all.** Spares go down to the minors until one is
+       left in the crease — a real move the app offers (`POST /move-to-minors`),
        and where this league already keeps its spares: BOT's own keeper data
-       carries ten goalies down there. Measured: John Gibson, 26 points, group 3,
-       so his $0.5M stays fully on the cap and the demotion frees nothing.
+       carries ten goalies down there. Measured on today's roster: one demotion,
+       John Gibson, 26 points, group 3, so his $0.5M stays fully on the cap and
+       the demotion frees nothing.
+
+       A loop rather than a single demotion, because the count is keeper data and
+       moves every season. Measured against a doctored roster: with three keeper
+       goalies the old single demotion left BOT needing NONE, so the state was not
+       a must-have one at all and the scenario quietly stopped testing its own
+       subject; with one it demoted the last goalie, leaving a team that cannot
+       field a legal lineup at all. Both now come out at exactly one goalie short.
     2. **Exactly one spot, and a budget below the salary cap.** `_drain` to $2.5M
        spendable then `_fill` to 23 leaves BOT one seat and $3.0M — deliberately
        under MAX_SALARY, because a physical max that IS the league maximum cannot
@@ -307,12 +315,15 @@ def _scenario_endgame_last_goalie(state: AuctionState) -> None:
     bot = state.teams[MY_TEAM]
     goalies = {n for n, p in state.available_players.items() if p.position == "G"}
 
-    spare = min(
+    # One short of the position minimum, so exactly one goalie is needed. Weakest
+    # first, and the tie-break on name keeps two loads identical.
+    crease = sorted(
         (p for p in bot.roster_players if p.position == "G"),
         key=lambda p: (p.projected_points, p.name),
     )
-    spare.is_bench = True  # send_to_minors' precondition
-    bot.send_to_minors(spare.name)
+    for spare in crease[:max(0, len(crease) - (POSITION_MINIMUMS["G"] - 1))]:
+        spare.is_bench = True  # send_to_minors' precondition
+        bot.send_to_minors(spare.name)
 
     # Goalies are reserved from BOT's own buying: the point is the hole in the
     # crease, and `_drain` would happily fill it with the best one in the pool.

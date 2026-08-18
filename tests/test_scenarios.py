@@ -328,6 +328,44 @@ class TestEndgameLastGoalie:
         assert rec.action == "BID"
         assert rec.value_cap == pytest.approx(bot.physical_max_bid)
 
+    @pytest.mark.parametrize("keeper_goalies", [1, 2, 3])
+    def test_it_works_from_any_size_of_crease(self, monkeypatch, keeper_goalies):
+        """How many goalies BOT keeps is data, and it changes every season.
+
+        Today's roster has two, so a single demotion and a demote-until-one loop
+        are indistinguishable on live data — which is why this doctors the count.
+        Measured against the single-demotion version: three keeper goalies left
+        BOT needing NO goalie, so the scenario silently stopped being about a
+        must-have; one left it with an empty crease and a lineup it cannot legally
+        field. Neither failed anything, because neither can happen this season.
+        """
+        real_build = scenarios.build_initial_state
+
+        def doctored():
+            state = real_build()
+            bot = state.teams[MY_TEAM]
+            crease = [p for p in bot.roster_players if p.position == "G"]
+            while len(crease) > keeper_goalies:
+                spare = crease.pop()
+                spare.is_bench = True
+                bot.send_to_minors(spare.name)
+            while len(crease) < keeper_goalies:
+                spare = next(
+                    (p for p in bot.minor_players if p.position == "G"), None,
+                )
+                assert spare is not None, "BOT has no minor-league goalie to recall"
+                bot.recall_from_minors(spare.name)
+                crease.append(spare)
+            return state
+
+        monkeypatch.setattr(scenarios, "build_initial_state", doctored)
+        bot = scenarios.load(LAST_GOALIE).teams[MY_TEAM]
+        assert bot.position_counts["G"] == 1, (
+            f"{keeper_goalies} keeper goalies left {bot.position_counts['G']} in "
+            f"the crease; one short of the minimum is the whole scenario"
+        )
+        assert bot.roster_needs == {"F": 0, "D": 0, "G": 1}, bot.roster_needs
+
     def test_every_opponent_can_still_be_solved(self):
         """Their creases are filled on purpose, and this is why.
 

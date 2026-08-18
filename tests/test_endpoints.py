@@ -1790,6 +1790,42 @@ class TestRoundThreeMutators:
         )
         assert restored_acquired == before_acquired
 
+    def test_a_scenario_that_cannot_build_says_so_and_changes_nothing(
+        self, client, monkeypatch, caplog,
+    ):
+        """`_fill` raises when the pool cannot supply what a construction asks for.
+
+        A refreshed `players.csv` is the realistic cause, and unhandled it is a
+        500 — on which htmx swaps nothing, so the operator gets a click that
+        appears to do nothing at all. The live draft has to survive it too: every
+        mutation in the endpoint happens after `scenarios.load` returns, and this
+        is the test that keeps it that way.
+        """
+        import main
+        import scenarios
+
+        client.post("/reset")
+        before = client.get("/state").json()
+        name = sorted(scenarios.SCENARIOS)[0]
+
+        def explode(_name):
+            raise RuntimeError("SRL stalled at 19 of 23")
+
+        monkeypatch.setattr(scenarios, "load", explode)
+        with caplog.at_level("ERROR"):
+            r = client.post("/load-scenario", data={"name": name})
+
+        assert r.status_code == 200, "a broken scenario must not 500 at the operator"
+        toast = toast_of(r)
+        assert toast.get("type") == "error", toast
+        assert "stalled at 19 of 23" in toast.get("message", ""), (
+            f"the toast has to name what went wrong, got {toast}"
+        )
+        assert "failed to build" in caplog.text, "and it has to be logged"
+        assert client.get("/state").json() == before, (
+            "the live draft must be exactly as it was"
+        )
+
     def test_load_scenario_unknown(self, client):
         client.post("/reset")
         before = client.get("/state").json()

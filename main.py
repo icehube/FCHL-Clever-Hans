@@ -1453,6 +1453,23 @@ async def load_scenario(request: Request, name: str = Form(...)):
             _render(request, "partials/all_panels.html"),
             f"Unknown scenario: {name}", "error",
         )
+    except Exception as e:
+        # A scenario that cannot BUILD is a different failure from one that does
+        # not exist, and it needs its own answer: `_fill` raises when the pool
+        # cannot supply what a construction asks for, which is exactly what a
+        # refreshed `players.csv` could cause. Unhandled it is a 500, and htmx
+        # swaps nothing on a 500 — so the operator gets a click that silently did
+        # nothing, the same class of bug as the no-feedback scan button.
+        #
+        # Safe to report and carry on precisely because nothing has moved yet:
+        # every mutation below happens after `load` returns, so the live draft is
+        # untouched. Logged as well as toasted, since a toast auto-dismisses and
+        # the traceback is what says which construction step gave up.
+        logging.exception("Scenario %s failed to build", name)
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            f"Scenario {name} failed to build: {type(e).__name__}: {e}", "error",
+        )
     new_state._snapshots.append(prior)
     auction_state = new_state
     model_prices = predict_all_prices(auction_state.available_players, model_params)

@@ -17,7 +17,11 @@
    not whose roster it is. #}
 <div id="buyout-scan"{% if scan_oob is defined and scan_oob %} hx-swap-oob="true"{% endif %}>
     {% if buyout_dots_on_screen %}
-    <button hx-get="/buyout-indicators" hx-swap="none" class="btn btn-xs btn-warning mb-2">
+    {# hx-disabled-elt for the same reason Solve Standings carries it: ~15 solves
+       is roughly two seconds with no styled indicator anywhere in the app, so the
+       click is invisible and a second one doubles the work. #}
+    <button hx-get="/buyout-indicators" hx-swap="none" hx-disabled-elt="this"
+            class="btn btn-xs btn-warning mb-2">
         Scan Roster for Buyout Opportunities
     </button>
     {% endif %}

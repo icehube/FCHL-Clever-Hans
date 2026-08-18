@@ -8,10 +8,18 @@
        `hx-swap="none"` — the response is out-of-band fragments only, exactly
        like the buyout Scan button. Ungated, because unlike the buyout dots every
        target it swaps (one span per team, plus the basis marker) renders
-       unconditionally, so it can never fire into an empty document. #}
+       unconditionally, so it can never fire into an empty document.
+
+       `hx-disabled-elt="this"` is the only feedback this click has. Measured
+       1262ms on a fresh league, and the app styles neither `.htmx-request` nor
+       an `htmx-indicator`, so without it the page is identical to not having
+       clicked for over a second — and a second click starts a second ten-solve
+       run. htmx 1.9.10 sets `disabled=""` for the request's duration
+       (`htmx-1.9.10.min.js`, function `sr`), which DaisyUI already greys. #}
     <div class="flex items-center justify-between gap-2 mb-2">
         <h2 class="card-title text-accent text-base">League State</h2>
-        <button hx-get="/solve-standings" hx-swap="none" class="btn btn-xs btn-accent btn-outline"
+        <button hx-get="/solve-standings" hx-swap="none" hx-disabled-elt="this"
+                class="btn btn-xs btn-accent btn-outline"
                 title="Replace every opponent's estimated Proj with a real optimizer solve (~1s). Any pick returns them to estimates.">
             Solve Standings
         </button>

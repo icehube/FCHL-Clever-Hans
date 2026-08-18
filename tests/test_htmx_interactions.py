@@ -510,3 +510,51 @@ class TestShortcutsModal:
         """
         page = client.get("/").text
         assert page.index('id="shortcuts-modal"') < page.index('id="app"')
+
+
+class TestTheSlowScansDisableTheirOwnButton:
+    """A multi-solve click has to look like something is happening.
+
+    The app styles neither `.htmx-request` nor an `htmx-indicator` — checked
+    across `static/style.css` and `base.html` — so for the duration of one of
+    these requests the page is byte-identical to not having clicked. Measured
+    1262ms for Solve Standings on a fresh league and ~2s for the buyout scan's
+    ~15 solves. A second click during that window starts the whole thing again.
+
+    `hx-disabled-elt="this"` fixes both halves with one attribute: htmx 1.9.10
+    sets `disabled=""` on the element for the request's duration
+    (`htmx-1.9.10.min.js`, function `sr`), which DaisyUI already greys out, and a
+    disabled button cannot be clicked twice.
+
+    Both buttons, deliberately, and asserted as a rule over the pair rather than
+    one test each: one of them greying while the other sits inert is a worse
+    inconsistency than neither doing it.
+    """
+
+    SLOW_SCANS = ("/solve-standings", "/buyout-indicators")
+
+    def _button(self, html: str, path: str) -> str:
+        found = re.search(rf"<button[^>]*hx-get=\"{re.escape(path)}\"[^>]*>", html)
+        assert found, f"no button in GET / fires {path} — did the markup change?"
+        return found.group(0)
+
+    def test_every_multi_solve_button_disables_itself(self, client):
+        page = client.get("/").text
+        naked = [p for p in self.SLOW_SCANS
+                 if 'hx-disabled-elt="this"' not in self._button(page, p)]
+        assert not naked, (
+            f"{naked} run several MILP solves with no feedback and no guard "
+            f"against a second click — add hx-disabled-elt=\"this\""
+        )
+
+    def test_the_pair_is_still_the_right_pair(self, client):
+        """Guards the list itself: a third scan button must join it or be justified.
+
+        Any `hx-get` in the page whose endpoint runs more than one solve belongs
+        above. This cannot detect that from markup, so it does the next best
+        thing — it fails if either named path stops appearing, which is how the
+        list above would quietly stop checking anything.
+        """
+        page = client.get("/").text
+        for path in self.SLOW_SCANS:
+            self._button(page, path)

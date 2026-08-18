@@ -1,3 +1,4 @@
+{% from "macros/standings.html" import proj_figure %}
 <section class="card bg-base-200 shadow-md p-4" id="league-state">
     {# The button sits in the header, not in the table, for the reason the
        min-content note below spells out: all 12 columns are floored by their own
@@ -107,13 +108,12 @@
             <td>${{ "%.1f"|format(t.physical_max_bid) }}M</td>
             {% set proj = projections.get(code, {}) if projections is defined else {} %}
             <td>{{ proj.get("current", 0) }}</td>
-            {# The figure lives in a span so GET /solve-standings can swap it:
-               a `<td>` has no table context at the top level of a response, and
-               the badge has to move with the number because a solve changes
-               everyone's rank. Kept character-for-character in step with
-               standings_cells.html — htmx matches the target by id, so the two
-               only agree if they say the same thing. #}
-            <td class="font-semibold {% if code == my_team %}text-info{% endif %}"><span id="proj-{{ code }}">{{ proj.get("projected", 0) }}{% if code == my_team and proj.get("rank") %} <span class="badge badge-info badge-xs">#{{ proj.rank }}</span>{% endif %}</span></td>
+            {# Through the macro, which standings_cells.html also calls: the
+               figure lives in a span so GET /solve-standings can swap it (a
+               `<td>` has no table context at the top level of a response), and
+               htmx matches that swap by id, so one definition is the only thing
+               that guarantees the two agree. #}
+            <td class="font-semibold {% if code == my_team %}text-info{% endif %}">{{ proj_figure(code, proj, my_team) }}</td>
             <td>
                 <form hx-post="/team-done" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ code }}">

@@ -1,0 +1,17 @@
+{# The League State Proj figure, defined once because two templates render it.
+
+   `league_state.html` renders it inline inside its `<td>`; `standings_cells.html`
+   renders it with `hx-swap-oob` as the response to GET /solve-standings. htmx
+   matches that swap by **id**, so the two have to agree character for character
+   or the scan silently updates nothing — the same hazard the `dom_id` filter
+   exists for on the buyout dots, where only the id was shared and the markup
+   stayed duplicated in two files.
+
+   Three things travel together and that is why this is one macro rather than
+   three expressions: the id, the figure, and the rank badge — which renders for
+   BOT alone, and has to move WITH the number, because a solve changes every
+   team's rank. Swapping the figure without the badge leaves an authoritative
+   "#2" describing figures that are no longer there. #}
+{% macro proj_figure(code, proj, my_team, oob=false) -%}
+<span id="proj-{{ code }}"{% if oob %} hx-swap-oob="true"{% endif %}>{{ proj.get("projected", 0) }}{% if code == my_team and proj.get("rank") %} <span class="badge badge-info badge-xs">#{{ proj.rank }}</span>{% endif %}</span>
+{%- endmacro %}

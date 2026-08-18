@@ -34,6 +34,14 @@ rediscover the same non-problem.
 
   Two mutants, each verified to die and each killed by `test_first_bind_is_a_pick_ordinal_not_an_index_into_the_priced_subset` specifically: back to 0-based, and a 1-based ordinal over the *priced* subset rather than all picks. The second is the one a cross-check cannot catch — both synthetic drafts have zero unpriced records, so it agrees with the instrument either way.
 
+- **`measure_spend.py` gave a raw traceback on exactly the file it exists to open.** `report()` read the state unguarded, and all four failure modes were reproduced rather than assumed: a truncated write and a non-JSON file raise `json.JSONDecodeError`; a hand-edited or half-written log parses fine and then raises **`KeyError: 'model_price'`**, because `state._transaction_from_dict` reads nine keys positionally; and a directory argument raises `IsADirectoryError`. That last one and an unreadable file are both `OSError`, so one guard covers them.
+
+  Why it matters more than a tidy-up: the app **renames a state it cannot parse to `.corrupt` instead of deleting it**, and the reason anyone opens a `.corrupt` file is to find out what the draft contained. The failure that brings people to this reader was the one failure the reader could not survive. Fixed the way `_load_saved_state` already handles the same class of problem — degrade, don't die — printing the path and the exception type, since the whole point of the CLI argument is that the file may not be the live state.
+
+  Four tests over `report()` with `capsys` (`TestTheReportSurvivesWhatPeopleActuallyOpen`), and five mutants verified dead, each at the test that claims it: guard narrowed to `ValueError` → the missing-key test alone; guard deleted → the corrupt and missing-key tests; message no longer naming the file or cause → the same two; the empty-log branch deleted from `report()` → the new empty-log test alone; the `path.exists()` check deleted → the missing-file test. That last mutant is the interesting one — with the new guard in place its failure mode *degrades* from a traceback to a less useful message (`FileNotFoundError` is an `OSError`), which is exactly the kind of quiet regression a guard invites, and the test still catches it.
+
+  The empty-log case now has **two** tests that look redundant and are not: `test_an_empty_log_reports_no_picks_rather_than_zeros` fails if `summarize` starts returning zero-filled keys, the new `capsys` one fails if `report` stops branching on them. A refactor can do either without the other, and only one test notices each. Also dropped the `f` prefix from four placeholder-less f-strings (F541).
+
 
 ## [2026-08-17b]
 
@@ -56,7 +64,7 @@ rediscover the same non-problem.
 
   Three deliberate constraints, each load-bearing: it **never imports `main`**, so unlike the other two instruments it cannot touch a live draft even in principle rather than relying on a temp-dir redirect; it parses with `state._transaction_from_dict` instead of hand-copying nine key names (the hazard CLAUDE.md names for the backfills); and it **allowlists `transaction_type == "draft"`**, because a trade's `salary` is not a clearing price and `/trade-between` writes `"SRL→MAC"` into `team_code`, which would attribute spend to a team that does not exist. Records with `model_price <= 0` are excluded from the ceiling statistics and the count reported — `_log_transaction` defaults both prices to `0`, so a zero is missing data, and `market_price=0 < model_price=5` would otherwise read as a bind.
 
-  Unlike `measure_layout.py` and `measure_ceiling.py`, the logic is a pure `summarize()` with **a real pytest test** (`tests/test_measure_spend.py`, 5 tests, 6 mutations verified). That split is deliberate: `measure_layout.py` could not see a stale selector for two days, and `measure_ceiling.py`'s numbers now appear in four documents unchecked, both because their logic only exists inside a `__main__` nothing runs.
+  Unlike `measure_layout.py` and `measure_ceiling.py`, the logic is a pure `summarize()` with **a real pytest test** (`tests/test_measure_spend.py` — 6 tests over `summarize()` with 6 mutations verified; this entry said 5, miscounted, and the file is at 10 after the `report()` guard above). That split is deliberate: `measure_layout.py` could not see a stale selector for two days, and `measure_ceiling.py`'s numbers now appear in four documents unchecked, both because their logic only exists inside a `__main__` nothing runs.
 
 
 ## [2026-08-17]

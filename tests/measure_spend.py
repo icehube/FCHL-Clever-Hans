@@ -160,7 +160,24 @@ def report(path: Path) -> None:
         print(f"no state file at {path}")
         return
 
-    s = summarize(load_records(path))
+    # A `.corrupt` state is EXACTLY what someone points this at: the app renames
+    # a state file it cannot parse rather than deleting it (`lifespan`), and the
+    # reason to open one is to find out what the draft contained. So the failure
+    # this has to survive is the failure that brings people here. Same stance as
+    # `_load_saved_state` — degrading beats a traceback — with the file named,
+    # since the whole point of the argument is that it may not be the live state.
+    #
+    # KeyError is in the list because `_transaction_from_dict` reads nine keys
+    # positionally: a truncated or hand-edited log raises `KeyError:
+    # 'model_price'` rather than anything json-shaped. OSError covers the
+    # directory-instead-of-file slip (IsADirectoryError) and an unreadable file.
+    try:
+        records = load_records(path)
+    except (json.JSONDecodeError, KeyError, OSError) as exc:
+        print(f"could not read {path}: {type(exc).__name__}: {exc}")
+        return
+
+    s = summarize(records)
     print(f"\n{'=' * 74}\n{path}\n{'=' * 74}")
 
     if not s["picks"]:
@@ -178,23 +195,23 @@ def report(path: Path) -> None:
     if s["unpriced"]:
         print(f"  picks with no model $ : {s['unpriced']} (excluded from the ceiling stats)")
 
-    print(f"\n  --- did Layer 2 change a planning price? ---")
+    print("\n  --- did Layer 2 change a planning price? ---")
     first = "never" if s["first_bind"] is None else f"pick {s['first_bind']}"
     print(f"  market < model        : {s['ceiling_changed_a_price']}/{s['priced']}"
           f"  (first: {first})")
     print(f"  largest single cut    : ${s['bind_gap_max']}M")
     print(f"  total cut from model  : ${s['bind_gap_total']}M")
 
-    print(f"\n  --- what buyers actually paid ---")
+    print("\n  --- what buyers actually paid ---")
     print(f"  above the plan        : {s['paid_over_plan']}/{s['priced']} picks")
     print(f"  salary - market price : {s['paid_vs_plan_mean']:+.2f}M mean")
     print(f"  salary - model price  : {s['paid_vs_model_mean']:+.2f}M mean,"
           f" {s['paid_vs_model_abs']:.2f}M mean absolute")
 
-    print(f"\n  --- spend curve (cumulative $M by pick) ---")
+    print("\n  --- spend curve (cumulative $M by pick) ---")
     print("  " + "  ".join(f"{n}:{v}" for n, v in s["curve"]))
 
-    print(f"\n  --- by team ---")
+    print("\n  --- by team ---")
     print("  " + "  ".join(f"{k} ${v}M" for k, v in s["by_team"].items()))
 
 

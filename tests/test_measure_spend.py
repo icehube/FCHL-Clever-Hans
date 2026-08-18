@@ -11,8 +11,11 @@ is about arithmetic over a log, so a fixture would add live-data coupling and
 buy nothing. Nothing here reads `players.csv`.
 """
 
+import json
+from pathlib import Path
+
 from state import TransactionRecord
-from tests.measure_spend import summarize
+from tests.measure_spend import report, summarize
 
 
 def _rec(
@@ -140,3 +143,79 @@ class TestSummarizeCountsTheRightRecords:
             "sum() of an empty generator is an int, and the report formats this "
             "with a bare {} so the type reaches the screen as $0M"
         )
+
+
+def _state_file(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "auction_state.json"
+    path.write_text(body)
+    return path
+
+
+class TestTheReportSurvivesWhatPeopleActuallyOpen:
+    """`report()` reads a file off disk, so its failures are file failures.
+
+    Every case here is a file someone plausibly points this at. The one that
+    motivated the guard: the app renames a state it cannot parse to `.corrupt`
+    instead of deleting it, and the reason to open a `.corrupt` file is to find
+    out what the draft contained — so the failure that brings people to this tool
+    was the one failure it could not survive.
+
+    These go through `report()` rather than `summarize()` deliberately. The
+    summary is pure and covered above; what is being pinned here is that the
+    process prints something usable and returns, which is a property of the CLI.
+    """
+
+    def test_an_empty_log_says_so_instead_of_printing_a_table_of_zeros(
+        self, tmp_path, capsys
+    ):
+        """The behaviour `summarize`'s two-shape return exists to produce.
+
+        The shape assertion above and this one catch different things: that one
+        fails if the dict starts carrying zeroed keys, this one fails if the
+        report stops branching on them. Neither implies the other — a refactor
+        could zero-fill the dict and keep the guard, or keep the dict and drop
+        the guard, and only one test notices each.
+        """
+        report(_state_file(tmp_path, '{"transaction_log": []}'))
+        out = capsys.readouterr().out
+        assert "nothing to measure" in out, (
+            f"an empty log did not say so; the report printed:\n{out}"
+        )
+        assert "league spend" not in out, (
+            f"the report printed its spend table for a log with no picks, so a "
+            f"fresh install reads as a draft that spent $0.0M:\n{out}"
+        )
+
+    def test_a_corrupt_state_names_the_file_rather_than_raising(self, tmp_path, capsys):
+        """A truncated write is what `.corrupt` files usually are."""
+        path = _state_file(tmp_path, '{"transaction_log": [{"player_name": "X"')
+        report(path)
+        out = capsys.readouterr().out
+        assert str(path) in out and "JSONDecodeError" in out, (
+            f"a corrupt state must name the file and what went wrong, got:\n{out}"
+        )
+
+    def test_a_record_missing_a_price_key_is_reported_rather_than_raising(
+        self, tmp_path, capsys
+    ):
+        """Not a JSON error — `_transaction_from_dict` reads nine keys positionally.
+
+        A hand-edited or half-written log parses fine and then raises
+        `KeyError: 'model_price'`, which is why the guard cannot be
+        `json.JSONDecodeError` alone.
+        """
+        record = {
+            "player_name": "X", "position": "F", "team_code": "BOT",
+            "salary": 1.0, "timestamp": "t", "transaction_type": "draft",
+        }
+        path = _state_file(tmp_path, json.dumps({"transaction_log": [record]}))
+        report(path)
+        out = capsys.readouterr().out
+        assert "KeyError" in out and "model_price" in out, (
+            f"a log record missing a price must be reported, not raised:\n{out}"
+        )
+
+    def test_a_missing_file_is_not_an_error_at_all(self, tmp_path, capsys):
+        """The default path is the operator's live state, which may not exist yet."""
+        report(tmp_path / "nope.json")
+        assert "no state file at" in capsys.readouterr().out

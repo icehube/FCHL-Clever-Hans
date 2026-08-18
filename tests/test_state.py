@@ -83,6 +83,52 @@ class TestPlayerOnRoster:
         assert p.counts_on_cap is False
 
 
+class TestAPoolPlayerBecomingARosterPlayer:
+    """`PlayerOnRoster.from_pool` — the RFA conversion is the whole point.
+
+    `counts_on_cap` reads the group and MINOR_CAP_GROUPS is {"2", "3"}, so a
+    sold RFA left on his pool group costs a team NOTHING while sitting in the
+    minors. /assign converted inline and scenario setup did not convert at all,
+    which was harmless only while no scenario put a purchase down there.
+    """
+
+    def _pool_player(self, group: str) -> Player:
+        return Player(
+            name="Pool Guy", position="F", group=group, nhl_team="TOR",
+            age=27, projected_points=60, is_rfa=group.startswith("RFA"),
+            salary=1.0, team_probability=5.0,
+        )
+
+    @pytest.mark.parametrize("pool_group,expected", [
+        ("RFA1", "2"),
+        ("RFA2", "3"),
+        # Not an RFA: a UFA's group travels unchanged. "2" and "3" are already
+        # the signed groups, and A-E are minor-league contracts nobody bids on.
+        ("2", "2"),
+        ("3", "3"),
+        ("C", "C"),
+    ])
+    def test_the_group_a_sale_signs_him_to(self, pool_group, expected):
+        p = PlayerOnRoster.from_pool(self._pool_player(pool_group), 4.2)
+        assert p.group == expected
+
+    def test_an_rfa_in_the_minors_still_costs_the_cap(self):
+        """The failure the conversion prevents, stated as the consequence."""
+        p = PlayerOnRoster.from_pool(self._pool_player("RFA1"), 4.2)
+        p.is_minor = True
+        assert p.counts_on_cap is True
+
+    def test_the_rest_of_him_survives_the_trip(self):
+        p = PlayerOnRoster.from_pool(self._pool_player("RFA1"), 4.2)
+        assert (p.name, p.position, p.nhl_team, p.projected_points) == \
+               ("Pool Guy", "F", "TOR", 60)
+        assert p.salary == 4.2, "the sale price, not his old salary"
+
+    def test_a_purchase_is_not_a_keeper(self):
+        """is_keeper is provenance — `team_panel.html` colours a row on it."""
+        assert PlayerOnRoster.from_pool(self._pool_player("UFA"), 0.5).is_keeper is False
+
+
 class TestTeamStateSalary:
     def test_total_salary_keepers_only(self):
         keepers = [
@@ -738,6 +784,34 @@ class TestMinorsMovement:
         assert team.acquired_players == []
         assert len(team.minor_players) == 1
         assert team.minor_players[0].is_minor is True
+
+    def test_add_minor_player_lands_benched_in_the_minors(self):
+        """The door scenario setup uses: straight down, with spots still open.
+
+        add_acquired_player would seat him on the roster instead — it only
+        routes to the minors when the roster is FULL. Benched on arrival for
+        the same reason send_to_minors demands it: a later recall must not
+        displace a starter.
+        """
+        team = _make_team()
+        team.add_minor_player(_make_player_on_roster(name="Depth"))
+        assert team.total_spots_remaining == ROSTER_SIZE, "no active spot taken"
+        assert [p.name for p in team.minor_players] == ["Depth"]
+        assert team.minor_players[0].is_minor is True
+        assert team.minor_players[0].is_bench is True
+
+    def test_a_full_roster_routes_through_the_same_door(self):
+        """add_acquired_player's overflow branch delegates rather than repeating.
+
+        Asserted through the flags, which is what the two paths have to agree
+        on: a copy that forgot is_bench would pass "he is in the minors".
+        """
+        team = _make_team(keepers=[
+            _make_player_on_roster(name=f"P{i}", salary=0.5) for i in range(ROSTER_SIZE)
+        ])
+        assert team.add_acquired_player(_make_player_on_roster(name="Extra")) is True
+        assert [p.name for p in team.minor_players] == ["Extra"]
+        assert (team.minor_players[0].is_minor, team.minor_players[0].is_bench) == (True, True)
 
     def test_recall_from_minors(self):
         p = _make_player_on_roster(name="Demoted", group="A", is_minor=True)

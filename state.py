@@ -98,6 +98,34 @@ class PlayerOnRoster:
         """
         return self.group in BUYOUT_ELIGIBLE_GROUPS
 
+    @classmethod
+    def from_pool(cls, player: Player, salary: float) -> "PlayerOnRoster":
+        """A pool player, bought at `salary`. The one door into a roster.
+
+        Carries the RFA group conversion the CBA requires on a sale: an RFA1
+        signs to group 2 and an RFA2 to group 3. That is not cosmetic —
+        `counts_on_cap` reads the group, and MINOR_CAP_GROUPS is {"2", "3"},
+        so a player left on his pool group would sit in the minors costing
+        nothing against the cap. /assign did this inline and scenario setup did
+        not do it at all, which was harmless only while scenarios never put a
+        purchase in the minors.
+
+        is_keeper stays False by construction: a purchase is not provenance.
+        """
+        group = player.group
+        if group == "RFA1":
+            group = "2"
+        elif group == "RFA2":
+            group = "3"
+        return cls(
+            name=player.name,
+            position=player.position,
+            group=group,
+            salary=salary,
+            projected_points=player.projected_points,
+            nhl_team=player.nhl_team,
+        )
+
 
 def _floor_to_increment(amount: float) -> float:
     """Largest committable amount not exceeding `amount`.
@@ -290,17 +318,30 @@ class TeamState:
         return value; the rest can ignore it.
         """
         if self.roster_count >= ROSTER_SIZE:
-            player.is_minor = True
-            # Benched on arrival, mirroring send_to_minors' precondition, so a
-            # later recall lands on the bench instead of displacing a starter.
-            player.is_bench = True
-            self.minor_players.append(player)
-            self._invalidate_cache()
+            self.add_minor_player(player)
             return True
 
         self.acquired_players.append(player)
         self._invalidate_cache()
         return False
+
+    def add_minor_player(self, player: PlayerOnRoster) -> None:
+        """Seat a player straight in the minors, bypassing the active roster.
+
+        The overflow branch of add_acquired_player is one caller; scenario setup
+        is the other, and it needs this door because it stashes depth on teams
+        that still have active spots — where add_acquired_player would seat them
+        on the roster instead. Without it a caller has to reach through
+        `_invalidate_cache`, and the flags below are exactly the sort of thing
+        that gets forgotten one copy at a time.
+
+        Benched on arrival, mirroring send_to_minors' precondition, so a later
+        recall lands on the bench instead of displacing a starter.
+        """
+        player.is_minor = True
+        player.is_bench = True
+        self.minor_players.append(player)
+        self._invalidate_cache()
 
     def send_to_minors(self, player_name: str) -> None:
         """Move an active-roster player to minors. Player must be benched first.

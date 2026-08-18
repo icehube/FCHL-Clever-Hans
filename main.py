@@ -972,21 +972,9 @@ async def assign_player(
     auction_state.save_snapshot()
     p = auction_state.available_players.pop(player)
 
-    # RFA group conversion: RFA1→GROUP 2, RFA2→GROUP 3
-    group = p.group
-    if group == "RFA1":
-        group = "2"
-    elif group == "RFA2":
-        group = "3"
-
-    roster_player = PlayerOnRoster(
-        name=p.name,
-        position=p.position,
-        group=group,
-        salary=salary,
-        projected_points=p.projected_points,
-        nhl_team=p.nhl_team,
-    )
+    # Including the RFA group conversion the sale requires — see
+    # PlayerOnRoster.from_pool, which is where that rule lives now.
+    roster_player = PlayerOnRoster.from_pool(p, salary)
     to_minors = auction_state.teams[team].add_acquired_player(roster_player)
     # The sale still succeeds — refusing it mid-auction would cost clicks at the
     # worst moment — but the operator has to be told the player went down.

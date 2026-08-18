@@ -106,7 +106,13 @@ def _fill(
     the only sign was a physical max that came out right anyway.
 
     `room` keeps the commissioner's reserve intact (a bid may never leave a team
-    unable to fill its roster at MIN_SALARY), the same guard `_drain` uses.
+    unable to fill its roster at MIN_SALARY), the same guard `_drain` uses. It
+    cannot bind on either scenario and is not meant to: a cheapest-first fill
+    picks a floor-priced player, the reserve rule guarantees `room >= MIN_SALARY`,
+    and deleting the condition entirely fails no test (measured). It earns its
+    place at the other end — when `positions` narrows the choice to a position
+    whose cheap end has been sold, it turns "seat him anyway and break the
+    reserve" into the RuntimeError below.
 
     Raises RuntimeError rather than returning short: a scenario that quietly
     builds a smaller roster than it says produces test failures three assertions
@@ -307,9 +313,18 @@ def _scenario_endgame_last_goalie(state: AuctionState) -> None:
     What this scenario deliberately does NOT do is drain the opponents. They stay
     rich, the ceiling holds at MAX_SALARY and every `stop_status` reads `at_cap`
     — `endgame-ceiling-binds` owns that half, and it needed three ingredients of
-    its own to get there. Their creases do get filled, which is not decoration:
-    an opponent still needing goalies with none in reach solves Infeasible, and
-    the League State projection would silently fall back to its estimate for it.
+    its own to get there.
+
+    Why the goalies go onto opponents' rosters rather than all into their minors:
+    it is about the state being READABLE, not about solvability. A first draft of
+    this docstring claimed an opponent left needing goalies would solve Infeasible
+    and lose its exact League State projection — that is false here and the
+    mutation proves it. Stripping the crease-filling leaves every opponent Optimal,
+    because they are rich and ten goalies priced $3.2M-$7.7M are still on the
+    board: unaffordable to BOT, pocket change to a team with $20M. What the
+    filling buys is a league that looks like a league on screen — three in the
+    crease each, the classic shape — rather than ten teams carrying one goalie and
+    six in the minors.
     """
     price = _model_price(state)
     bot = state.teams[MY_TEAM]

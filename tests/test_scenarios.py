@@ -8,7 +8,15 @@ import pytest
 import market
 import optimizer
 import scenarios
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM, ROSTER_SIZE, SALARY_INCREMENT
+from config import (
+    BACKUP_TARGETS,
+    MAX_SALARY,
+    MIN_SALARY,
+    MY_TEAM,
+    POSITION_MINIMUMS,
+    ROSTER_SIZE,
+    SALARY_INCREMENT,
+)
 from data_loader import build_initial_state
 from price_model import load_model_params, predict_all_prices
 
@@ -366,13 +374,41 @@ class TestEndgameLastGoalie:
         )
         assert bot.roster_needs == {"F": 0, "D": 0, "G": 1}, bot.roster_needs
 
-    def test_every_opponent_can_still_be_solved(self):
-        """Their creases are filled on purpose, and this is why.
+    def test_every_opponent_gets_its_crease_filled(self):
+        """The shape the scenario claims, asserted directly.
 
-        An opponent still needing goalies with none in reach solves Infeasible,
-        and `main._recompute_exact_projections` then keeps its ESTIMATE — so the
-        League State Proj column would quietly stop being exact for that team on
-        a scenario that has nothing to do with projections.
+        Indirectly was not enough. This started life as "every opponent's MILP
+        still solves", on the theory that a team left needing goalies would go
+        Infeasible — and deleting the crease-filling altogether failed NOTHING,
+        because these opponents are rich and ten goalies are still on the board at
+        $3.2M-$7.7M. Unaffordable to BOT is pocket change to a team with $20M. The
+        filling is about the state being readable, so read it.
+        """
+        state = scenarios.load(LAST_GOALIE)
+        crease = {
+            code: sum(1 for p in team.roster_players if p.position == "G")
+            for code, team in state.teams.items()
+            if code != MY_TEAM
+        }
+        expected = POSITION_MINIMUMS["G"] + BACKUP_TARGETS["G"]
+        assert set(crease.values()) == {expected}, (
+            f"goalies per opponent: {crease} — every rival should carry "
+            f"{expected}, the 14/7/3 shape"
+        )
+
+    def test_every_opponent_can_still_be_solved(self):
+        """A loadable scenario must not degrade a panel to floor values.
+
+        `main._recompute_exact_projections` drops an Infeasible team back to its
+        ESTIMATE, and BOT's own advice falls back to floor values when its MILP
+        cannot solve — so a scenario that leaves a team unsolvable is worse than
+        `/reset` rather than better.
+
+        This one holds for a boring reason today (nobody is short of anything they
+        can afford) and it did not catch the crease-filling being removed, which is
+        what the test above is for. What it does guard is a future construction
+        that strips a POSITION out of the pool while teams still need it — the trap
+        this scenario walks right past, since it removes 53 of 64 goalies.
         """
         state = scenarios.load(LAST_GOALIE)
         _, live, _ = _priced(state)

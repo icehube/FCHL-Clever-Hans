@@ -267,6 +267,14 @@ doesn't fail the test, either the assertion is wrong or the test is aimed at the
 wrong operation — the stress ownership invariant could not fail under `/assign`
 at all, and only became real once it also ran after `/undo`.
 
+**A mutation that applied to nothing is not a passing test.** A scripted mutant
+whose anchor missed — shell escaping, a wrapped line, indentation one level off —
+runs the suite against the *unmutated* file and prints green, which reads exactly
+like coverage. It has happened four times here (2026-08-17, 2026-08-18), each
+time on a multi-line anchor. Assert the patch replaced **exactly one** site
+before running the suite, and be suspicious of any mutant that dies in no test at
+all: the likely explanation is that it was never applied.
+
 ## Code conventions
 
 - Python 3.12, type hints on signatures

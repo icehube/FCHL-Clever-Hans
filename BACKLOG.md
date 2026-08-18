@@ -211,7 +211,7 @@ class of thing from the 157px the old select clipped silently.
 
 ### Testing
 
-- **More scenarios.** Extend the pre-baked set behind `POST /load-scenario`. `endgame-ceiling-binds` landed 2026-08-13 (most teams done, ceiling binding at ~$2.8M, stars unsold) and immediately paid for itself twice — it placement-checked the `tooltip-left` that no fresh state can render, and it surfaced the done-team projection bug. Still worth covering: last-goalie endgame, drained-budget late draft, a cap-rich team with a full roster (now a live bidder as of `4dc59da` — a scenario would let you see its effect on ceilings rather than trusting the unit tests), and bidding down to a single remaining bidder.
+- **More scenarios.** Extend the pre-baked set behind `POST /load-scenario`. Three have landed: `endgame-ceiling-binds` 2026-08-13 (most teams done, ceiling binding, stars unsold), and `endgame-last-goalie` plus `endgame-sole-bidder` 2026-08-18 — see `CHANGELOG.md` for what each measured. Still worth covering: **a cap-rich team with a full roster** (a live bidder as of `4dc59da` — a scenario would let you see its effect on ceilings rather than trusting the unit tests; note `endgame-sole-bidder` makes ten teams full and *broke*, which is the opposite case and cannot be folded into it, since a rich full roster is a live bidder and destroys that scenario's premise), and a **drained-budget late draft** in which the money is gone but the rosters are not yet full — the state between a fresh reset and the two endgames, where the ceiling binds mid-range rather than at the floor.
 
 ### Performance
 

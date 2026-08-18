@@ -1002,7 +1002,13 @@ class TestTooltipsStayInsideTheirPanel:
             "Worth up to (bid panel)": "HARD LIMIT",
             "Marginal (bid panel)": "What he adds to YOUR optimal roster",
             "Sigma (price chart)": "How SPREAD OUT",
-            "Proj (league table)": "Computed two ways",
+            # Was "Computed two ways" until 2026-08-17, when the tooltip was
+            # rewritten for GET /solve-standings. Anchored on the mechanism
+            # rather than on a turn of phrase: the two figures being computed
+            # differently is now the DEFAULT rather than the whole story, and
+            # this fragment goes away only if the tooltip stops explaining how
+            # to make them comparable.
+            "Proj (league table)": "Solve Standings",
             # The app's only `tooltip-left`, and the reason the endgame scenario
             # is in STATES. It renders per CAPPED row, so on a fresh state it
             # never renders at all and this suite measured 0 of them until

@@ -3138,3 +3138,235 @@ class TestEverySortableColumnCanActuallySort:
         assert ".textContent" not in sort_body, (
             "sortTable reads textContent directly again, bypassing the fallback"
         )
+
+
+class TestExactStandingsOnDemand:
+    """`GET /solve-standings` replaces the Proj estimates with real MILP optima.
+
+    The estimate in `_context` exists because 11 solves per action is
+    unaffordable, and it cannot be cheaply improved — measured 2026-08-17, three
+    budget-aware replacements were all WORSE (mean |err| 94 against 147/176/401),
+    because greedy-by-points spends the budget on one star and floors the rest.
+    So the only thing better than the estimate is the solve, and the solve has to
+    be asked for.
+
+    What it costs to get wrong is the rank badge. On the `endgame-ceiling-binds`
+    scenario the estimate put BOT at #2 when BOT was #1 — the same class of error
+    as the done-team projection bug fixed 2026-08-13, whose class docstring is a
+    few hundred lines above this one.
+    """
+
+    def _figure(self, html: str, code: str) -> int:
+        """The Proj figure out of a team's `proj-<CODE>` span.
+
+        By id, not by cell position: the span is what the OOB swap targets, so
+        reading it is reading the thing the endpoint actually writes.
+        """
+        found = re.search(rf'id="proj-{code}"[^>]*>\s*(\d+)', html)
+        assert found, f"no proj-{code} span in the response"
+        return int(found.group(1))
+
+    def _basis(self, html: str) -> str:
+        found = re.search(r'id="proj-basis"[^>]*>\s*([^<]*?)\s*<', html)
+        assert found, "no proj-basis marker in the response"
+        return found.group(1)
+
+    def _live_opponents(self) -> list[str]:
+        import main
+
+        return [
+            c for c, t in main.auction_state.teams.items()
+            if not t.is_done and c != main.MY_TEAM
+        ]
+
+    def test_every_fragment_the_scan_returns_has_a_target(self, client):
+        """The `htmx:oobErrorNoTarget` failure, which is silent on screen.
+
+        htmx resolves an out-of-band target by selector into `querySelectorAll`
+        from a loop with no try/catch, so one id that matches nothing costs the
+        console a line and the operator nothing visible — the Scan button's
+        original bug, where all 11 swaps missed on an opponent's panel.
+
+        Every id carrying `hx-swap-oob` is collected, with NO assumption about
+        what it is called. The first version of this matched `id="proj-..."` and
+        so was blind to exactly the mutation it existed to catch: renaming the
+        fragments to `projection-<CODE>` left it seeing only the basis marker,
+        whose target was still fine, and it passed against 11 dead swaps.
+        """
+        import main
+
+        page = section_of(client.get("/").text, "league-state")
+        fragments = re.findall(
+            r'id="([^"]+)"[^>]*hx-swap-oob', client.get("/solve-standings").text
+        )
+        assert fragments, "the scan returned no out-of-band fragments at all"
+        missing = [f for f in fragments if f'id="{f}"' not in page]
+        assert not missing, (
+            f"{missing} are swapped by the scan but render nowhere in League "
+            f"State, so those swaps silently do nothing"
+        )
+        # One per team plus the basis marker. A count as well as the resolution
+        # check, because a fragment that stops being emitted resolves vacuously.
+        expected = len(main.auction_state.nomination_order) + 1
+        assert len(fragments) == expected, (
+            f"the scan returned {len(fragments)} fragments against "
+            f"{expected} (one per team in League State, plus the basis marker)"
+        )
+
+    def test_an_opponents_figure_becomes_its_milp_optimum(self, client):
+        """The point of the exercise: the number on screen is the real optimum."""
+        import main
+        from optimizer import solve_optimal_roster
+
+        code = self._live_opponents()[0]
+        client.get("/solve-standings")
+        truth = solve_optimal_roster(
+            main.auction_state.teams[code],
+            main.auction_state.available_players,
+            main.market_prices,
+        )
+        assert truth.status == "Optimal", f"{code} cannot be solved; pick another"
+        shown = self._figure(section_of(client.get("/").text, "league-state"), code)
+        assert shown == int(truth.total_points), (
+            f"{code} shows {shown} against a MILP optimum of "
+            f"{int(truth.total_points)} — the scan's figure is not reaching the page"
+        )
+
+    def test_a_pick_returns_the_column_to_estimates(self, client):
+        """The load-bearing one: an exact figure must not outlive its state.
+
+        `_recompute()` empties `exact_projections` on every mutation, for the
+        reason its docstring already gives about the caches beside it. Without
+        that, the column keeps showing optima computed against a pool that has
+        since lost players and a buyer whose budget has changed — and it says
+        "exact" while doing it, on the figure that carries the rank badge.
+
+        The team with the WIDEST estimate-to-exact gap is chosen deliberately: a
+        single pick by someone else moves an estimate by a few points at most, so
+        "the figure is no longer the exact one" cannot pass by coincidence.
+        """
+        import main
+
+        before = section_of(client.get("/").text, "league-state")
+        client.get("/solve-standings")
+        after_scan = section_of(client.get("/").text, "league-state")
+        code = max(
+            self._live_opponents(),
+            key=lambda c: abs(self._figure(after_scan, c) - self._figure(before, c)),
+        )
+        exact = self._figure(after_scan, code)
+        assert exact != self._figure(before, code), (
+            "no opponent's figure changed at all, so this test cannot tell the "
+            "two bases apart — the scan is not doing anything"
+        )
+
+        assign(client, pool_top(1)[0], main.MY_TEAM, 1.0)
+        page = section_of(client.get("/").text, "league-state")
+        assert main.exact_projections == {}, (
+            f"a pick left {len(main.exact_projections)} exact figures cached, so "
+            f"the column now describes the state before the pick"
+        )
+        assert self._basis(page) == "estimated", (
+            f"the marker still reads {self._basis(page)!r} after a pick"
+        )
+        assert self._figure(page, code) != exact, (
+            f"{code} still shows its pre-pick exact figure {exact}"
+        )
+
+    def test_the_basis_marker_renders_in_both_states(self, client):
+        """A target that disappears with its contents can only be swapped once.
+
+        The `buyout_scan.html` bug exactly: the Scan button vanished on the way
+        to an opponent's panel and never came back, because the wrapper was
+        conditional rather than only its `hx-swap-oob` attribute.
+        """
+        page = section_of(client.get("/").text, "league-state")
+        assert self._basis(page) == "estimated"
+
+        client.get("/solve-standings")
+        after = section_of(client.get("/").text, "league-state")
+        n = len(self._live_opponents())
+        assert self._basis(after) == f"exact {n}/{n}", (
+            f"after a clean scan the marker reads {self._basis(after)!r}"
+        )
+
+    def test_the_scan_solves_live_opponents_only(self, monkeypatch, client):
+        """Done teams and BOT are skipped, and neither is an optimization.
+
+        A done team's roster is FINAL — solving it invents purchases it has sworn
+        off, which is the 2026-08-13 bug worth +673 to +1101 points a team. BOT's
+        figure is already `milp_solution.total_points` from the same solve over
+        the same inputs.
+
+        Patched on `main`, not on `optimizer`: main.py does `from optimizer
+        import solve_optimal_roster`, so the name is bound in main's namespace and
+        patching the optimizer module misses every call (see
+        `tests/test_counterfactual_cache.py`, which documents the same trap).
+        """
+        import main
+        from optimizer import solve_optimal_roster as real_solve
+
+        calls = []
+
+        def counting(team, *a, **kw):
+            calls.append(team.code)
+            return real_solve(team, *a, **kw)
+
+        monkeypatch.setattr(main, "solve_optimal_roster", counting)
+        client.post("/team-done", data={"team_code": self._live_opponents()[-1]})
+        calls.clear()
+
+        client.get("/solve-standings")
+        expected = self._live_opponents()
+        assert calls, "the counter saw no solves at all, so it proves nothing"
+        assert sorted(calls) == sorted(expected), (
+            f"the scan solved {sorted(calls)} against the live opponents "
+            f"{sorted(expected)} — a done team or BOT was solved, or one was missed"
+        )
+
+    def test_a_done_teams_figure_is_untouched_by_the_scan(self, client):
+        """Its roster is final, so there is nothing for a solve to improve."""
+        import main
+
+        code = self._live_opponents()[-1]
+        client.post("/team-done", data={"team_code": code})
+        before = self._figure(section_of(client.get("/").text, "league-state"), code)
+
+        client.get("/solve-standings")
+        after = self._figure(section_of(client.get("/").text, "league-state"), code)
+        assert after == before == main.auction_state.teams[code].current_roster_points, (
+            f"done team {code} went {before} -> {after} across a scan; a finished "
+            f"roster projects what it has"
+        )
+
+    def test_an_unsolvable_opponent_keeps_its_estimate_rather_than_reading_zero(
+        self, client
+    ):
+        """A solver failure must not be reported as a team with no points.
+
+        Absence from `exact_projections` is what makes this safe — the team falls
+        through to the estimate. Storing a zero would put a plausible-looking
+        last place on the board, and the marker's count is what tells you one
+        cell is still a guess.
+        """
+        import main
+
+        code = self._live_opponents()[0]
+        squeeze(code, 1.0)  # $1.0M against a dozen unfilled spots: no legal roster
+        estimate = self._figure(section_of(client.get("/").text, "league-state"), code)
+
+        r = client.get("/solve-standings")
+        assert r.status_code == 200, "an unsolvable opponent broke the whole scan"
+        assert code not in main.exact_projections, (
+            f"{code} has no feasible roster but was cached as exact"
+        )
+        page = section_of(client.get("/").text, "league-state")
+        assert self._figure(page, code) == estimate, (
+            f"{code} moved to {self._figure(page, code)} from its {estimate} "
+            f"estimate despite having no solution"
+        )
+        n = len(self._live_opponents())
+        assert self._basis(page) == f"exact {n - 1}/{n}", (
+            f"the marker reads {self._basis(page)!r} while one cell is still an "
+            f"estimate — a count exists precisely so this case is visible"
+        )

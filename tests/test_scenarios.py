@@ -220,7 +220,20 @@ class TestEndgameCeilingBinds:
         )
 
     def test_loading_it_twice_gives_the_same_state(self):
-        """Ties break on name for this reason; the tests below would flake without it."""
+        """Two loads in one process — a narrower claim than it reads, so say which.
+
+        It does **not** pin the name tie-breaks in `_fill`/`_drain`, which is what
+        this docstring claimed until 2026-08-19. Dict iteration is
+        insertion-ordered, so a tie-break removed from `_fill` produces the same
+        answer twice and every test in this file stays green (measured, not
+        reasoned). The tie-breaks earn their place ACROSS processes, where hash
+        and set order vary, and no test here can see that.
+
+        What it does catch is state leaking between loads — a cached price dict, a
+        mutated `POSITION_MINIMUMS`, anything that makes the second build a
+        function of the first. That is worth a cheap test; pinning tie-breaks is
+        not what it is.
+        """
         first, second = scenarios.load(ENDGAME), scenarios.load(ENDGAME)
         for code in first.teams:
             a, b = first.teams[code], second.teams[code]
@@ -840,6 +853,7 @@ class TestDrainedLateDraft:
             assert solution.status == "Optimal", f"{code} is {solution.status}"
 
     def test_loading_it_twice_gives_the_same_state(self):
+        """Leakage between loads, not tie-breaks — see `TestEndgameCeilingBinds`."""
         first, second = scenarios.load(LATE_DRAFT), scenarios.load(LATE_DRAFT)
         for code in first.teams:
             a, b = first.teams[code], second.teams[code]
@@ -945,7 +959,16 @@ class TestFullRosterStillBidding:
         _assert_bot_is_still_in_the_draft(state, live)
 
     def test_every_team_still_solves(self):
-        """Including the full one, whose MILP has zero spots to fill."""
+        """Teeth on the ten teams WITH spots — the full one never reaches the MILP.
+
+        `solve_optimal_roster` answers `spots == 0` from its own branch
+        (`optimizer.py:162`, forced players exactly filling a roster are Optimal,
+        not Infeasible), so no construction of the full team can make this test
+        fail: measured, filling it with skaters only left all 58 green. Its
+        position legality is pinned instead by the `roster_needs` assertion in
+        `test_exactly_one_opponent_is_full_with_nothing_it_needs`, which is a real
+        reading of the same state.
+        """
         state = scenarios.load(FULL_ROSTER)
         _, live, _ = _priced(state)
         for code, team in state.teams.items():
@@ -953,6 +976,7 @@ class TestFullRosterStillBidding:
             assert solution.status == "Optimal", f"{code} is {solution.status}"
 
     def test_loading_it_twice_gives_the_same_state(self):
+        """Leakage between loads, not tie-breaks — see `TestEndgameCeilingBinds`."""
         first, second = scenarios.load(FULL_ROSTER), scenarios.load(FULL_ROSTER)
         for code in first.teams:
             a, b = first.teams[code], second.teams[code]

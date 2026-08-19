@@ -20,6 +20,24 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-18c]
+
+### Added
+
+- **The model price renders beside the market price in the nomination panel.** The last unbuilt want from the 2026-08-07 owner testing pass. The panel's "Expected" figure is `market_prices` — deliberately, and that is not being undone: until 2026-08-06 the drain path put the raw **model** price under that label and advertised `Expected: ~$7.7M` for a player who could only fetch $2.5M. But with one figure on screen, "cheap because the market is thin" and "cheap because the model rates him low" look identical, and telling those apart is the whole point of a nomination. So each pick now carries both figures, each labelled: `Expected: ~$2.8M ▼ · Model $9.5M`, the model struck through when the ceiling cuts the price. Same visual grammar as `bid_limits.html`'s Price column, so the two panels explain the same phenomenon the same way; the order differs because this line is labelled and that column is not.
+
+  **Both figures always render, even when they agree.** A second figure that appears only on divergence cannot be told apart from "this panel doesn't show that", and a fixed position is what lets the RFA and UFA halves be compared at a glance.
+
+  **`capped` is quantized to one decimal**, matching `main.py`'s `bid_limits` flag, and that is not a nicety: the drain tie-break breaks toward **least surplus**, so on the UFA half the recommended player is routinely a cent under the ceiling. Measured in a $2.5M-ceiling state — the UFA pick is **$2.51M model against a $2.50M market**, which prints as two identical figures. A raw float comparison would strike one of them through and read as a display bug. The consequence worth knowing: the divergence this want is about shows up mostly on the **RFA half and on target picks**, because the UFA drain ranking actively selects toward agreement.
+
+  Structural, because the failure mode is invisible on screen: all **six** `NominationPick` construction sites (2 RFA, 4 UFA) now go through `_nomination_pick`, which keys both dicts off `player.name`. Two figures side by side describing *different* players is not something a reader could catch, and six copies of `market_prices.get(name, MIN_SALARY)` is where a lookup keyed on the wrong branch's name would hide. An ast guard asserts `NominationPick(...)` is constructed in exactly one place — which is also what covers the two branches (UFA depth, UFA fallback) that no buildable state reaches, rather than contriving a state and pretending. Four of the six are exercised for real: RFA drain + UFA target on a fresh state, RFA drain + UFA drain at a $2.5M ceiling, RFA target + UFA target in `endgame-ceiling-binds`.
+
+  Measured in Chrome at 375 / 1280 / 1600px, both states: the line stays **one line at every width** — 209px of text uncapped, 226px capped, inside a box 303px wide even in the 1-col layout — and no card reaches past the panel's right edge. The planning estimate was ~190px, which was low but not by enough to matter.
+
+  A native `title`, **not** DaisyUI's `data-tip`: `TestTooltipsStayInsideTheirPanel` loads `GET /` and starts a bid, but never fires `/nominate`, so a bubble here would be one nobody has ever placement-checked — the debt `bid_limits`' own `tooltip-left` carried until 2026-08-13, and which `BACKLOG.md` still tracks for eight of the twenty.
+
+  Nine mutations, all killed. Two are worth recording. Swapping the model lookup to the market dict dies **only** in the ceiling-bound state — at full budgets the two dicts agree on every pick, so the fresh case cannot see it, which is why both states are parametrized rather than one. And deleting the price line from **either** card fails, in both directions: the two blocks were hand-maintained copies of that line until this change made them one macro call, the same duplication `loadTradeChoices` removed from the trade forms.
+
 ## [2026-08-18b]
 
 ### Added

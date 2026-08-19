@@ -3,6 +3,39 @@
    session (player, price, bidder toggles) lives only in the DOM of #bid-panel;
    before the split both endpoints re-rendered the whole #auction-control from
    base context and wiped it, and /nominate is bound to a bare `n` keypress. #}
+{# The two prices a recommendation is judged on, one definition, called by both
+   cards. Layer 2's clearing price is the headline (it is what a nomination
+   actually fetches, and what the drain ranking runs on); Layer 1's vacuum price
+   sits beside it, dimmed and labelled.
+
+   BOTH figures always render, even when they agree. A second figure that
+   appears only on divergence cannot be told apart from "the panel doesn't show
+   this", and the whole point of the pair is the discrimination between a player
+   cheap because the market is thin and one cheap because the model rates him
+   low — with the position fixed, the RFA and UFA halves compare at a glance.
+   Each figure carries its own label because the 2026-08-06 defect was the MODEL
+   price wearing the word "Expected", not the model price being on screen.
+
+   Same visual grammar as bid_limits.html's Price column — struck model, warning
+   market, ▼ — so the two panels explain the same phenomenon the same way. The
+   order differs on purpose: this line is labelled, that column is not.
+
+   `pick.capped` is quantized to one decimal (see NominationPick.capped): a $0.01
+   gap prints two identical figures, and striking one of them through then reads
+   as a display bug rather than as the ceiling binding.
+
+   A native `title`, not DaisyUI's `data-tip`: TestTooltipsStayInsideTheirPanel
+   loads GET / and starts a bid but never fires /nominate, so a bubble here would
+   be one nobody has ever placement-checked — the debt bid_limits' own
+   `tooltip-left` carried until 2026-08-13. #}
+{% macro pick_prices(pick) -%}
+{% set market = "$%.1fM"|format(pick.expected_price) %}
+{% set model = "$%.1fM"|format(pick.model_price) %}
+    <div class="text-xs font-semibold mt-1"{% if pick.capped %} title="Model says {{ model }}, but no opponent can push bidding that high — the market ceiling caps it at {{ market }}"{% endif %}>
+        Expected: {% if pick.capped %}<span class="text-warning">~{{ market }} &#9660;</span>{% else %}~{{ market }}{% endif %}
+        <span class="font-normal opacity-50">· Model <span{% if pick.capped %} class="line-through"{% endif %}>{{ model }}</span></span>
+    </div>
+{%- endmacro %}
 <div id="nomination-panel">
     <div class="flex items-center gap-2 mb-2">
         <h2 class="card-title text-accent text-base">Auction</h2>
@@ -53,7 +86,7 @@
             </div>
             <div class="badge badge-sm badge-outline mt-1">{{ rfa_pick.strategy }}</div>
             <div class="text-xs opacity-80 mt-1">{{ rfa_pick.reasoning }}</div>
-            <div class="text-xs font-semibold mt-1">Expected: ~${{ "%.1f"|format(rfa_pick.expected_price) }}M</div>
+        {{ pick_prices(rfa_pick) }}
             <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="mt-2">
                 <input type="hidden" name="player" value="{{ rfa_pick.player.name }}">
                 <input type="hidden" name="price" value="0.5">
@@ -74,7 +107,7 @@
             </div>
             <div class="badge badge-sm badge-outline mt-1">{{ ufa_pick.strategy }}</div>
             <div class="text-xs opacity-80 mt-1">{{ ufa_pick.reasoning }}</div>
-            <div class="text-xs font-semibold mt-1">Expected: ~${{ "%.1f"|format(ufa_pick.expected_price) }}M</div>
+        {{ pick_prices(ufa_pick) }}
             <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="mt-2">
                 <input type="hidden" name="player" value="{{ ufa_pick.player.name }}">
                 <input type="hidden" name="price" value="0.5">

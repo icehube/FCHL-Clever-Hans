@@ -718,6 +718,108 @@ class TestNominate:
         assert "Auction" in r.text
 
 
+class TestNominationPanelPrices:
+    """Both prices on screen, and the marker only where the ceiling actually cuts.
+
+    "Expected" is the market price — the clearing price a nomination fetches —
+    and since 2026-08-18 the model price renders beside it, labelled, so the
+    operator can tell a player cheap because the market is thin from one cheap
+    because the model rates him low (the 2026-08-07 owner want).
+
+    `GET /nominate` returns the nomination panel alone, so the whole body is the
+    fragment; `section_of` is no use here because the panel is a `<div>`.
+    """
+
+    CARD = re.compile(r'nomination-pick"(.*?)</form>', re.S)
+
+    def _cards(self, page: str) -> list[dict]:
+        """What each recommendation on screen says, as the operator reads it.
+
+        The figures come back as the rendered STRINGS, compared below against
+        `f"{price:.1f}"` — the template's own formatting. Comparing floats would
+        re-implement the rounding rather than check it.
+        """
+        cards = []
+        for body in self.CARD.findall(page):
+            flat = re.sub(r"\s+", " ", body)
+            player = re.search(r'name="player" value="([^"]+)"', flat)
+            market = re.search(r"Expected: (?:<span[^>]*>)?~\$([\d.]+)M", flat)
+            model = re.search(r'Model <span( class="line-through")?>\$([\d.]+)M', flat)
+            assert player and market and model, (
+                f"a nomination card did not render both figures: {flat[:300]}"
+            )
+            cards.append({
+                "player": html.unescape(player.group(1)),
+                "market": market.group(1),
+                "model": model.group(2),
+                "struck": model.group(1) is not None,
+                "arrow": "&#9660;" in flat,
+            })
+        return cards
+
+    def _assert_figures_match(self, main, cards: list[dict]) -> int:
+        """Each figure is that player's own price, and the marker follows them.
+
+        Returns how many cards are marked, so the caller can insist the state it
+        chose actually produces one — an equivalence where both sides are always
+        false cannot fail, which is what `TestPriceColumn` records for the
+        bid_limits flag at full budgets.
+        """
+        assert len(cards) == 2, f"expected an RFA and a UFA card, got {len(cards)}"
+        for card in cards:
+            name = card["player"]
+            market = main.market_prices[name]
+            model = main.model_prices[name].expected_price
+            assert card["market"] == f"{market:.1f}", (
+                f"{name}: panel says Expected ${card['market']}M, market price is "
+                f"${market:.1f}M"
+            )
+            assert card["model"] == f"{model:.1f}", (
+                f"{name}: panel says Model ${card['model']}M, model price is "
+                f"${model:.1f}M"
+            )
+            capped = round(model, 1) > round(market, 1)
+            assert card["struck"] is capped and card["arrow"] is capped, (
+                f"{name}: model ${model:.1f}M vs market ${market:.1f}M is "
+                f"{'capped' if capped else 'not capped'}, but the card renders "
+                f"struck={card['struck']} arrow={card['arrow']}"
+            )
+        return sum(1 for c in cards if c["struck"])
+
+    def test_both_figures_render_in_both_cards(self, client):
+        """Neither half may show one price. Both cards call the same macro, so a
+        deleted call is the failure this catches — the RFA and UFA blocks were
+        two hand-maintained copies of this line until the macro landed."""
+        import main
+
+        self._assert_figures_match(main, self._cards(client.get("/nominate").text))
+
+    def test_the_marker_tracks_the_ceiling(self, client):
+        """`endgame-ceiling-binds` is where the equivalence above gets its teeth.
+
+        At full budgets the ceiling is $11.4M and the priciest model price is
+        ~$9.5M, so nothing is capped and the marker half of that assertion is
+        vacuous. Measured in this scenario 2026-08-18: a $2.8M ceiling, 28 of 677
+        pool prices cut, and the RFA pick is McDavid at $2.8M against a $9.5M
+        model price — which also makes this the only state here that reaches the
+        RFA *target* branch.
+        """
+        import main
+
+        client.post("/load-scenario", data={"name": "endgame-ceiling-binds"})
+        page = client.get("/nominate").text
+        marked = self._assert_figures_match(main, self._cards(page))
+
+        assert marked, (
+            "no recommendation in endgame-ceiling-binds is priced under its model "
+            "price any more, so this test no longer exercises the marker — the "
+            "state has lost its teeth, pick one where the ceiling cuts a pick"
+        )
+        assert "the market ceiling caps it at" in page, (
+            "a marked figure must explain itself on hover"
+        )
+
+
 class TestExplain:
     def test_explain_player(self, client):
         """Explain should return a populated counterfactual.

@@ -396,11 +396,13 @@ class TestBothPricesReachThePanel:
     screen. So every pick carries both, and `capped` says whether they diverge
     **as displayed** — see the property for why that is quantized.
 
-    Both states are here on purpose. At full budgets the ceiling is $11.4M and
-    the priciest model price is ~$9.5M, so nothing in the pool is capped and
-    every `capped` assertion is vacuously satisfied — the same trap
-    `test_endpoints.py::TestPriceColumn` records for the bid_limits flag. The
-    ceiling-bound state is what gives them content.
+    Both states are here on purpose, and the fresh one is the weaker of the two
+    by construction: at full budgets the ceiling is $11.4M and the priciest model
+    price is ~$9.5M, so nothing in the pool is capped, every `capped` assertion is
+    vacuously satisfied, and — measured — reading the model figure out of the
+    MARKET dict passes too, because on a fresh state the two dicts agree on every
+    pick. The ceiling-bound state is what gives both halves content. Same trap
+    `test_endpoints.py::TestPriceColumn` records for the bid_limits flag.
     """
 
     @staticmethod

@@ -20,6 +20,31 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-18e]
+
+### Added
+
+- **Two scenarios finish the pre-baked set: `drained-late-draft` and `full-roster-still-bidding`.** These were the last two items on `BACKLOG.md`'s *More scenarios*, and both are states `POST /reset` cannot reach and the operator has never seen. The set is now five: `goalie-asymmetry`, `endgame-ceiling-binds` (most teams done, ceiling binding, stars unsold), `endgame-last-goalie` (one spot, one affordable goalie), `endgame-sole-bidder` (ten full rosters, nobody able to raise a bid), and these two.
+
+  **`drained-late-draft`** — sixty picks in: all ten opponents live, every one still needing players, and nobody able to pay for the stars left. Measured: ceiling **$3.3M**, the second of ten distinct maxes ($3.5M / $3.3M / $3.1M / …), `demand_count` 10 with `floor_demand` False, rosters 17–21 with 3–7 spots, **25 of 597** pool prices capped, every team's MILP Optimal, build 16ms. It fills the gap between a fresh reset (ceiling *is* the cap, every `stop_status` reads `at_cap`) and `endgame-sole-bidder` (ceiling at the floor, every price floored): the only loadable state where the ceiling binds **mid-range**, so the bid panel's "Should win it" figure says something about a particular player — BID, worth $4.0M, stop $3.6M on the priciest RFA — and the nomination panel's new two-price line shows a $3.3M market price against a $9.5M model price with the model struck through.
+
+  **`full-roster-still-bidding`** — the other half of the 2026-08-05 report. `4dc59da` made a full roster with cap space a live bidder (extras go to the minors with salary fully on cap), and that fix had only ever been exercised against synthetic teams. Measured: one opponent at **24 players, 0 spots, `roster_needs` all zero, `physical_max_bid` $8.0M** — and `market_ceiling` is $8.0M with `second_bidder` that team. **The counterfactual is the point and it is a number**: the second-highest max among opponents *with spots* is $3.0M, so a ceiling gated on roster space would price the whole pool **$5.0M** too low. Downstream, `live_opponents([BOT, full])` returns it and a bid check against it alone reads BID, worth $6.2M, stop $8.1M. Only 2 of 594 prices are capped at that ceiling — exactly the two players priced above it — so this is not the scenario for the capped marker, and the docstring says so.
+
+- **The finding that shaped both: a "no money, spots still open" state cannot be built by buying players.** `_drain` stops at `ROSTER_SIZE`, so spending is bounded by roster space. Measured with the top 25 held back, **7 of 10 opponents reached 24 players with $8.2M–$22.6M still spendable**, the ceiling never left `MAX_SALARY` and **not one** of 570 pool prices was capped — the exact opposite of the intended state. The lever that removes money without adding players is one the league already has: CBA 11.4 leaves 50% of a bought-out salary on the cap, so `_squeeze` sets `penalties` to land a team on a named `physical_max_bid` and the team reads as one that bought contracts out. Real spending *plus* dead cap beats either alone — drain to $12.0M spendable first and the penalties come out at a tidy $9.0M–$11.0M, where no drain at all needs $13.5M–$28.4M. Draining **deeper** does not help: at $8.0M and $5.0M targets some teams reach 24 (premise gone) and the spread widens to $5.4–15.9M and $2.9–19.5M.
+
+### Changed
+
+- **Ordering inside a scenario is load-bearing twice, and both were measured rather than reasoned.**
+
+  In `full-roster-still-bidding` the two rich teams are shaped **first, while the pool is still rich**. `_drain` buys the dearest player it can, so against the leftovers of eight already-shaped teams it needs many cheap purchases to move a big budget — measured, shaping these two last put the *rival* at 24 as well. Two full teams look fine on screen and quietly destroy the test: with the highest and the second both full, "the ceiling is set by a team with no roster space" can no longer fail, and swapping the two squeeze targets stops being detectable.
+
+  In both scenarios BOT is shaped **last**, which is why its drain target had to be tuned against the real call order: the opponents thin the mid tier first, so the same target buys BOT more players than it does against a fresh pool. Four targets measured in place — $14.0M (21 players, 3 spots, **no position needs left**), $16.0M (19 / 5, $9.5M remaining, $7.5M max, needs {D: 1}, 1196 lineup points), $18.0M and $20.0M (18 / 6 but $11.0M–$13.0M of dead cap on your own roster). $16.0M ships. The first draft of that docstring carried the fresh-pool figures (18 players, 6 spots, a $7.0M penalty) which the real ordering never produces.
+
+- **`scenarios._squeeze` is unit-tested directly — the only test in `test_scenarios.py` that reaches for a private.** The helper needs two branches: with spots open the commissioner's reserve is added back, at `spots == 0` there is none. Get the second wrong and the team lands $0.5M off its named target while **every scenario-level assertion still passes**, because the ceiling still equals the full team's max, just half a million lower. So the branch is pinned on the helper, at both ends, rather than through a scenario constant asserted in two places. An earlier draft of the `_squeeze` docstring called that branch "the whole claim of `full-roster-still-bidding`", which overstated it in the direction that matters: the error is invisible from outside.
+
+  Six mutations, all killed, each in the test that names its claim: dropping `_squeeze` from the shape (ceiling back to `MAX_SALARY`, nothing capped — 7 tests), one flat squeeze target instead of the stagger (the distinct-maxes guard alone), the full team left one short of 24, the two squeeze targets swapped (`second_bidder` becomes the rival), the reserve added at zero spots, and the rich teams shaped last.
+
+
 ## [2026-08-18d]
 
 ### Fixed

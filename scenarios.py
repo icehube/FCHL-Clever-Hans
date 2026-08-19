@@ -13,6 +13,7 @@ from config import (
     MY_TEAM,
     POSITION_MINIMUMS,
     ROSTER_SIZE,
+    SALARY_CAP,
 )
 from data_loader import build_initial_state
 from price_model import load_model_params, predict_all_prices
@@ -427,11 +428,230 @@ def _scenario_endgame_sole_bidder(state: AuctionState) -> None:
         _fill(team, state, price, set())
 
 
+def _squeeze(team: TeamState, target_max: float) -> None:
+    """Set `penalties` so `physical_max_bid` lands exactly on `target_max`.
+
+    The lever purchases cannot pull. `_drain` stops at `ROSTER_SIZE`, so a team
+    cannot spend its way to "no money, spots still open" — measured 2026-08-18
+    with the top 25 held back, **7 of 10 opponents hit 24 players with $8.2M to
+    $22.6M still spendable**, the ceiling stayed at MAX_SALARY and not one of 570
+    pool prices was capped. Dead cap is what removes money without adding players,
+    and the league already has it: CBA 11.4 leaves 50% of a bought-out salary on
+    the cap. So a squeezed team reads as one that bought contracts out, which is
+    exactly the mid-draft state these scenarios are about.
+
+    Inverted rather than searched, the same trick as `tests/helpers.squeeze` and
+    `test_nomination._drain_state`: zero the penalties first so `total_salary`
+    reads the roster alone, then solve for the remaining budget that produces
+    `target_max`.
+
+    **Two branches, and the second one is load-bearing.** With spots open,
+    `physical_max_bid = (remaining - spots * MIN_SALARY) + MIN_SALARY`, so the
+    reserve has to be added back. At `spots == 0` there is no reserve and
+    `physical_max_bid` IS `remaining_budget` — adding the term there lands the
+    figure $0.5M off, which is the whole claim of `full-roster-still-bidding`.
+
+    Call it AFTER every purchase for that team. A squeezed team has no `room`
+    left, so `_fill` raises and `_drain` returns having bought nothing.
+    """
+    team.penalties = 0.0
+    team._invalidate_cache()
+    spots = team.total_spots_remaining
+    wanted_remaining = (
+        target_max if spots == 0
+        else target_max - MIN_SALARY + spots * MIN_SALARY
+    )
+    team.penalties = round(
+        max(0.0, SALARY_CAP - team.total_salary - wanted_remaining), 1
+    )
+    team._invalidate_cache()
+
+
+def _late_draft_shape(
+    state: AuctionState,
+    price: dict[str, float],
+    reserved: set[str],
+    codes: list[str],
+    spread: tuple[float, float],
+    fill_to: tuple[int, int] = (17, 21),
+) -> None:
+    """Give each of `codes` a real roster, real holes, and no money left.
+
+    Three steps per team, in this order: `_drain` to $12.0M spendable (money
+    actually spent on players, so the rosters look drafted rather than filled),
+    `_fill` to a staggered size with depth, then `_squeeze` onto a staggered
+    physical max. Spending first is not decoration — it is what keeps the
+    penalties plausible: measured, no drain at all needs $13.5M to $28.4M of dead
+    cap per team, draining to $12.0M needs **$9.0M to $11.0M**, and draining
+    deeper does not help (at $8.0M and $5.0M some teams reach 24 players, which
+    destroys the premise, while the penalty spread widens to $5.4-15.9M and
+    $2.9-19.5M).
+
+    **The stagger is load-bearing, not cosmetic.** The market ceiling is the
+    SECOND-highest opponent max; ten teams on the same number make "second"
+    indistinguishable from "highest" or "any of them", so a test asserting the
+    ceiling is the second-highest could not fail. Same reason
+    `_scenario_endgame_ceiling_binds` drains its two live teams to different
+    targets. Codes are taken in the caller's order, so the assignment is
+    deterministic and two loads of a scenario are identical.
+    """
+    lo, hi = spread
+    fill_lo, fill_hi = fill_to
+    last = len(codes) - 1
+    for i, code in enumerate(codes):
+        team = state.teams[code]
+        _drain(team, state, price, reserved, 12.0)
+        _fill(team, state, price, reserved,
+              up_to=fill_lo + (i * (fill_hi - fill_lo)) // last)
+        _squeeze(team, round(lo + i * (hi - lo) / last, 1))
+
+
+def _leave_bot_planning(
+    state: AuctionState, price: dict[str, float], reserved: set[str]
+) -> None:
+    """BOT: money spent, holes left, and still able to plan. Both scenarios.
+
+    Tuned against the real call order rather than guessed, and the order matters:
+    the opponents are shaped first and thin the mid tier, so the same drain target
+    buys BOT MORE players here than the same call does against a fresh pool. Every
+    figure below is measured after the ten opponents have been through.
+
+    * $14.0M — 21 players, 3 spots, and `roster_needs` all zero. Cheapest penalty
+      ($7.0M) and the worst state to load: nothing left to plan.
+    * $16.0M — **19 players, 5 spots, $9.5M remaining, $7.5M physical max, needs
+      {D: 1}, penalty $9.0M**, and the optimal lineup at 1196 points, the best of
+      the four targets tried. This one.
+    * $18.0M / $20.0M — 18 players and 6 spots, but $11.0M and $13.0M of dead cap,
+      which reads as absurd on your own roster.
+
+    $7.5M is deliberately under MAX_SALARY: a physical max sitting at the league
+    maximum cannot be told apart from `physical_max_bid`'s clamp, which is the
+    mistake `endgame-last-goalie` was built to avoid. The penalty lands in the
+    same $9-11M band as the opponents', so the state reads as one league rather
+    than as BOT being special.
+    """
+    bot = state.teams[MY_TEAM]
+    _drain(bot, state, price, reserved, 16.0)
+    if bot.roster_count < 18:
+        _fill(bot, state, price, reserved, up_to=18)
+    _squeeze(bot, 7.5)
+
+
+def _reserved_top(price: dict[str, float], count: int = 25) -> set[str]:
+    """The priciest `count` players, held back so the ceiling has something to cap.
+
+    `_scenario_endgame_ceiling_binds` learned this the hard way twice: a top-down
+    drain removes exactly the players whose model price the ceiling would have
+    cut, and the state then reports zero capped rows. 25 rather than 40 for the
+    reason recorded there — the distribution is steep, and reserving 40 takes
+    everything over $3.0M and leaves nothing worth draining a budget on.
+    """
+    return set(sorted(price, key=lambda n: (-price[n], n))[:count])
+
+
+def _scenario_drained_late_draft(state: AuctionState) -> None:
+    """Sixty picks in: everyone has holes, nobody can pay for the stars left.
+
+    The state between a fresh reset and the two endgames, and the one a real
+    draft spends most of its second half in. `endgame-ceiling-binds` reaches a
+    binding ceiling by marking eight teams DONE, which is a different situation:
+    there, demand has collapsed and two teams are bidding. Here all ten opponents
+    are live, every one of them still needs players, and the ceiling binds anyway
+    — because the money is gone.
+
+    Measured 2026-08-18: ceiling **$3.3M**, strictly inside the floor/cap range
+    and the second of ten distinct maxes ($3.5M / $3.3M / $3.1M / ...);
+    `demand_count` 10 with `floor_demand` False; rosters 17-21 with 3-7 spots
+    each and nobody done; **25 of 597** pool prices capped; every team's MILP
+    Optimal. Build 16ms.
+
+    What it is for: this is the only loadable state where the bid panel's
+    forecast half says something about a player rather than reporting `at_cap`.
+    A bid check on the priciest RFA against the two richest rivals reads BID,
+    worth $4.0M, "Should win it" $3.6M — and the nomination panel shows him at a
+    $3.3M market price against a $9.5M model price, which is the struck-through
+    figure the two-price line was built for, outside an endgame.
+    """
+    price = _model_price(state)
+    reserved = _reserved_top(price)
+    _late_draft_shape(
+        state, price, reserved,
+        sorted(code for code in state.teams if code != MY_TEAM),
+        spread=(1.5, 3.5),
+    )
+    _leave_bot_planning(state, price, reserved)
+
+
+def _scenario_full_roster_still_bidding(state: AuctionState) -> None:
+    """A rival filled its 24 early, still has $8M of cap, and sets the whole market.
+
+    The other half of the 2026-08-05 report. `4dc59da` made a full roster with cap
+    space a LIVE bidder — extras go to the minors with their salary fully on the
+    cap, so a team at 24 can still raise a bid and someone has to outbid it — and
+    that fix has only ever been exercised against synthetic teams.
+    `endgame-sole-bidder` is the opposite case (full AND broke) and cannot be
+    folded in: there the ceiling collapses to the floor, here a team that cannot
+    roster anybody sets the league's clearing price.
+
+    Measured 2026-08-18. **MAC: 24 players, 0 spots, `roster_needs` all zero,
+    `physical_max_bid` $8.0M** on $8.0M of remaining budget — and
+    `market_ceiling` is $8.0M with `second_bidder` MAC. GVR is highest at $10.0M
+    with 7 spots still open, the other eight opponents run $3.0M down to $1.5M at
+    17-21 players, nobody is done, every team's MILP is Optimal. Build 13ms.
+
+    **The counterfactual is the point, and it is a number**: the second-highest
+    max among opponents WITH SPOTS is $3.0M, so a ceiling rule that gated on
+    roster space would price the entire pool **$5.0M** too low. Downstream,
+    `live_opponents([BOT, MAC])` returns MAC and `compute_live_ceiling` gives
+    $8.0M, so a bid check on the priciest player in the pool against MAC alone
+    reads BID, worth $6.2M, "Should win it" $8.1M — advice that exists only
+    because a full team counts.
+
+    Three things are load-bearing:
+
+    * **The full team must be SECOND-highest.** The market ceiling IS the
+      second-highest opponent max, so as the highest it would set nothing and the
+      scenario would prove nothing. Hence $8.0M for it against $10.0M for the
+      richest rival, and swapping the two is a mutation the tests catch.
+    * **Both figures sit under MAX_SALARY.** A physical max at the league maximum
+      cannot be told apart from `physical_max_bid`'s clamp — the mistake
+      `endgame-last-goalie` was built to avoid — and the claim here is precisely
+      which number the ceiling came from.
+    * **The two rich teams are shaped FIRST, while the pool is still rich.** Not
+      cosmetic: `_drain` buys the dearest player it can and stops at
+      `ROSTER_SIZE`, so against the leftovers of eight shaped teams it needs many
+      cheap purchases to move a big budget — measured, shaping these two last put
+      the RIVAL at 24 as well. Two full teams read fine on screen and quietly
+      destroy the test: with the highest and the second both full, "the ceiling is
+      set by a team with no roster space" can no longer fail.
+
+    Only **2 of 594** pool prices are capped here — exactly the two players whose
+    model price exceeds $8.0M. That is expected at this ceiling and this scenario
+    is not the one for the capped marker; `drained-late-draft` is.
+    """
+    price = _model_price(state)
+    reserved = _reserved_top(price)
+    by_wealth = sorted(
+        (code for code in state.teams if code != MY_TEAM),
+        key=lambda code: (-state.teams[code].remaining_budget, code),
+    )
+    full, rival = by_wealth[0], by_wealth[1]
+    for code, up_to, target_max in ((full, ROSTER_SIZE, 8.0), (rival, 17, 10.0)):
+        team = state.teams[code]
+        _drain(team, state, price, reserved, 12.0)
+        _fill(team, state, price, reserved, up_to=up_to)
+        _squeeze(team, target_max)
+    _late_draft_shape(state, price, reserved, by_wealth[2:], spread=(1.5, 3.0))
+    _leave_bot_planning(state, price, reserved)
+
+
 SCENARIOS = {
     "goalie-asymmetry": _scenario_goalie_asymmetry,
     "endgame-ceiling-binds": _scenario_endgame_ceiling_binds,
     "endgame-last-goalie": _scenario_endgame_last_goalie,
     "endgame-sole-bidder": _scenario_endgame_sole_bidder,
+    "drained-late-draft": _scenario_drained_late_draft,
+    "full-roster-still-bidding": _scenario_full_roster_still_bidding,
 }
 
 

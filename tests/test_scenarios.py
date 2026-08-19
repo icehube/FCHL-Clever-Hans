@@ -23,6 +23,8 @@ from price_model import load_model_params, predict_all_prices
 ENDGAME = "endgame-ceiling-binds"
 LAST_GOALIE = "endgame-last-goalie"
 SOLE_BIDDER = "endgame-sole-bidder"
+LATE_DRAFT = "drained-late-draft"
+FULL_ROSTER = "full-roster-still-bidding"
 
 
 def _priced(state):
@@ -562,6 +564,356 @@ class TestEndgameSoleBidder:
             a, b = first.teams[code], second.teams[code]
             assert [(p.name, p.salary) for p in a.all_players] == \
                    [(p.name, p.salary) for p in b.all_players], f"{code} differs"
+        assert first.available_players.keys() == second.available_players.keys()
+
+
+def _assert_bot_is_still_in_the_draft(state, live):
+    """Both late-draft scenarios build BOT with `_leave_bot_planning`, so this is one check.
+
+    A scenario whose BOT cannot act tests nothing: an Infeasible MILP degrades
+    every panel to floor values and the advisor stops answering. The two halves
+    that are not obvious:
+
+    * `physical_max_bid < MAX_SALARY` — a physical max sitting AT the league
+      maximum cannot be told apart from the clamp inside `physical_max_bid`, so
+      any figure derived from it would be unattributable.
+    * a nonzero `roster_needs` — this is what the drain target was chosen for. A
+      shallower drain buys BOT past its position minimums and leaves nothing on
+      the board it has to have; see `_leave_bot_planning` for the four targets
+      measured. If a data refresh moves this, retune that target rather than
+      deleting the assertion.
+    """
+    bot = state.teams[MY_TEAM]
+    solution = optimizer.solve_optimal_roster(bot, state.available_players, live)
+    assert solution.status == "Optimal", (
+        f"BOT's MILP is {solution.status} — the advisor cannot answer"
+    )
+    assert not bot.is_done, "BOT must always still be drafting"
+    assert bot.total_spots_remaining >= 1, "BOT has no spots left to plan for"
+    assert MIN_SALARY < bot.physical_max_bid < MAX_SALARY, (
+        f"BOT's physical max is ${bot.physical_max_bid}M — it has to be a real "
+        f"figure strictly under ${MAX_SALARY}M, or it is indistinguishable from "
+        f"the clamp"
+    )
+    assert sum(bot.roster_needs.values()) >= 1, (
+        f"BOT is at {bot.roster_count} players with no position needs left "
+        f"({dict(bot.roster_needs)}) — `_leave_bot_planning`'s drain target is "
+        f"tuned to leave a hole on the board"
+    )
+
+
+class TestSqueezeHitsItsTarget:
+    """`scenarios._squeeze` directly, because from outside a scenario it cannot fail.
+
+    The helper inverts `physical_max_bid` to land a team on a named max, and it
+    needs two branches: with spots open the commissioner's reserve has to be added
+    back, at `spots == 0` there is no reserve at all. Get the second one wrong and
+    the team lands $0.5M off — and **every scenario-level assertion still passes**,
+    because the ceiling still equals the full team's max, just half a million
+    lower. So the branch is pinned here, on the helper, rather than through
+    `full-roster-still-bidding`.
+
+    The only test in this file that reaches for a private: the alternative is a
+    scenario constant asserted in two places, which is a second source of truth
+    for a figure that exists to be arbitrary.
+    """
+
+    def _an_opponent(self, state):
+        return state.teams[sorted(c for c in state.teams if c != MY_TEAM)[0]]
+
+    def test_with_spots_open_the_reserve_is_added_back(self):
+        state = build_initial_state()
+        team = self._an_opponent(state)
+        scenarios._squeeze(team, 4.2)
+        assert team.total_spots_remaining > 0, "precondition: this is the open branch"
+        assert team.physical_max_bid == pytest.approx(4.2), (
+            f"asked for a $4.2M max, got ${team.physical_max_bid}M on "
+            f"{team.total_spots_remaining} open spots"
+        )
+
+    def test_a_full_roster_has_no_reserve_to_add_back(self):
+        state = build_initial_state()
+        team = self._an_opponent(state)
+        model, _, _ = _priced(state)
+        scenarios._fill(team, state, model, set())
+        assert team.total_spots_remaining == 0, "precondition: this is the full branch"
+        scenarios._squeeze(team, 6.0)
+        assert team.physical_max_bid == pytest.approx(6.0), (
+            f"asked for a $6.0M max on a full roster, got "
+            f"${team.physical_max_bid}M — the open-spots formula adds a reserve "
+            f"that does not exist at 24 players"
+        )
+        assert team.remaining_budget == pytest.approx(6.0), (
+            "at zero spots the physical max IS the remaining budget"
+        )
+
+
+class TestDrainedLateDraft:
+    """Sixty picks in: the money is gone, the rosters are not full, nobody is done.
+
+    The state between `/reset` and the two endgames, and the one a real draft
+    spends its second half in. `endgame-ceiling-binds` reaches a binding ceiling by
+    marking eight teams DONE — demand collapses and two teams bid.
+    `endgame-sole-bidder` reaches it by filling every roster — the ceiling hits the
+    floor. Here all ten opponents are live, every one of them still needs players,
+    and the ceiling binds anyway, mid-range, because the budgets are spent.
+
+    Bands and floors, never the measured value: `players.csv` is replaced before
+    every draft.
+    """
+
+    def _opponents(self, state):
+        return {c: t for c, t in state.teams.items() if c != MY_TEAM}
+
+    def test_the_ceiling_binds_strictly_between_the_floor_and_the_cap(self):
+        """Neither of the two states already loadable: not the cap, not the floor."""
+        _, _, info = _priced(scenarios.load(LATE_DRAFT))
+        assert MIN_SALARY < info.market_ceiling < MAX_SALARY, (
+            f"ceiling is ${info.market_ceiling}M — at ${MAX_SALARY}M this is "
+            f"/reset and at ${MIN_SALARY}M it is endgame-sole-bidder; the point "
+            f"of this scenario is the range in between"
+        )
+
+    def test_the_ceiling_is_the_second_highest_opponent_max(self):
+        """The rule itself, on ten live teams — and the top three must differ.
+
+        With ties, "second-highest" is indistinguishable from "highest" or "any of
+        them" and this assertion could not fail. `_late_draft_shape` staggers the
+        squeeze targets for exactly this reason.
+        """
+        state = scenarios.load(LATE_DRAFT)
+        _, _, info = _priced(state)
+        maxes = sorted(
+            (t.physical_max_bid for t in self._opponents(state).values()), reverse=True
+        )
+        assert len(set(maxes[:3])) == 3, (
+            f"the top three opponent maxes are {maxes[:3]} — a tie hides which "
+            f"team sets the ceiling"
+        )
+        assert info.market_ceiling == pytest.approx(maxes[1]), (
+            f"ceiling ${info.market_ceiling}M is not the second-highest of {maxes}"
+        )
+
+    def test_every_opponent_is_live_and_still_shopping(self):
+        """The premise: money gone, holes left, nobody finished.
+
+        A done team leaves the ceiling and the demand count entirely, so one of
+        those would quietly turn this into `endgame-ceiling-binds`.
+        """
+        state = scenarios.load(LATE_DRAFT)
+        _, _, info = _priced(state)
+        for code, team in self._opponents(state).items():
+            assert not team.is_done, f"{code} is done — that is the other scenario"
+            assert team.total_spots_remaining >= 1, (
+                f"{code} has a full roster; this scenario is about teams that "
+                f"still need players and cannot pay for them"
+            )
+            assert team.physical_max_bid >= MIN_SALARY, (
+                f"{code} cannot reach the floor, so it is not a bidder at all"
+            )
+            assert ROSTER_SIZE // 2 < team.roster_count < ROSTER_SIZE, (
+                f"{code} has {team.roster_count} players — a late draft is most "
+                f"of the way to {ROSTER_SIZE}, and none of the way is a reset"
+            )
+        assert info.demand_count == len(state.teams) - 1, (
+            f"demand_count is {info.demand_count}, not all "
+            f"{len(state.teams) - 1} opponents"
+        )
+        assert not info.floor_demand, (
+            "floor_demand means zero demand, which floors every price in the pool"
+        )
+
+    def test_a_real_share_of_the_pool_is_capped(self):
+        """What the ceiling is FOR: prices the MILP plans on, cut below the model.
+
+        Counted with `market.is_capped`, the same predicate the Available Players
+        Price column and the nomination panel's ▼ marker both render from — a
+        private restatement here would pass while the panels showed nothing.
+        """
+        state = scenarios.load(LATE_DRAFT)
+        model, live, info = _priced(state)
+        capped = [n for n in model if market.is_capped(model[n], live[n])]
+        assert len(capped) >= 10, (
+            f"only {len(capped)} of {len(model)} players price below their model "
+            f"at a ${info.market_ceiling}M ceiling — with a handful, whether the "
+            f"panels show the capped branch at all is luck"
+        )
+
+    def test_the_nomination_panel_has_a_model_price_to_strike_through(self):
+        """The two-price line, outside an endgame.
+
+        Both figures always render; the ▼ and the strike-through only when the
+        ceiling cut the price. A recommendation whose two figures agree renders a
+        panel that cannot show what this scenario was built to show.
+        """
+        state = scenarios.load(LATE_DRAFT)
+        model, live, _ = _priced(state)
+        picks = [p for p in optimizer.recommend_nomination(state, live, model) if p]
+        assert picks, "no nomination recommendation at all"
+        assert any(p.capped for p in picks), (
+            "neither nomination pick is capped: "
+            + ", ".join(
+                f"{p.player.name} model ${p.model_price:.1f}M vs market "
+                f"${p.expected_price:.1f}M"
+                for p in picks
+            )
+        )
+
+    def test_the_forecast_says_something_about_the_player(self):
+        """`stop_status = live` with a real figure — impossible on a fresh state.
+
+        At `ceiling == MAX_SALARY` the forecast never starts and every player in
+        the pool reports `at_cap` with no number.
+        """
+        state = scenarios.load(LATE_DRAFT)
+        model, live, info = _priced(state)
+        richest = max(model, key=lambda n: (model[n], n))
+        rec = optimizer.compute_bid_recommendation(
+            state.available_players[richest], state.teams[MY_TEAM],
+            state.available_players, live, info, current_price=MIN_SALARY,
+        )
+        assert rec.stop_status == "live", (
+            f"stop_status is {rec.stop_status!r} — no forecast, so this scenario "
+            f"buys nothing over /reset"
+        )
+        assert rec.expected_stop is not None
+        assert rec.expected_stop <= MAX_SALARY, (
+            f"expected_stop ${rec.expected_stop}M is a bid the league forbids"
+        )
+
+    def test_bot_can_still_plan_and_still_bid(self):
+        state = scenarios.load(LATE_DRAFT)
+        _, live, _ = _priced(state)
+        _assert_bot_is_still_in_the_draft(state, live)
+
+    def test_every_team_still_solves(self):
+        """League State's Proj column is a MILP per team; one Infeasible blanks a row."""
+        state = scenarios.load(LATE_DRAFT)
+        _, live, _ = _priced(state)
+        for code, team in state.teams.items():
+            solution = optimizer.solve_optimal_roster(team, state.available_players, live)
+            assert solution.status == "Optimal", f"{code} is {solution.status}"
+
+    def test_loading_it_twice_gives_the_same_state(self):
+        first, second = scenarios.load(LATE_DRAFT), scenarios.load(LATE_DRAFT)
+        for code in first.teams:
+            a, b = first.teams[code], second.teams[code]
+            assert [(p.name, p.salary) for p in a.all_players] == \
+                   [(p.name, p.salary) for p in b.all_players], f"{code} differs"
+            assert a.penalties == b.penalties, f"{code} penalties differ"
+        assert first.available_players.keys() == second.available_players.keys()
+
+
+class TestFullRosterStillBidding:
+    """A team at 24 with cap space is still a bidder — and here it sets the price.
+
+    `4dc59da` fixed a ceiling that gated on roster space; extras go to the minors
+    with their salary fully on the cap, so a full team can raise a bid and someone
+    has to outbid it. Until now that lived only in unit tests on synthetic teams.
+    `endgame-sole-bidder` is the opposite case — full AND broke — and proves
+    nothing about this one.
+    """
+
+    def _opponents(self, state):
+        return {c: t for c, t in state.teams.items() if c != MY_TEAM}
+
+    def _the_full_team(self, state):
+        full = [c for c, t in self._opponents(state).items() if t.roster_count == ROSTER_SIZE]
+        assert len(full) == 1, (
+            f"expected exactly one full opponent, got {full} — see the scenario "
+            f"docstring on why two makes the claim below unfalsifiable"
+        )
+        return full[0], state.teams[full[0]]
+
+    def test_exactly_one_opponent_is_full_with_nothing_it_needs(self):
+        state = scenarios.load(FULL_ROSTER)
+        code, team = self._the_full_team(state)
+        assert team.total_spots_remaining == 0, f"{code} still has a spot open"
+        assert sum(team.roster_needs.values()) == 0, (
+            f"{code} is at {ROSTER_SIZE} players but still reports "
+            f"{dict(team.roster_needs)} — it cannot roster anyone to fix that"
+        )
+        assert not team.is_done, (
+            f"{code} is marked done, which excludes it from the ceiling for a "
+            f"completely different reason and hides what this scenario tests"
+        )
+
+    def test_the_full_team_sets_the_market_ceiling(self):
+        """It is SECOND-highest on purpose: the ceiling IS the second-highest max.
+
+        As the highest it would set nothing at all, and swapping the two squeeze
+        targets is a mutation this catches.
+        """
+        state = scenarios.load(FULL_ROSTER)
+        _, _, info = _priced(state)
+        code, team = self._the_full_team(state)
+        assert MIN_SALARY < team.physical_max_bid < MAX_SALARY, (
+            f"{code}'s max is ${team.physical_max_bid}M — at ${MAX_SALARY}M it "
+            f"cannot be told apart from the clamp"
+        )
+        assert info.second_bidder == code, (
+            f"second_bidder is {info.second_bidder}, not the full team {code}"
+        )
+        assert info.market_ceiling == pytest.approx(team.physical_max_bid), (
+            f"ceiling ${info.market_ceiling}M is not {code}'s "
+            f"${team.physical_max_bid}M"
+        )
+
+    def test_gating_the_ceiling_on_roster_space_would_underprice_the_pool(self):
+        """The 2026-08-05 regression as a number, which is the point of the state."""
+        state = scenarios.load(FULL_ROSTER)
+        _, _, info = _priced(state)
+        code, _ = self._the_full_team(state)
+        with_spots = sorted(
+            (t.physical_max_bid for t in self._opponents(state).values()
+             if t.total_spots_remaining > 0),
+            reverse=True,
+        )
+        gated = with_spots[1]
+        assert info.market_ceiling - gated >= 1.0, (
+            f"a ceiling counting only teams with spots would be ${gated}M against "
+            f"the real ${info.market_ceiling}M — a ${info.market_ceiling - gated:.1f}M "
+            f"gap is too small to notice when {code} stops counting"
+        )
+
+    def test_the_live_ceiling_counts_it_too(self):
+        """The bid advisor's own ceiling is a different computation over a different set.
+
+        `/bid-check` builds its `MarketInfo` from `compute_live_ceiling` over the
+        named bidders, so a full team dropping out of THAT set would produce a
+        spurious DROP against the one rival who can actually outbid BOT.
+        """
+        state = scenarios.load(FULL_ROSTER)
+        code, team = self._the_full_team(state)
+        bidders = [MY_TEAM, code]
+        assert market.live_opponents(bidders, state.teams) == [code], (
+            f"{code} is not a live opponent, so bidding against it alone reads "
+            f"as uncontested"
+        )
+        assert market.compute_live_ceiling(bidders, state.teams) == pytest.approx(
+            team.physical_max_bid
+        )
+
+    def test_bot_can_still_plan_and_still_bid(self):
+        state = scenarios.load(FULL_ROSTER)
+        _, live, _ = _priced(state)
+        _assert_bot_is_still_in_the_draft(state, live)
+
+    def test_every_team_still_solves(self):
+        """Including the full one, whose MILP has zero spots to fill."""
+        state = scenarios.load(FULL_ROSTER)
+        _, live, _ = _priced(state)
+        for code, team in state.teams.items():
+            solution = optimizer.solve_optimal_roster(team, state.available_players, live)
+            assert solution.status == "Optimal", f"{code} is {solution.status}"
+
+    def test_loading_it_twice_gives_the_same_state(self):
+        first, second = scenarios.load(FULL_ROSTER), scenarios.load(FULL_ROSTER)
+        for code in first.teams:
+            a, b = first.teams[code], second.teams[code]
+            assert [(p.name, p.salary) for p in a.all_players] == \
+                   [(p.name, p.salary) for p in b.all_players], f"{code} differs"
+            assert a.penalties == b.penalties, f"{code} penalties differ"
         assert first.available_players.keys() == second.available_players.keys()
 
 

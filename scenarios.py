@@ -432,10 +432,18 @@ def _squeeze(team: TeamState, target_max: float) -> None:
     """Set `penalties` so `physical_max_bid` lands exactly on `target_max`.
 
     The lever purchases cannot pull. `_drain` stops at `ROSTER_SIZE`, so a team
-    cannot spend its way to "no money, spots still open" — measured 2026-08-18
-    with the top 25 held back, **7 of 10 opponents hit 24 players with $8.2M to
-    $22.6M still spendable**, the ceiling stayed at MAX_SALARY and not one of 570
-    pool prices was capped. Dead cap is what removes money without adding players,
+    cannot spend its way to "no money, spots still open". Swept 2026-08-18 over
+    **16 constructions** — drain targets $0 / $5 / $8 / $12M spendable, with and
+    without a fill to 24, against the top 25 and the top 40 reserved — and in
+    **every one** the ceiling stayed at MAX_SALARY and **zero** pool prices were
+    capped. The sharpest single case is the top 25 reserved, drained to $0.0M with
+    no fill: **6 of 10 opponents stop at 24 players with $9.8M to $23.0M still
+    spendable**, because the roster ran out before the money did. (An earlier
+    draft of this paragraph published 7 / $8.2M-$22.6M / 570 pool prices, which
+    reproduces under none of the 16 — the same class of error as the 19/40/563
+    trio in `_scenario_endgame_ceiling_binds`. The sweep is the claim; a single
+    construction was never the point.) Dead cap is what removes money without
+    adding players,
     and the league already has it: CBA 11.4 leaves 50% of a bought-out salary on
     the cap. So a squeezed team reads as one that bought contracts out, which is
     exactly the mid-draft state these scenarios are about.
@@ -509,7 +517,7 @@ def _late_draft_shape(
     actually spent on players, so the rosters look drafted rather than filled),
     `_fill` to a staggered size with depth, then `_squeeze` onto a staggered
     physical max. Spending first is not decoration — it is what keeps the
-    penalties plausible: measured, no drain at all needs $13.5M to $28.4M of dead
+    penalties plausible: measured, no drain at all needs $15.2M to $28.3M of dead
     cap per team, draining to $12.0M needs **$9.0M to $11.0M**, and draining
     deeper does not help (at $8.0M and $5.0M some teams reach 24 players, which
     destroys the premise, while the penalty spread widens to $5.4-15.9M and

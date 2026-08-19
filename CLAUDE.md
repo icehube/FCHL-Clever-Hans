@@ -278,7 +278,7 @@ all: the likely explanation is that it was never applied.
 
 ## Code conventions
 
-- Python 3.12, type hints on signatures
+- Python 3.12+ (the venv runs 3.14.4 — verified 2026-08-19; nothing pins a version, so this is the floor, not the target), type hints on signatures
 - All money in millions (4.6 = $4.6M)
 - Market-adjusted prices everywhere in optimizer -- never raw model prices
 - Flat module layout, no nested packages

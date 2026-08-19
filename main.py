@@ -671,7 +671,9 @@ def _solve_buyout_indicators(
     return solved
 
 
-def _publish_if_current(version: int, target: dict, solved: dict, what: str) -> bool:
+def _publish_if_current[V](
+    version: int, target: dict[str, V], solved: dict[str, V], what: str
+) -> bool:
     """Copy a thread's result into its module dict — unless the state moved on.
 
     The two manual scans (`/solve-standings`, `/buyout-indicators`) are seconds of

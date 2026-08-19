@@ -76,4 +76,4 @@ Use the project's `.venv/bin/<tool>` convention throughout — never `source .ve
 - Circular imports
 - Missing or malformed data files
 - PuLP/CBC solver not available
-- Incompatible Python version (project targets 3.12)
+- Incompatible Python version (3.12 is the floor; the venv runs 3.14.4)

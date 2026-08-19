@@ -29,6 +29,7 @@ from market import (
     bid_winner,
     compute_live_ceiling,
     compute_market_ceiling,
+    is_capped,
     live_opponents,
 )
 from optimizer import (
@@ -764,8 +765,10 @@ def _context(request: Request) -> dict:
             # market_price = min(model_price, ceiling), so the two are equal on
             # every row until opponent budgets drain. Flag the rows where the
             # ceiling actually cuts the price — the table shows one column and
-            # only marks it when the market is doing something.
-            "capped": round(mp, 1) < round(model_p, 1),
+            # only marks it when the market is doing something. Shared with the
+            # nomination panel's two figures, hence market.is_capped rather than
+            # the comparison inline.
+            "capped": is_capped(model_p, mp),
             "is_rfa": player.is_rfa,
             "in_optimal": name in wanted,
             "prior_fchl_team": player.prior_fchl_team,

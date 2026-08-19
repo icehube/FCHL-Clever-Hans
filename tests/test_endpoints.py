@@ -396,10 +396,33 @@ class TestPriceColumn:
         assert ">Model $<" not in r.text and ">Market $<" not in r.text
 
     def _capped(self, main, name: str) -> bool:
-        """The same flag _context puts on each bid_limits row."""
+        """The same flag _context puts on each bid_limits row.
+
+        RECOMPUTED here rather than read off the response on purpose — that is
+        what makes the assertions below an equivalence rather than a tautology.
+        The cost is that nothing in this class sees the rendered flag, which is
+        why `test_capped_flips_once_the_ceiling_bites` also reads the markup:
+        `market.is_capped` returning False breaks the Price column's marker and
+        every recomputation in here would still agree with itself.
+        """
         return round(main.market_prices[name], 1) < round(
             main.model_prices[name].expected_price, 1
         )
+
+    def _row(self, page: str, name: str) -> str:
+        """The bid_limits table row for `name`, as rendered.
+
+        Matched against the UNESCAPED row rather than by escaping the name:
+        Jinja writes an apostrophe as `&#39;` and `html.escape` produces
+        `&#x27;`, so escaping here silently matches nothing for two names in
+        today's pool (`Ryan O'Reilly`, `K'Andre Miller`) — and which name this
+        test picks depends on the data.
+        """
+        rows = [r for r in page.split("<tr") if f">{name}</a>" in html.unescape(r)]
+        assert len(rows) == 1, (
+            f"expected exactly one Available Players row for {name}, got {len(rows)}"
+        )
+        return rows[0]
 
     def test_capped_means_exactly_over_the_ceiling(self, client):
         """The RULE, not today's outcome.
@@ -480,6 +503,24 @@ class TestPriceColumn:
             assert self._capped(main, priciest)
             capped = self._assert_rule_holds(main, "opponents squeezed")
             assert capped, "fixture stopped capping anything — the rule asserts nothing"
+
+            # And the column actually SAYS so. Everything above recomputes the
+            # rule from the two price dicts, so it holds identically against a
+            # `capped` flag that is wrong for every row — measured 2026-08-18,
+            # `market.is_capped` returning False leaves this class green.
+            page = client.get("/").text
+            marked = self._row(page, priciest)
+            assert "line-through" in marked, (
+                f"{priciest} is capped (${model[priciest]:.1f}M model vs "
+                f"${main.market_prices[priciest]:.1f}M market) but his row is unmarked"
+            )
+            assert f"${round(main.market_prices[priciest], 1)}M" in marked
+
+            plain = next(n for n in main.auction_state.available_players
+                         if not self._capped(main, n))
+            assert "line-through" not in self._row(page, plain), (
+                f"{plain} is priced at his model price and must not be marked"
+            )
         finally:
             for code, pen in saved.items():
                 main.auction_state.teams[code].penalties = pen

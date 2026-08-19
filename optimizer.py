@@ -19,7 +19,7 @@ from config import (
     SALARY_INCREMENT,
     STARTING_LINEUP,
 )
-from market import MarketInfo
+from market import MarketInfo, is_capped
 from state import AuctionState, Player, TeamState, lineup_points
 
 
@@ -89,15 +89,12 @@ class NominationPick:
     def capped(self) -> bool:
         """Did the market ceiling cut this player's price, *as displayed*?
 
-        Quantized to one decimal, the same rule as `main.py`'s `bid_limits`
-        `capped` flag, because the panel prints one decimal: a $0.01 gap renders
-        as two identical figures, and striking one of them through then reads as
-        a display bug rather than as Layer 2 binding. Not a hypothetical — the
-        drain tie-break breaks toward LEAST surplus, so on the UFA half the pick
-        is routinely a cent under the ceiling (measured 2026-08-18 in a
-        $2.5M-ceiling state: $2.51M model against a $2.50M market).
+        The rule itself is `market.is_capped`, shared with the Available Players
+        Price column — see it for why the comparison is quantized and why there
+        is only one copy. This property exists so the template can ask the pick
+        instead of doing arithmetic in Jinja.
         """
-        return round(self.model_price, 1) > round(self.expected_price, 1)
+        return is_capped(self.model_price, self.expected_price)
 
 
 @dataclass

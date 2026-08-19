@@ -107,6 +107,31 @@ def compute_market_price(
     return min(model_price, market_info.market_ceiling)
 
 
+def is_capped(model_price: float, market_price: float) -> bool:
+    """Did the ceiling cut this player's price, as the panels DISPLAY it?
+
+    The observation that `compute_market_price`'s `min()` bit. Lives here rather
+    than in either panel because both of them ask it — the Available Players
+    Price column and the nomination panel's two figures — and two copies of one
+    rule agree only until one is edited, which is how the drain filter went stale
+    and how `compute_marginal_value` came to carry its own drifting copy of
+    `physical_max_bid`'s formula (see CHANGELOG.md).
+
+    Quantized to one decimal because that is what both panels print: a $0.01 gap
+    renders as two identical figures, and marking one of them then reads as a
+    display bug rather than as Layer 2 binding. Not hypothetical — the drain
+    tie-break breaks toward least surplus, so the UFA half's recommendation is
+    routinely a cent under the ceiling ($2.51M model against a $2.50M market,
+    measured 2026-08-18).
+
+    The tests deliberately do NOT import this: `TestPriceColumn._capped` and
+    `TestNominationPanelPrices._assert_figures_match` restate the comparison so
+    the assertion is an independent equivalence rather than a tautology against
+    the code under test.
+    """
+    return round(model_price, 1) > round(market_price, 1)
+
+
 def compute_all_market_prices(
     players: dict[str, Player],
     model_prices: dict[str, PricePrediction],

@@ -20,6 +20,69 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-19c]
+
+Grill of the event-loop change. Three findings, none of them a defect in the
+shipped behaviour — the measurements all held up on re-check — and all three
+about the change being *undefended* rather than wrong.
+
+### Changed
+
+- **The structural guard now asks the question from the side that catches a new
+  endpoint.** `THREADED_SCANS` is a hand-maintained pair, so on its own it says
+  nothing about a **third** multi-solve endpoint — which is exactly the failure
+  it exists to prevent, and exactly how this bug arrived in the first place: an
+  endpoint written the obvious way, `async def` around a loop of solves. Two
+  additions close it. First, the "no direct solver call" check moved from handler
+  bodies to the whole module: `_context` is called by all 25 endpoints, so a
+  `_solve_*` added *there* would have been on the loop for every one of them and
+  passed the handler-only walk. Second, every caller of `solve_optimal_roster`
+  must now be a `_solve_*` (which the first check forces into a thread) or name
+  itself in `SOLVES_ON_THE_LOOP` with a reason — today `_recompute` alone, one
+  78ms solve whose result every panel in the response needs. Same set-equality
+  idiom as `TestEveryMutatingPostTakesASnapshot`. Both mutants checked, each
+  asserted to have patched exactly one site.
+- **CBC being safe to call from two threads at once is recorded and pinned.** The
+  change made concurrent solves reachable for the first time — the loop solves
+  for BOT on every pick while a scan is mid-flight in a worker thread — and
+  nothing said so. It holds because PuLP names its scratch files `uuid4().hex`
+  per solve (`pulp/apis/core.py`, `LpSolver.create_tmp_files`) and CBC is a
+  subprocess, so the GIL is released: measured 11 concurrent solves × 3 rounds,
+  zero errors, zero disagreements with the serial answers, **401ms against
+  1134ms**. The new test races three opponents against their serial answers
+  (0.88s, six solves) and asserts the **answers**, not the timing, because the
+  collision regime is silent — adding `keepFiles=True` to `optimizer.py`'s one
+  `PULP_CBC_CMD`, the one-line change that reintroduces a shared filename, does
+  **not** raise: SRL came back `status="Optimal"` with **950** points against
+  **1355** solved alone, a wrong figure that would have rendered wearing a rank
+  badge.
+- `_publish_if_current` is generic over its value type (`[V]`, `dict[str, V]`)
+  instead of taking two bare `dict`s, so handing the buyout dict's string
+  verdicts an int-valued projections solve is a type error rather than a runtime
+  surprise. Also corrected the documented Python version: `CLAUDE.md` and
+  `verify-app.md` said 3.12 and the venv runs **3.14.4**, with nothing in the
+  repo pinning either — so 3.12 is the floor, not the target.
+
+### Investigated
+
+- **The `deepcopy` per scan is not a cost worth optimising.** 2.7–2.8ms on a
+  fresh state, mid-draft, and with a full 50-entry snapshot chain — the chain is
+  a list of JSON *strings*, which `deepcopy` returns by reference rather than
+  copying. A roster scan pays 23 copies, ~63ms of ~1600ms, all of it inside the
+  worker thread.
+- **The discard path was re-checked in Chrome and has no defect.** A pick landing
+  mid-scan leaves all 15 dot placeholders untouched, re-enables the Scan button,
+  logs no console error, and does show the warning toast: present at t+319ms
+  through t+3009ms, gone at t+4613ms, which is `shortcuts.js`'s 4000ms
+  auto-dismiss. A first probe reported no toast — that was a bad query on a
+  document-wide `.alert` join, not a finding.
+- **A ~3x speedup is available and was deliberately not taken** — see
+  `BACKLOG.md` → Ideas → Performance. The scans' own loops are embarrassingly
+  parallel now that concurrent CBC is measured safe, which would take a ~1.6s
+  roster scan to ~550ms. The loop fix already removed the *blocking*, which is
+  the part that hurt on draft day; a slow scan beside a responsive cockpit is a
+  different problem from a frozen one.
+
 ## [2026-08-19b]
 
 ### Fixed

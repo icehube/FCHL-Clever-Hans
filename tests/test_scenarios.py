@@ -650,8 +650,11 @@ class TestSqueezeHitsItsTarget:
     def test_a_full_roster_has_no_reserve_to_add_back(self):
         state = build_initial_state()
         team = self._an_opponent(state)
-        model, _, _ = _priced(state)
-        scenarios._fill(team, state, model, set())
+        # The scenarios' own price function, not `_priced`'s model dict: this one
+        # clamps to MIN_SALARY, which is why it exists. The two agree on today's
+        # data (no rounded model price is under $0.5M), so this is about the test
+        # of a helper using the helper's prices rather than a live difference.
+        scenarios._fill(team, state, scenarios._model_price(state), set())
         assert team.total_spots_remaining == 0, "precondition: this is the full branch"
         scenarios._squeeze(team, 6.0)
         assert team.physical_max_bid == pytest.approx(6.0), (

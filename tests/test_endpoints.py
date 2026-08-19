@@ -740,7 +740,7 @@ class TestViewedTeamSurvivesEdits:
         assert re.search(r'name="team_a" value="SRL"', panel), "trade form too"
 
     def test_buyout_dots_render_for_bot_only(self, client):
-        """The scan is BOT-only by construction — _recompute_buyout_indicators
+        """The scan is BOT-only by construction — _solve_buyout_indicators
         scores every hypothetical against BOT's MILP total — so a placeholder on
         SRL's roster could only ever sit grey, reading as "not analyzed" when
         the answer is "this analysis isn't about you"."""

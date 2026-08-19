@@ -430,7 +430,7 @@ class TestEndgameLastGoalie:
     def test_every_opponent_can_still_be_solved(self):
         """A loadable scenario must not degrade a panel to floor values.
 
-        `main._recompute_exact_projections` drops an Infeasible team back to its
+        `main._solve_exact_projections` drops an Infeasible team back to its
         ESTIMATE, and BOT's own advice falls back to floor values when its MILP
         cannot solve — so a scenario that leaves a team unsolvable is worse than
         `/reset` rather than better.

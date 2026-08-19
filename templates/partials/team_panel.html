@@ -146,7 +146,7 @@
                answer is "can't be bought out at all".
 
                Same reason no dots on an opponent's panel. The scan is BOT-only
-               by construction — _recompute_buyout_indicators scores every
+               by construction — _solve_buyout_indicators scores every
                hypothetical against BOT's MILP total — so on SRL's roster the
                real answer is "this analysis isn't about you". #}
             <td>{% if viewed_team.is_my_team and not p.is_target and p.can_be_bought_out %}<span id="bo-{{ p.name|dom_id }}" class="buyout-light light-grey" title="Not analyzed — click 'Scan Roster for Buyout Opportunities' in the Buyout Analyzer"></span>{% endif %}</td>

@@ -11,11 +11,15 @@ import re
 from datetime import datetime
 
 from contextlib import asynccontextmanager
+from copy import deepcopy
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+# The two manual scans hand their MILP loops to this rather than running them on
+# the event loop. See `_publish_if_current` for the whole rule.
+from starlette.concurrency import run_in_threadpool
 
 from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
 # Imported as a module so `data_loader.loaded_disambiguations` is read live. It
@@ -392,6 +396,11 @@ buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 # opponent solve harmless.
 exact_projections: dict[str, int] = {}
 
+# Bumped by `_recompute()` on every state change. Read by the two threaded scans
+# to decide whether the state they solved against is still the state on screen;
+# `_publish_if_current` is the whole rule.
+_state_version = 0
+
 
 # Marginal values for the current state epoch, keyed by player name. Cleared
 # wholesale by _recompute() rather than versioned: a version counter has the
@@ -494,6 +503,11 @@ def _recompute():
     already been sold.
     """
     global market_prices, market_info, milp_solution, last_trade_eval
+    global _state_version
+    # Every state change passes through here, so one bump covers all twelve
+    # mutating endpoints. The two threaded scans compare it before and after
+    # solving — see `_publish_if_current`.
+    _state_version += 1
     last_trade_eval = None
     _marginal_cache.clear()
     _counterfactual_cache.clear()
@@ -566,8 +580,16 @@ def _log_change(kind: str, team_code: str, description: str) -> None:
     ))
 
 
-def _recompute_exact_projections() -> None:
+def _solve_exact_projections(
+    state: AuctionState, prices: dict[str, float]
+) -> dict[str, int]:
     """Solve every LIVE OPPONENT's optimal roster. Called only from /solve-standings.
+
+    **Pure, and that is the point**: it reads the state and prices it is handed
+    and returns a dict, touching no global. That is what makes it safe to run in
+    a worker thread while the event loop stays free to answer a bid check — see
+    `_publish_if_current`. It used to read `auction_state`/`market_prices` and
+    write `exact_projections` directly, which could only ever run on the loop.
 
     The heuristic in `_context` exists because 11 MILPs per action is
     unaffordable; this is the same answer computed properly, on request, the way
@@ -589,14 +611,12 @@ def _recompute_exact_projections() -> None:
     zero, so it keeps showing the estimate. Reporting a team as 0 points because
     a solver failed is worse than reporting it approximately.
     """
-    # Cleared in place, not rebound: `_recompute()` clears the same dict, and one
-    # object with two owners is easier to reason about than two bindings.
-    exact_projections.clear()
-    for code, t in auction_state.teams.items():
+    solved: dict[str, int] = {}
+    for code, t in state.teams.items():
         if t.is_done or code == MY_TEAM:
             continue
         try:
-            sol = solve_optimal_roster(t, auction_state.available_players, market_prices)
+            sol = solve_optimal_roster(t, state.available_players, prices)
         except Exception as e:
             # Broad on purpose — a solver blowing up on one opponent must not
             # cost the other nine — but never silent. The basis marker reveals
@@ -609,18 +629,26 @@ def _recompute_exact_projections() -> None:
             )
             continue
         if sol.status == "Optimal":
-            exact_projections[code] = int(sol.total_points)
+            solved[code] = int(sol.total_points)
+    return solved
 
 
-def _recompute_buyout_indicators():
-    """Recompute buyout indicators for BOT's roster. Called on-demand from /buyout-indicators."""
-    global buyout_indicators
-    from copy import deepcopy
+def _solve_buyout_indicators(
+    state: AuctionState, prices: dict[str, float], current_points: float
+) -> dict[str, str]:
+    """Would buying each eligible player out improve BOT's optimal lineup?
+
+    Pure for the same reason as `_solve_exact_projections`, and it needs one more
+    thing passed in: `current_points`, the figure every hypothetical is compared
+    against, read off `milp_solution` on the loop before this is called. The
+    per-player clones come off `state` — the caller's private snapshot — so
+    nothing here can see a roster change half-applied by a pick that lands while
+    it is solving.
+    """
     from config import BUYOUT_PENALTY_RATE
 
-    team = auction_state.teams[MY_TEAM]
-    current_pts = milp_solution.total_points if milp_solution and milp_solution.status == "Optimal" else 0
-    buyout_indicators = {}
+    solved: dict[str, str] = {}
+    team = state.teams[MY_TEAM]
     # Only what's eligible: a dot beside a player who can't be bought out is
     # worse than no dot, because it reads as a verdict on a decision that isn't
     # available.
@@ -632,14 +660,56 @@ def _recompute_buyout_indicators():
     # offered while the scan said nothing about them. Costs 4 more solves.
     for p in (q for q in team.all_players if q.can_be_bought_out):
         try:
-            clone = deepcopy(auction_state)
+            clone = deepcopy(state)
             bt = clone.teams[MY_TEAM]
             bt.remove_player(p.name)
             bt.penalties += p.salary * BUYOUT_PENALTY_RATE
-            bo_sol = solve_optimal_roster(bt, auction_state.available_players, market_prices)
-            buyout_indicators[p.name] = "buyout" if bo_sol.total_points > current_pts else "keep"
+            bo_sol = solve_optimal_roster(bt, state.available_players, prices)
+            solved[p.name] = "buyout" if bo_sol.total_points > current_points else "keep"
         except Exception:
-            buyout_indicators[p.name] = "keep"
+            solved[p.name] = "keep"
+    return solved
+
+
+def _publish_if_current(version: int, target: dict, solved: dict, what: str) -> bool:
+    """Copy a thread's result into its module dict — unless the state moved on.
+
+    The two manual scans (`/solve-standings`, `/buyout-indicators`) are seconds of
+    synchronous CBC. Run on the event loop, as they were until 2026-08-19, they
+    block EVERY other request for their whole duration — measured a warm
+    `/bid-check` at **10ms alone against 1682ms behind a roster scan**, and even
+    `/state`, which solves nothing at all, at 1564ms. The operator types a bid
+    price while a scan runs, so that is the one stall a live auction cannot
+    afford. `hx-disabled-elt` greys the button and says nothing about the panel.
+
+    So the solving moved to a worker thread, and this is the price of that: the
+    loop can now run an `/assign` while a scan is mid-flight, and a result
+    computed against the roster from before that pick must not be published.
+    Both dicts are read by templates that present them as authoritative — the
+    Proj column carries a rank badge, the dots carry a verdict — so a stale one
+    is worse than none. Discarding leaves the Proj column on its estimate with
+    `#proj-basis` saying so; the dots need one extra step at the call site,
+    because their template defaults a missing verdict to "keep" and would paint
+    a discarded scan all-green.
+
+    **A version counter rather than "is the dict still empty".** `_recompute()`
+    already clears `exact_projections`, and empty is ALSO the normal state before
+    anybody scans, so emptiness cannot tell "nobody asked" from "a pick landed
+    while I was solving". The counter can.
+
+    Cleared and updated in place rather than rebound: `_recompute()` clears the
+    same object, and one dict with two owners is easier to reason about than two
+    bindings.
+    """
+    if _state_version != version:
+        logging.info(
+            "Discarded %s solved against v%d — the state moved to v%d while the "
+            "solver ran, so the panel keeps what it had", what, version, _state_version,
+        )
+        return False
+    target.clear()
+    target.update(solved)
+    return True
 
 
 def _save_state():
@@ -1397,8 +1467,42 @@ async def undo(request: Request):
 
 @app.get("/buyout-indicators", response_class=HTMLResponse)
 async def buyout_indicators_endpoint(request: Request):
-    """Compute buyout indicators lazily, loaded via HTMX after page render."""
-    _recompute_buyout_indicators()
+    """Compute buyout indicators lazily, loaded via HTMX after page render.
+
+    ~15 MILP solves, off the event loop. Everything this handler reads from the
+    live state — the snapshot, the prices, the figure to beat — is read HERE, on
+    the loop, and handed to the solver; everything it writes goes through
+    `_publish_if_current`, also on the loop. So no worker thread ever touches a
+    module global, and the only thing the threading buys is that the other
+    requests keep being answered.
+
+    The `deepcopy` is safety, not speed — 3ms against a 78ms solve. The solver
+    only reads, but it reads `available_players` and every roster while an
+    `/assign` can now run alongside it, and a dict that changes size during
+    iteration raises.
+    """
+    version = _state_version
+    snapshot = deepcopy(auction_state)
+    current = (
+        milp_solution.total_points
+        if milp_solution and milp_solution.status == "Optimal" else 0
+    )
+    solved = await run_in_threadpool(
+        _solve_buyout_indicators, snapshot, market_prices, current
+    )
+    if not _publish_if_current(version, buyout_indicators, solved, "buyout indicators"):
+        # An EMPTY body, not the dots template. `buyout_dots.html` paints a
+        # verdict on every eligible player and defaults a missing one to "keep",
+        # so rendering it after a discard would turn all 15 dots green — which
+        # reads as "no buyout helps" and is exactly the silent failure the
+        # 2026-08-07 minors bug produced. `hx-swap="none"` plus no body leaves
+        # the placeholders grey, which is the truth: nobody has scanned this
+        # state yet. The toast is the only thing that says so.
+        return _toast(
+            HTMLResponse(""),
+            "Roster changed while scanning — nothing to show, scan again",
+            "warning",
+        )
     ctx = _context(request)
     return _render(request, "partials/buyout_dots.html", ctx)
 
@@ -1417,8 +1521,18 @@ async def solve_standings(request: Request):
     and `/undo` has nothing to revert, because no draft record changed. That is
     also why it does not go through `_recompute()` — which would empty the dict
     it just filled.
+
+    Solved off the event loop, published only if the state has not moved
+    underneath — `_publish_if_current` carries the reasoning for both scans, and
+    `/buyout-indicators` the note on why the snapshot is taken here rather than
+    in the thread.
     """
-    _recompute_exact_projections()
+    version = _state_version
+    snapshot = deepcopy(auction_state)
+    solved = await run_in_threadpool(
+        _solve_exact_projections, snapshot, market_prices
+    )
+    _publish_if_current(version, exact_projections, solved, "exact projections")
     return _render(request, "partials/standings_cells.html", _context(request))
 
 

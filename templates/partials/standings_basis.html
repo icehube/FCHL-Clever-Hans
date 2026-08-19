@@ -25,7 +25,7 @@
    What it deliberately does NOT distinguish: a scan in which every solve failed
    reads the same as never having scanned. That is honest about the figures, which
    is what the label is for, and a fourth state would describe history rather than
-   what is on screen. The log line in `_recompute_exact_projections` is where a
+   what is on screen. The log line in `_solve_exact_projections` is where a
    failure is diagnosed. #}
 <span id="proj-basis"{% if basis_oob is defined and basis_oob %} hx-swap-oob="true"{% endif %} class="text-[10px] font-normal opacity-60 block">
     {%- if standings_basis and not standings_basis.estimated -%}

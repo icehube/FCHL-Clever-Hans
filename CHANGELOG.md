@@ -20,6 +20,37 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-19b]
+
+### Fixed
+
+- **The two manual scans no longer stall the whole cockpit.** `BACKLOG.md` had this filed on 2026-08-18 and deferred "with a draft coming"; re-measured against the live server it was worse than the entry said, because **every** request queued behind a scan and not just other solves:
+
+  | request | alone | during `/solve-standings` | during Scan Roster | after |
+  |---|---|---|---|---|
+  | `/bid-check` (warm) | 10ms | 1234ms | **1682ms** | **3–14ms** |
+  | `/state` (solves nothing) | ~3ms | 1208ms | 1564ms | **12ms** |
+  | `/nominate` | 79ms | 1214ms | 1582ms | **87–90ms** |
+
+  All 25 handlers in `main.py` are `async def`, so FastAPI dispatches them to the event loop and ~1.2–1.6s of synchronous CBC held it. The draft-day shape is one click: Scan Roster, then type a bid price — `#bid-price` is `hx-trigger="change"` — and the advisor took 1.7s to answer a request that costs 10ms. `hx-disabled-elt` greys the button and says nothing about the rest of the panel. The scans themselves are unchanged (1296ms / 1635ms) and still land their results (15 dots, 10 exact figures).
+
+  **Not the one-word version.** `_recompute_exact_projections` and `_recompute_buyout_indicators` read module globals and wrote module globals, so simply dropping `async` would have run the state reads *and* the global writes in a worker thread — the objection the backlog entry itself raised. Instead each is now a pure `_solve_*` function that takes a state and prices and returns a dict: the endpoint reads what it needs on the loop, hands the pure function to `run_in_threadpool`, and publishes on the loop. No worker thread touches a global.
+
+  The `deepcopy` per scan is **safety, not speed** — 3ms against a 78ms solve. The solvers only read, but they iterate `available_players` and every roster while an `/assign` can now run alongside them, and a dict that changes size during iteration raises.
+
+- **A pick landing mid-scan now beats the scan.** That hazard is created by this change and is the reason `_publish_if_current` exists: the loop can run an `/assign` while a scan is in flight, and a result describing the roster from before it must not be published, because both dicts are rendered as authoritative — the Proj column carries a rank badge, the dots carry a verdict. `_recompute()` bumps a `_state_version` (one bump covers all twelve mutating endpoints); the scans compare it before and after.
+
+  **A counter rather than "is the dict still empty"**: `_recompute()` already clears `exact_projections`, and empty is *also* the normal state before anyone scans, so emptiness cannot tell "nobody asked" from "a pick landed while I was solving".
+
+  **The two discards are not symmetrical**, which is the part worth remembering. Dropping a standings solve is enough on its own — the column falls back to `_context`'s estimate and `#proj-basis` says `estimated`. Dropping a buyout scan is not: `buyout_dots.html` paints a verdict on every eligible player and defaults a missing one to `keep`, so re-rendering it would turn all 15 dots **green** — indistinguishable from "no buyout helps", which is precisely the 2026-08-07 minors failure. So that path returns an empty body (the placeholders stay grey) plus a warning toast saying to scan again.
+
+- New `tests/test_event_loop.py`, three kinds of claim because none covers the others: **structural** (ast — each scan hands a `_solve_*` to `run_in_threadpool`, no handler calls one directly, and `_recompute` still bumps the counter), **ordering** on the live server (`/state` fired 50ms *after* a scan must finish first — ordering rather than wall-clock, since CLAUDE.md's rule is that timing assertions go flaky under load), and **discard** (a stub solver that calls the real `_recompute()` mid-solve, so the test covers the link between the bump and the guard). Proven able to fail three ways: against the pre-fix build 5 of the 6 fail including the ordering test; publishing unconditionally kills both discard tests; removing the bump kills those two *and* the structural one.
+
+### Investigated
+
+- **`/trade-evaluate` measured at last: 179ms** for one-for-one and 171ms for three-for-one, inside the 500ms interaction budget. It was the one endpoint the closed interaction-budget entry left unmeasured, for the stated reason that it needs a built-up trade form — which is now three lines of `form.getlist` payload. No change; the figure is the point.
+
+
 ## [2026-08-19]
 
 ### Fixed

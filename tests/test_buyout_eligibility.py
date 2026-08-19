@@ -364,7 +364,7 @@ class TestUIMatchesEligibility:
         )
 
     def test_an_opponents_minors_get_no_dots(self, client):
-        """Dots are BOT-only by construction: `_recompute_buyout_indicators`
+        """Dots are BOT-only by construction: `_solve_buyout_indicators`
         scores every hypothetical against BOT's MILP total. Widening the scan
         to the minors must not widen it to other teams."""
         import main

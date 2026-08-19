@@ -449,11 +449,27 @@ def _squeeze(team: TeamState, target_max: float) -> None:
     `physical_max_bid = (remaining - spots * MIN_SALARY) + MIN_SALARY`, so the
     reserve has to be added back. At `spots == 0` there is no reserve and
     `physical_max_bid` IS `remaining_budget` — adding the term there lands the
-    figure $0.5M off, which is the whole claim of `full-roster-still-bidding`.
+    figure $0.5M off its named target. That error is invisible from OUTSIDE a
+    scenario, because the ceiling still equals the full team's max, just half a
+    million lower, so `TestSqueezeHitsItsTarget` pins both branches on the helper
+    directly rather than through `full-roster-still-bidding`.
+
+    **Raises rather than missing quietly.** Penalties only take money AWAY, so a
+    target above what the team could reach with no dead cap at all is impossible,
+    and the `max(0.0, ...)` this replaced returned a team sitting somewhere else
+    entirely while reporting success — the failure `_fill` raises to avoid, in a
+    helper whose entire contract is a figure. Measured 2026-08-18: the impossible
+    branch is reached by neither shipped scenario (11 squeezes each, every one
+    exact), so this is a guard for the next one.
+
+    Note it REPLACES whatever dead cap the league already carried rather than
+    adding to it — `fchl_teams.json` gives JHN and LGN $0.3M each — which keeps
+    the arithmetic invertible at the cost of overwriting two real figures.
 
     Call it AFTER every purchase for that team. A squeezed team has no `room`
     left, so `_fill` raises and `_drain` returns having bought nothing.
     """
+    original = team.penalties
     team.penalties = 0.0
     team._invalidate_cache()
     spots = team.total_spots_remaining
@@ -461,9 +477,21 @@ def _squeeze(team: TeamState, target_max: float) -> None:
         target_max if spots == 0
         else target_max - MIN_SALARY + spots * MIN_SALARY
     )
-    team.penalties = round(
-        max(0.0, SALARY_CAP - team.total_salary - wanted_remaining), 1
-    )
+    shortfall = round(SALARY_CAP - team.total_salary - wanted_remaining, 1)
+    if shortfall < 0:
+        # Leave the team as it was found: a half-squeezed roster in a raised
+        # build is debris, and the test asserts there is none.
+        team.penalties = original
+        team._invalidate_cache()
+        raise RuntimeError(
+            f"{team.code} cannot reach a ${target_max:.1f}M physical max: "
+            f"{team.roster_count} players at ${team.total_salary:.1f}M on the cap "
+            f"leave it ${shortfall:.1f}M short with zero penalties, and penalties "
+            f"only take money away. Drain it less, or ask for less."
+        )
+    # `round` gives -0.0 for a sub-cent shortfall; the guard above has already
+    # rejected every shortfall a $0.1M league can express.
+    team.penalties = max(shortfall, 0.0)
     team._invalidate_cache()
 
 

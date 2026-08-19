@@ -15,6 +15,7 @@ from config import (
     MY_TEAM,
     POSITION_MINIMUMS,
     ROSTER_SIZE,
+    SALARY_CAP,
     SALARY_INCREMENT,
 )
 from data_loader import build_initial_state
@@ -645,6 +646,32 @@ class TestSqueezeHitsItsTarget:
         )
         assert team.remaining_budget == pytest.approx(6.0), (
             "at zero spots the physical max IS the remaining budget"
+        )
+
+    def test_an_impossible_target_says_so(self):
+        """Penalties only take money away, so some targets cannot be reached.
+
+        The `max(0.0, ...)` this replaced returned a team parked somewhere else
+        entirely while reporting success — and a scenario that quietly builds a
+        state other than the one it names produces failures three assertions from
+        the cause, which is the argument `_fill`'s docstring already makes.
+
+        The target is derived, not picked: with zero penalties the best max a team
+        can show is its whole cap room less the reserve it must keep for the spots
+        it has NOT filled.
+        """
+        state = build_initial_state()
+        team = self._an_opponent(state)
+        before = team.penalties
+        achievable = (
+            SALARY_CAP - team.total_salary
+            - (team.total_spots_remaining - 1) * MIN_SALARY
+        )
+        with pytest.raises(RuntimeError, match=team.code):
+            scenarios._squeeze(team, round(achievable + 1.0, 1))
+        assert team.penalties == before, (
+            "a raised squeeze left the team half-modified — the next scenario to "
+            "catch this error would be squeezing debris"
         )
 
 

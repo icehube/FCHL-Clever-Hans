@@ -66,12 +66,38 @@ class BidRecommendation:
 
 @dataclass
 class NominationPick:
-    """A recommended player to nominate."""
+    """A recommended player to nominate.
+
+    Two prices, and the field names are a trap worth reading twice.
+    `expected_price` is LAYER 2's market price — the clearing price a nomination
+    actually fetches, which the panel labels "Expected" — while `model_price` is
+    LAYER 1's `PricePrediction.expected_price`, the model's vacuum figure. The
+    panel shows them side by side so the operator can tell "cheap because the
+    market is thin" from "cheap because the model rates him low"; before
+    2026-08-06 the drain path put the MODEL price under the "Expected" label and
+    advertised ~$7.7M for a player who could only fetch $2.5M, which is why the
+    two are separate fields with separate labels rather than one figure.
+    """
 
     player: Player
     strategy: str  # "target", "drain", "depth"
     reasoning: str
     expected_price: float
+    model_price: float
+
+    @property
+    def capped(self) -> bool:
+        """Did the market ceiling cut this player's price, *as displayed*?
+
+        Quantized to one decimal, the same rule as `main.py`'s `bid_limits`
+        `capped` flag, because the panel prints one decimal: a $0.01 gap renders
+        as two identical figures, and striking one of them through then reads as
+        a display bug rather than as Layer 2 binding. Not a hypothetical — the
+        drain tie-break breaks toward LEAST surplus, so on the UFA half the pick
+        is routinely a cent under the ceiling (measured 2026-08-18 in a
+        $2.5M-ceiling state: $2.51M model against a $2.50M market).
+        """
+        return round(self.model_price, 1) > round(self.expected_price, 1)
 
 
 @dataclass
@@ -608,6 +634,37 @@ def recommend_nomination(
     return rfa_pick, ufa_pick
 
 
+def _nomination_pick(
+    player: Player,
+    strategy: str,
+    reasoning: str,
+    market_prices: dict[str, float],
+    model_prices: dict[str, float],
+) -> NominationPick:
+    """Build a pick, taking BOTH prices from the dicts for the SAME player.
+
+    Every branch of both pickers goes through here. Six copies of
+    `market_prices.get(name, MIN_SALARY)` is exactly where a second lookup keyed
+    on the wrong branch's name would hide, and the two figures render next to
+    each other — one of them describing a different player is not something a
+    reader of the panel could catch. `player.name` IS the key both dicts use
+    (`data_loader` builds `Player(name=name, ...)` from the disambiguated name),
+    so there is no separate name to thread through.
+
+    Both defaults are MIN_SALARY, so a name missing from either dict renders
+    agreement rather than a fabricated gap. `_best_drain_candidate` defaults the
+    model side to 0.0 instead, deliberately: there it feeds a surplus to rank on,
+    where a missing price must not earn a bonus.
+    """
+    return NominationPick(
+        player=player,
+        strategy=strategy,
+        reasoning=reasoning,
+        expected_price=market_prices.get(player.name, MIN_SALARY),
+        model_price=model_prices.get(player.name, MIN_SALARY),
+    )
+
+
 def _pick_best_rfa(
     rfas: dict[str, Player],
     wanted: set[str],
@@ -622,15 +679,14 @@ def _pick_best_rfa(
     wanted_rfas = [(n, p) for n, p in rfas.items() if n in wanted]
     if wanted_rfas:
         # Pick the one with best value (highest points per dollar)
-        best_name, best = max(
+        _, best = max(
             wanted_rfas,
             key=lambda x: x[1].projected_points / max(market_prices.get(x[0], MIN_SALARY), MIN_SALARY),
         )
-        return NominationPick(
-            player=best,
-            strategy="target",
-            reasoning=f"BOT wants {best.name} — nominate to acquire via secret bid",
-            expected_price=market_prices.get(best_name, MIN_SALARY),
+        return _nomination_pick(
+            best, "target",
+            f"BOT wants {best.name} — nominate to acquire via secret bid",
+            market_prices, model_prices,
         )
 
     # Otherwise drain. No MIN_DRAIN_PRICE gate and no depth fallback here: a
@@ -639,12 +695,11 @@ def _pick_best_rfa(
     # same reason as the UFA branch — see _best_drain_candidate.
     best_name, best = _best_drain_candidate(rfas, market_prices, model_prices)
     price = market_prices.get(best_name, MIN_SALARY)
-    return NominationPick(
-        player=best,
-        strategy="drain",
-        reasoning=f"{best.name} (~${price:.1f}M) is the priciest RFA the market can "
-                  f"reach — forces opponents to spend their sealed bid",
-        expected_price=price,
+    return _nomination_pick(
+        best, "drain",
+        f"{best.name} (~${price:.1f}M) is the priciest RFA the market can "
+        f"reach — forces opponents to spend their sealed bid",
+        market_prices, model_prices,
     )
 
 
@@ -737,15 +792,14 @@ def _pick_best_ufa(
     # Strategy 1: Target — nominate a player BOT wants
     wanted_ufas = [(n, p) for n, p in ufas.items() if n in wanted]
     if wanted_ufas:
-        best_name, best = max(
+        _, best = max(
             wanted_ufas,
             key=lambda x: x[1].projected_points / max(market_prices.get(x[0], MIN_SALARY), MIN_SALARY),
         )
-        return NominationPick(
-            player=best,
-            strategy="target",
-            reasoning=f"BOT wants {best.name} — nominate to buy",
-            expected_price=market_prices.get(best_name, MIN_SALARY),
+        return _nomination_pick(
+            best, "target",
+            f"BOT wants {best.name} — nominate to buy",
+            market_prices, model_prices,
         )
 
     # Strategy 2: Drain — nominate player that forces opponents into bidding wars
@@ -758,29 +812,27 @@ def _pick_best_ufa(
         # failing the threshold means no drain is worth the turn. The old score
         # wasn't a price, so this check could reject a perfectly good drain.
         if price >= MIN_DRAIN_PRICE:
-            return NominationPick(
-                player=drain,
-                strategy="drain",
-                reasoning=_drain_reasoning(drain, price, state),
-                expected_price=price,
+            return _nomination_pick(
+                drain, "drain",
+                _drain_reasoning(drain, price, state),
+                market_prices, model_prices,
             )
 
     # Strategy 3: Depth — nominate a cheap player for BOT's roster
     cheap = [(n, p) for n, p in ufas.items() if market_prices.get(n, MIN_SALARY) <= 1.0]
     if cheap:
         depth_name, depth = max(cheap, key=lambda x: x[1].projected_points)
-        return NominationPick(
-            player=depth,
-            strategy="depth",
-            reasoning=f"{depth.name} ({depth.projected_points}pts) — cheap fill at ~${market_prices.get(depth_name, MIN_SALARY):.1f}M",
-            expected_price=market_prices.get(depth_name, MIN_SALARY),
+        price = market_prices.get(depth_name, MIN_SALARY)
+        return _nomination_pick(
+            depth, "depth",
+            f"{depth.name} ({depth.projected_points}pts) — cheap fill at ~${price:.1f}M",
+            market_prices, model_prices,
         )
 
     # Fallback: highest points available
-    best_name, best = max(ufas.items(), key=lambda x: x[1].projected_points)
-    return NominationPick(
-        player=best,
-        strategy="target",
-        reasoning=f"Best available: {best.name} ({best.projected_points}pts)",
-        expected_price=market_prices.get(best_name, MIN_SALARY),
+    _, best = max(ufas.items(), key=lambda x: x[1].projected_points)
+    return _nomination_pick(
+        best, "target",
+        f"Best available: {best.name} ({best.projected_points}pts)",
+        market_prices, model_prices,
     )

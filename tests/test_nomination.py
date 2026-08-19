@@ -213,7 +213,14 @@ class TestDrainStrategy:
 
     def test_expected_price_never_exceeds_market_price(self):
         """The panel renders expected_price as "Expected: ~$X M" — it has to be
-        the clearing price, not the model's vacuum price."""
+        the clearing price, not the model's vacuum price.
+
+        Since 2026-08-18 the model figure renders BESIDE it, labelled "Model"
+        and struck through when the ceiling cuts the price
+        (`TestBothPricesReachThePanel`). That does not soften this: the defect
+        was the model price wearing the "Expected" label, not the model price
+        being on screen.
+        """
         state, mp, model, _ = _drain_state()
         rfa_pick, ufa_pick = recommend_nomination(state, mp, model)
 
@@ -377,4 +384,141 @@ class TestComboNominationTurn:
         client.post("/assign", data={"player": ufa.name, "team": first, "salary": "2.0"})
         assert main.auction_state.current_nominator() != first, (
             "UFA sale completes the combo turn"
+        )
+
+
+class TestBothPricesReachThePanel:
+    """The panel shows Layer 1 and Layer 2 side by side, and says which is which.
+
+    The owner want behind this (`BACKLOG.md`, 2026-08-07 testing pass) is a
+    discrimination: a player cheap because the *market* is thin looks identical
+    to one cheap because the *model* rates him low when only one figure is on
+    screen. So every pick carries both, and `capped` says whether they diverge
+    **as displayed** — see the property for why that is quantized.
+
+    Both states are here on purpose. At full budgets the ceiling is $11.4M and
+    the priciest model price is ~$9.5M, so nothing in the pool is capped and
+    every `capped` assertion is vacuously satisfied — the same trap
+    `test_endpoints.py::TestPriceColumn` records for the bid_limits flag. The
+    ceiling-bound state is what gives them content.
+    """
+
+    @staticmethod
+    def _states():
+        return {"fresh": _setup, "ceiling-bound": lambda: _drain_state(2.5)}
+
+    @pytest.mark.parametrize("state_name", ["fresh", "ceiling-bound"])
+    def test_both_figures_come_from_their_own_dict(self, state_name):
+        """Each figure is that player's entry in the dict it belongs to.
+
+        The failure this exists for is a factory that looks the model price up
+        under the wrong branch's name: the two figures then describe different
+        players, and nothing on screen could reveal it.
+        """
+        state, mp, model, _ = self._states()[state_name]()
+        picks = recommend_nomination(state, mp, model)
+
+        for pick in picks:
+            assert pick is not None
+            name = pick.player.name
+            assert pick.expected_price == pytest.approx(mp[name]), (
+                f"{name}: Expected figure is ${pick.expected_price:.2f}M but the "
+                f"market price is ${mp[name]:.2f}M"
+            )
+            assert pick.model_price == pytest.approx(model[name]), (
+                f"{name}: Model figure is ${pick.model_price:.2f}M but the model "
+                f"price is ${model[name]:.2f}M"
+            )
+            assert pick.capped == (
+                round(model[name], 1) > round(mp[name], 1)
+            ), f"{name}: capped disagrees with the two figures it describes"
+
+    @pytest.mark.parametrize("state_name", ["fresh", "ceiling-bound"])
+    def test_the_model_figure_is_never_below_the_market_figure(self, state_name):
+        """market_price = min(model_price, ceiling), so the model is the upper one.
+
+        A pick where the market figure is the higher of the two would mean the
+        ceiling *raised* a price, which Layer 2 cannot do — the panel would be
+        striking through the wrong number.
+        """
+        state, mp, model, _ = self._states()[state_name]()
+
+        for pick in recommend_nomination(state, mp, model):
+            assert pick is not None
+            assert pick.model_price >= pick.expected_price - 1e-9, (
+                f"{pick.player.name}: market ${pick.expected_price:.2f}M is above "
+                f"model ${pick.model_price:.2f}M — the ceiling cannot raise a price"
+            )
+
+    @pytest.mark.parametrize(
+        "model_price,market_price,expect_capped",
+        [
+            # McDavid in `endgame-ceiling-binds`: the case the marker is for.
+            (9.55, 2.8, True),
+            # The UFA drain pick in a $2.5M-ceiling state, measured 2026-08-18.
+            # One cent below the ceiling, so both figures PRINT $2.5M — striking
+            # one through would read as a display bug. The drain tie-break
+            # breaks toward least surplus, so this is that half's normal case.
+            (2.51, 2.50, False),
+            # Floor player, nothing to cap.
+            (0.5, 0.5, False),
+        ],
+    )
+    def test_capped_is_quantized_like_the_figures_on_screen(
+        self, model_price, market_price, expect_capped
+    ):
+        from optimizer import NominationPick
+        from state import Player
+
+        # Constructed inline rather than through one of the three `_make_player`
+        # factories in this suite: the property reads neither the player nor the
+        # strategy, and importing a private helper across test modules to supply
+        # a field this assertion ignores would couple two files for nothing.
+        pick = NominationPick(
+            player=Player(
+                name="X", position="F", group="UFA", nhl_team="TOR", age=25,
+                projected_points=50, is_rfa=False, salary=0.0,
+                team_probability=5.0,
+            ),
+            strategy="drain",
+            reasoning="",
+            expected_price=market_price,
+            model_price=model_price,
+        )
+        assert pick.capped is expect_capped, (
+            f"model ${model_price:.2f}M vs market ${market_price:.2f}M renders as "
+            f"${model_price:.1f}M vs ${market_price:.1f}M"
+        )
+
+    def test_every_pick_is_built_by_the_factory(self):
+        """One construction site, so no branch can ship with one figure missing.
+
+        Six branches build a pick (2 RFA, 4 UFA) and only four are reachable
+        from a state this suite can build — the UFA depth and fallback arms need
+        a pool with no drain candidate above MIN_DRAIN_PRICE. Rather than
+        contrive those, this asserts the structural property that makes the four
+        measured ones representative: they all go through `_nomination_pick`.
+        Same technique as test_state.py::TestEveryMutatingPostTakesASnapshot.
+        """
+        import ast
+        import pathlib
+
+        tree = ast.parse(pathlib.Path("optimizer.py").read_text())
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            for call in ast.walk(node):
+                if (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "NominationPick"
+                    and node.name != "_nomination_pick"
+                ):
+                    offenders.append(f"{node.name}:{call.lineno}")
+
+        assert not offenders, (
+            "these build a NominationPick directly instead of calling "
+            f"_nomination_pick, so their two prices are not guaranteed to "
+            f"describe the same player: {offenders}"
         )

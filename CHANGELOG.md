@@ -20,6 +20,75 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-19d]
+
+### Changed
+
+- **No test names a player from `players.csv` any more, and a guard keeps it
+  that way.** CLAUDE.md has carried the rule *never hard-code a player name in a
+  test* for a year with nothing behind it, and it drifted the whole time.
+  Counted properly with an ast walk against all 2155 `PLAYER` values:
+  **61 literal names across 7 files**, where `BACKLOG.md` recorded "four literal
+  names … ~39 times" — an undercount of more than half. Seven of the 61 are
+  legitimate (`test_player_identity.py` writes its own CSV in `tmp_path` and
+  reuses the real collision cases on purpose), so **54 sites across 6 files**
+  were swept, each name replaced by the ROLE it plays via `helpers.pool_top` /
+  `a_roster_player`, and `_draft_to` — the symbol the backlog entry named — now
+  drafts through `helpers.assign`, which fails AT the pick.
+
+  **The deferral reason was backwards, which is why this had sat since
+  2026-08-18.** The entry said to do it at the next `players.csv` refresh, "when
+  the failures are in front of you". `/assign` answers **200 with a toast** when
+  it rejects, so the failure mode is a silent pass: at refresh time some tests
+  would simply have stopped testing anything, and nothing would have said so.
+  The 2026-08-07 drill is the precedent the entry itself cites — one missing name
+  arrived as `assert 24 == 25` three tests downstream, naming neither the player
+  nor the reason.
+
+  Two things the entry did not mention, both found by measuring rather than
+  reading. **A bare surname**: `test_htmx_interactions.py` asserted
+  `"Panarin" in trigger["showToast"]["message"]`, which no full-name guard can
+  see; it now asserts the derived name. And **`test_auction_draft.py` was never
+  silent** — its `_assign_and_verify` already checked that the pool shrank and
+  the log grew, naming the player, so that file would have failed loudly. The
+  five files that would have failed *quietly* are the ones that mattered.
+
+  `tests/test_no_literal_player_names.py` is the new guard: full-name equality
+  against the names the loaded state knows (available plus every team's
+  `all_players`, so the loader's `Matt Murray (DAL)` renames count too), with a
+  one-entry allowlist carrying its reason. **Full names only, deliberately** —
+  also matching capitalised tokens would catch the surname class, but it needs a
+  *data-dependent* allowlist (`"Charlie"`, in `test_state.py`'s Alice/Bob/Charlie
+  unit test, collides with five real players today) and that rots in the noisy
+  direction: the next CSV could fail a synthetic-name unit test for no reason, at
+  exactly the moment you want the suite quiet.
+
+- **The scripted ten-pick auction is derived, not listed.** `test_auction_draft.py`'s
+  `PICKS` table turned out to be almost exactly the top ten by projected points —
+  the tell that the names were never the point. Three of them were, and the
+  derivation keeps them: pick 5 is the top D-man, pick 6 must be an **RFA2**
+  because `test_08` asserts the sale converts him to group 3, and pick 7 is a
+  goalie. Verified faithful — 11 distinct players, the roles on picks 5/6/7, and
+  BOT still buying exactly 4 for exactly $15.5M, the two figures `test_15` and
+  `test_16` read straight off the table. `pool_top` gained `position` / `group`
+  filters for those three lookups, and `_script()` runs from `test_01` because
+  `main.auction_state` does not exist until the client starts. Ten test methods
+  were renamed off their players (`..._marner_to_hsm` → `..._an_rfa2_to_hsm`): a
+  method named for a player it no longer drafts is the same rot one level up, and
+  no guard can read a function name.
+
+### Investigated
+
+- **What this does and does not buy.** The guard proves no literal pool name
+  remains; `helpers.assign` proves a rejected pick fails at the pick. Neither
+  proves the suite would survive an *arbitrary* CSV — a pool with no goalies, or
+  with twenty players, breaks things no naming discipline can fix. That is what
+  `TestDataFingerprint` and the refresh drill are for.
+- **Sweeping all 15 files' direct `/assign` posts through `helpers.assign` was
+  considered and dropped.** 59 sites, and with names derived its unique value is
+  close to zero — the helper's documented purpose was stale names specifically.
+  Not filed as an idea either: there is no remaining failure it would catch.
+
 ## [2026-08-19c]
 
 Grill of the event-loop change. Three findings, none of them a defect in the

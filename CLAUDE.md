@@ -215,8 +215,12 @@ Shared non-fixture test utilities live in `tests/helpers.py` (`squeeze`,
 from there rather than copy-pasting; `squeeze` reached three copies before it
 was folded in.
 
-**Never hard-code a player name in a test.** Derive the target from the loaded
-state by the ROLE it needs to play — BOT's worst points-per-dollar keeper, the
+**Never hard-code a player name in a test** — enforced since 2026-08-19 by
+`tests/test_no_literal_player_names.py`, which walks every test file's string
+constants against the loaded pool; the one allowlisted file carries its reason in
+`NAMES_ARE_THE_POINT`. It checks full names only, so a bare *surname* assertion
+still slips through — assert the derived name, not a fragment of it. Derive the
+target from the loaded state by the ROLE it needs to play — BOT's worst points-per-dollar keeper, the
 top available forward, the first two names in the pool — because `players.csv`
 is replaced before every draft and a literal name silently stops matching.
 Draft picks go through `helpers.assign`, which fails at the pick: `/assign`

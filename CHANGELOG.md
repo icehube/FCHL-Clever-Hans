@@ -20,6 +20,27 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-18d]
+
+### Fixed
+
+- **The grill on the nomination-price batch killed two of its own tests and found a third that had never worked.** Recorded because none of the three was visible by reading — each was proven by a mutant that survived.
+
+  **The factory guard missed any construction outside a function body.** `test_every_pick_is_built_by_the_factory` walked `ast.FunctionDef` nodes, which is a *list of the places a call can hide* rather than a rule; a module-level `NominationPick(...)` left all 47 selected tests green while the docstring claimed "one construction site". Now checked by line span against `_nomination_pick`, which covers module level, `async def`, comprehensions and lambdas at once.
+
+  **The hover sentence could quote one figure twice.** The test asserted only that `"the market ceiling caps it at"` appeared *somewhere* in the response, so a title reading `Model says $2.8M … caps it at $2.8M` — self-contradicting, on screen — passed. It now has to name both figures, each derived from the price dicts for that card's player. The regex is anchored to the price line's own opening tag: the card carries an earlier `title` on the NHL logo and a bare search picked that one up ("EDM").
+
+  **`TestPriceColumn` never read the rendered `capped` flag.** Its `_capped` helper *recomputes* the rule from the two price dicts — deliberately, that is what makes its assertions an equivalence rather than a tautology — but the consequence is that every assertion in the class holds identically against a flag that is wrong for every row. Measured: a `capped` predicate returning False left the class green with the Price column's marker gone. It now also reads the markup in the squeezed state, one capped row and one uncapped. Pre-existing, and surfaced only because the rule became shared (below). The row reader matches the **unescaped** row rather than escaping the name: Jinja writes an apostrophe as `&#39;` and `html.escape` gives `&#x27;`, so escaping matched **zero** rows for `Ryan O'Reilly` and `K'Andre Miller`, and which name the test picks depends on the data.
+
+### Changed
+
+- **One definition of the capped rule: `market.is_capped`.** `main.py`'s `bid_limits` row and `NominationPick.capped` each carried the same quantized comparison, written in opposite directions — two copies of one rule, the second added the same day. That is the trap this file already records twice (the stale drain filter; `compute_marginal_value` carrying its own drifting copy of `physical_max_bid`'s formula). Sited beside `compute_market_price` because it is the observation that that function's `min()` bit, and `optimizer.py` already imported from `market.py`, so no new cycle. The two **test-side** copies stay hand-written on purpose, and the docstring says so — they are the independent equivalence, and importing the helper there would turn both into tautologies.
+
+- **The pool key and `Player.name` are now pinned as one identity**, in two tests: the live-data invariant (`test_data_loader.py`) and across a JSON round trip (`test_state.py`). `_nomination_pick` looks both of the panel's figures up by `player.name` while every branch that calls it iterates the pool by key — before this batch each branch used the key it was holding, so the two could not disagree. The invariant holds everywhere today and is load-bearing well beyond this change (`/assign` pops by key, both price dicts are keyed on it, `_dom_id` hashes it), but nothing tested it, and `to_json`/`from_json` store the key verbatim, so a mismatch would round-trip faithfully rather than heal. Both proven able to fail by keying a pool one character off — in the loader for the first, in `from_json` for the second.
+
+- `.claude/rules/pricing-pipeline.md` now records the drain tie-break's **display** consequence, which runs opposite to the intuition: breaking ties toward least surplus makes the UFA half systematically pick the candidate whose two figures *agree*, so a large gap on a UFA drain recommendation means the ranking is not doing what the rule says.
+
+
 ## [2026-08-18c]
 
 ### Added

@@ -962,7 +962,8 @@ class TestFullRosterStillBidding:
         """Teeth on the ten teams WITH spots — the full one never reaches the MILP.
 
         `solve_optimal_roster` answers `spots == 0` from its own branch
-        (`optimizer.py:162`, forced players exactly filling a roster are Optimal,
+        (`optimizer.py:162` in `solve_optimal_roster` — forced players exactly
+        filling a roster are Optimal,
         not Infeasible), so no construction of the full team can make this test
         fail: measured, filling it with skaters only left all 58 green. Its
         position legality is pinned instead by the `roster_needs` assertion in

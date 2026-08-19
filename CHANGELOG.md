@@ -20,6 +20,35 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-19]
+
+### Fixed
+
+- **The grill on the two new scenarios: a helper that could miss quietly, a test counting the wrong definition, and published numbers that did not reproduce.** The code was correct and both suites were green — every finding here is about a claim being weaker or wronger than it read.
+
+  **`_squeeze` returned success while missing its target.** `max(0.0, SALARY_CAP - salary - wanted)` yields 0 when the ask is impossible — penalties only take money AWAY, so no dead cap can *raise* a team's max — and the helper then left the team parked somewhere else while reporting nothing. That is the failure `_fill`'s own docstring argues against ("a scenario that quietly builds something other than what it says produces test failures three assertions from the cause"), in a helper whose entire contract is one figure. It now raises, naming the team, the target and the shortfall, and restores the penalties it found first so a failed build leaves no half-squeezed team behind. Measured: the branch is reached by neither shipped scenario (11 squeezes each, all exact), so this is a guard for the next one.
+
+  **The endgame's capped-row count asserted a definition the panel does not use.** `test_a_substantial_share_of_the_pool_is_capped` counted a raw `live < model - 1e-9` while the new late-draft test counted `market.is_capped`, which quantizes to the one decimal both panels print — two definitions of one rule in one file. They disagree by 3×: **83 raw against 28 quantized** of 677 on that state, because 55 of the 83 differ by less than a cent and render as two identical figures. The old floor of 40 sat *between* the two numbers, so it passed only by counting rows that show nothing, while its stated rationale is "the tooltip-left renders per capped row". Same one-definition problem `2176a56` fixed in production code the day before, back test-side.
+
+  **`_late_draft_shape` divided by zero on a single team.** `last = len(codes) - 1` is the spread's divisor. Unreachable from both callers (ten and eight) but the helper exists to be reused; one code now lands on the low end.
+
+### Changed
+
+- **The purchases-cannot-do-it measurement is republished as a sweep, because the single construction did not reproduce.** The `_squeeze` docstring and this file both said "7 of 10 opponents hit 24 players with $8.2M–$22.6M still spendable … not one of 570 pool prices was capped". Re-measured under the construction that sentence describes — drain every opponent to $0.0M spendable, top 25 reserved, no fill — it is **6 of 10, $9.8M–$23.0M, 0 of 575**, and no variant reproduces the trio: the closest, top 40 reserved, gives 7 of 10 but $0.0–24.5M and 577. This is the same class of error as the 19/40/563 trio recorded under `endgame-ceiling-binds`, and the fix is the same shape — publish what was actually established, which is stronger: swept over **16 constructions** (targets $0/$5/$8/$12M spendable × with and without a fill to 24 × top-25 and top-40 reserved), **the ceiling stayed at MAX_SALARY and zero prices were capped in every one**. Also `_late_draft_shape`'s "no drain at all needs $13.5M–$28.4M" re-measures at **$15.2M–$28.3M**; its other three figures reproduce exactly.
+
+- **Two test docstrings claimed coverage that mutation disproved.** Six targeted mutations against the five claims the original batch never proved could fail. Three landed — a shaped opponent marked done kills the live-and-shopping sweep; BOT's drain target moved 16.0 → 14.0 kills the position-needs claim and its squeeze moved 7.5 → 11.4 kills the under-the-clamp claim; the reserve term leaving `_squeeze`'s open branch kills eight tests. Two exposed docstrings rather than bugs:
+
+  **The determinism tests do not pin the name tie-breaks.** Removing `_fill`'s tie-break leaves all 58 tests green — dict iteration is insertion-ordered, so two loads in one process give the same answer either way. The tie-breaks matter *across* processes, where hash and set order vary, and nothing in this file can see that. What the test does catch is state leaking between loads (a cached price dict, a mutated `POSITION_MINIMUMS`), which is worth its 20ms; the docstring now says so instead of the opposite, and the two new copies point at it.
+
+  **`test_every_team_still_solves` has no teeth on a full team.** `solve_optimal_roster` answers `spots == 0` from its own branch (`optimizer.py:162 (solve_optimal_roster)`) and returns Optimal without running the MILP, so filling that team with skaters only left everything green. Its position legality is pinned by the `roster_needs` assertion in the exactly-one-full test instead.
+
+  The first attempt at the done-team mutation matched **two** sites and was not applied — the fifth anchor miss in this repo, caught by asserting exactly one replacement rather than by noticing a suspiciously green run.
+
+### Investigated
+
+- **The two new picker labels widen the navbar `<select>` by 67px and overflow nothing.** They are the longest options in the list and DaisyUI's `.select` carries no width constraint, so it is content-sized. Measured in Chrome: **402px → 469px**, with `scrollWidth == clientWidth` on both the navbar and the document at 1024 / 1280 / 1600, and the select's right edge unchanged at every width (940 / 1196 / 1516) — it grew leftward into free space. No change made.
+
+
 ## [2026-08-18e]
 
 ### Added

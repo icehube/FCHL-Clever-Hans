@@ -74,7 +74,9 @@ def assign(client: Any, player: str, team: str, salary: float) -> Any:
     return response
 
 
-def pool_top(n: int = 1) -> list[str]:
+def pool_top(
+    n: int = 1, position: str | None = None, group: str | None = None
+) -> list[str]:
     """The n highest-scoring available players, by name.
 
     Derived rather than named, per the CLAUDE.md rule: `players.csv` is replaced
@@ -89,14 +91,31 @@ def pool_top(n: int = 1) -> list[str]:
 
     Lives here because `test_browser_ui.py` had grown its own `_pool_top` — the
     path `squeeze` took to three copies before it was folded in.
+
+    `position` and `group` narrow the pool for a test whose assertion needs a
+    ROLE rather than a body: the scripted auction in `test_auction_draft.py` has
+    a pick asserting that a sale converts RFA2 to group 3, one described as the
+    top D-man and one as a goalie, and those three are the only reason these
+    filters exist. Both are exact matches on `Player.position` / `Player.group`
+    — `"F"`/`"D"`/`"G"` and `"3"`/`"RFA1"`/`"RFA2"` are the whole vocabulary
+    (measured on the live pool: 705 available, 234 D, 64 G, 9 RFA2). The assert
+    below is what turns a filter that matches nothing into a failure naming the
+    filter, rather than an IndexError at the call site.
     """
     import main
 
     ranked = sorted(
-        main.auction_state.available_players.values(),
+        (
+            p for p in main.auction_state.available_players.values()
+            if (position is None or p.position == position)
+            and (group is None or p.group == group)
+        ),
         key=lambda p: -p.projected_points,
     )
-    assert len(ranked) >= n, f"only {len(ranked)} players in the pool, wanted {n}"
+    assert len(ranked) >= n, (
+        f"only {len(ranked)} players in the pool match position={position!r} "
+        f"group={group!r}, wanted {n}"
+    )
     return [p.name for p in ranked[:n]]
 
 

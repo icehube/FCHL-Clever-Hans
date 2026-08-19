@@ -300,3 +300,88 @@ class TestAScanDiscardsWhatTheStateOutran:
             "the basis marker does not say the column is back on estimates, so "
             "the figures on screen look exact and are not"
         )
+
+
+class TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow:
+    """CBC being safe to call from two threads at once is now load-bearing.
+
+    Nothing before this change could run two solves concurrently: every handler
+    was `async def`, so the loop serialised them. Now the loop can answer an
+    `/assign` — which calls `_recompute()`, which solves for BOT — while a scan
+    is mid-flight in a worker thread. If PuLP's temp files collided, the symptom
+    would be an exception (visible, and the broad `except` per team would hide it
+    behind an estimate) or, far worse, a WRONG objective from a half-written
+    model file: a Proj column or a buyout dot that is authoritative and quietly
+    incorrect.
+
+    Verified 2026-08-19 rather than assumed. PuLP names its scratch files
+    `uuid4().hex` per solve when `keepFiles` is false (`pulp/apis/core.py`,
+    `LpSolver.create_tmp_files`), so two solvers cannot pick the same path, and
+    CBC is a subprocess — the GIL is released across it. 11 concurrent solves ×
+    3 rounds: zero errors, zero disagreements with the serial answers, 401ms
+    against 1134ms serial.
+
+    This test is the regression net for a PuLP upgrade that changes that naming
+    — `keepFiles=True` alone would put every solve on the same filename, since
+    that switch makes the prefix the model NAME instead. It asserts the ANSWERS,
+    not the timing, and the reason is measured: adding `keepFiles=True` to
+    `optimizer.py`'s one `PULP_CBC_CMD` does **not** raise. SRL came back
+    `status='Optimal'` with **950** points against **1355** solved alone — a
+    figure that would have rendered as a rank badge with nothing wrong on screen.
+    A collision that somehow produced identical answers would be harmless; one
+    that produces different answers is what this has to fail on.
+    """
+
+    def test_three_teams_solved_in_parallel_give_the_serial_answers(self, client):
+        from optimizer import solve_optimal_roster
+
+        state = main.auction_state
+        prices = main.market_prices
+        # Three live opponents, whichever they are — same rule as the scan.
+        codes = [
+            c for c, t in state.teams.items()
+            if not t.is_done and c != main.MY_TEAM and t.total_spots_remaining > 0
+        ][:3]
+        assert len(codes) == 3, f"need three solvable opponents, got {codes}"
+
+        def solve(code: str):
+            return solve_optimal_roster(
+                state.teams[code], state.available_players, prices
+            )
+
+        serial = {c: solve(c) for c in codes}
+
+        results: dict[str, object] = {}
+        errors: list[str] = []
+        start = threading.Barrier(len(codes))
+
+        def race(code: str) -> None:
+            try:
+                start.wait(timeout=30)   # overlap the solves, don't just queue them
+                results[code] = solve(code)
+            except Exception as e:                      # noqa: BLE001 - reported below
+                errors.append(f"{code}: {type(e).__name__}: {e}")
+
+        threads = [threading.Thread(target=race, args=(c,)) for c in codes]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60)
+
+        assert not errors, (
+            "solving from several threads at once raised — CBC or PuLP is no "
+            f"longer safe to call concurrently: {errors}. The scans hand their "
+            "MILP loop to a worker thread while the event loop keeps solving for "
+            "BOT on every pick, so this has to hold."
+        )
+        for code in codes:
+            assert results[code].status == serial[code].status, (
+                f"{code} solved to {results[code].status} in parallel and "
+                f"{serial[code].status} serially"
+            )
+            assert results[code].total_points == serial[code].total_points, (
+                f"{code}'s optimum changed when solved alongside others: "
+                f"{results[code].total_points} parallel vs "
+                f"{serial[code].total_points} serial — a concurrent solve is "
+                f"reading another one's model or solution file"
+            )

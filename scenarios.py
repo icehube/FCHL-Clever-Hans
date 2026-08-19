@@ -530,10 +530,16 @@ def _late_draft_shape(
     `_scenario_endgame_ceiling_binds` drains its two live teams to different
     targets. Codes are taken in the caller's order, so the assignment is
     deterministic and two loads of a scenario are identical.
+
+    `max(1, ...)` on the divisor because both live callers pass eight or ten codes
+    and neither reaches the one-code case: with a bare `len(codes) - 1` a single
+    code divides by zero, and a helper written to be reused should land it on the
+    low end of the spread instead of raising ZeroDivisionError at the next
+    scenario.
     """
     lo, hi = spread
     fill_lo, fill_hi = fill_to
-    last = len(codes) - 1
+    last = max(1, len(codes) - 1)
     for i, code in enumerate(codes):
         team = state.teams[code]
         _drain(team, state, price, reserved, 12.0)

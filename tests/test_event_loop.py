@@ -9,10 +9,10 @@ live server: a warm `/bid-check` cost **10ms alone and 1682ms behind a roster
 scan**, `/nominate` 1582ms, and `/state` — which solves nothing whatsoever —
 1564ms. The draft-day shape is one click: Scan Roster, then type a price.
 
-Three tests, three different kinds of claim, because none of them covers the
-others:
+Three kinds of claim, because none of them covers the others:
 
-* structural — the solving reaches a worker thread at all;
+* structural — the solving reaches a worker thread at all, and nothing else in
+  the module solves on the loop;
 * ordering — a cheap request really does overtake a scan, end to end;
 * discard — a result computed against a roster that has since changed is thrown
   away instead of published.
@@ -44,6 +44,19 @@ THREADED_SCANS = {
 # Pure solvers, by convention `_solve_*`. Calling one on the event loop is the
 # bug this module exists to prevent.
 SOLVER_PREFIX = "_solve_"
+
+# The one place in main.py allowed to solve on the loop, with the reason. This is
+# what closes the guard: `THREADED_SCANS` above is a hand-maintained list and
+# cannot notice a THIRD multi-solve endpoint being written, so the check that
+# matters runs the other way round — nothing may reach `solve_optimal_roster`
+# except from here or from a `_solve_*` handed to a thread.
+SOLVES_ON_THE_LOOP = {
+    "_recompute": (
+        "exactly one solve, for BOT, after a state change — ~78ms, and every "
+        "panel in the response needs its result, so there is nothing to overlap "
+        "it with"
+    ),
+}
 
 
 def _handlers() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -94,21 +107,64 @@ class TestTheSolvingHappensInAThread:
                 f"10ms bid check"
             )
 
-    def test_no_handler_calls_a_solver_directly(self):
-        """The other direction: a `_solve_*` call in a handler body is the bug."""
-        offenders = []
-        for name, node in _handlers().items():
-            for call in ast.walk(node):
-                if (
-                    isinstance(call, ast.Call)
-                    and isinstance(call.func, ast.Name)
-                    and call.func.id.startswith(SOLVER_PREFIX)
-                ):
-                    offenders.append(f"{name} calls {call.func.id}() at line {call.lineno}")
+    def test_nothing_calls_a_solver_except_through_a_thread(self):
+        """A `_solve_*` invoked anywhere is on the loop — and not only in a handler.
+
+        Scoped to handler bodies at first, which was the same open shape as the
+        list above: `_context` is called by every endpoint, so a `_solve_*` added
+        THERE would have been on the loop for all 25 of them and passed. Walks the
+        whole module now, and `run_in_threadpool(_solve_x, ...)` passes the
+        function as a name rather than calling it, so the legitimate route does
+        not register as a call.
+        """
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "main.py").read_text())
+        offenders = [
+            f"{call.func.id}() called at main.py:{call.lineno}"
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id.startswith(SOLVER_PREFIX)
+        ]
         assert not offenders, (
             "a pure solver is being called on the event loop: "
             + "; ".join(offenders)
             + " — hand it to run_in_threadpool instead"
+        )
+
+    def test_only_recompute_may_solve_on_the_loop(self):
+        """The closed half of this module, and the one that catches a NEW endpoint.
+
+        `THREADED_SCANS` is maintained by hand, so on its own it says nothing
+        about a third multi-solve endpoint — the failure it cannot see is exactly
+        the one that happened: an endpoint written the obvious way, `async def`
+        around a loop of solves, blocking every other request. This asks the
+        question from the other side. Any new function that calls
+        `solve_optimal_roster` has to be a `_solve_*` (which the test above forces
+        into a thread) or name itself here with a reason.
+
+        Same shape as `test_state.py::TestEveryMutatingPostTakesASnapshot`: a set
+        equality over a list that is otherwise kept by memory.
+        """
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "main.py").read_text())
+        callers = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(
+                isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Name)
+                and c.func.id == "solve_optimal_roster"
+                for c in ast.walk(node)
+            )
+        }
+        threaded = {n for n in callers if n.startswith(SOLVER_PREFIX)}
+        assert callers - threaded == set(SOLVES_ON_THE_LOOP), (
+            f"main.py solves the MILP from {sorted(callers - threaded)}, but the "
+            f"list of functions allowed to do that on the event loop is "
+            f"{sorted(SOLVES_ON_THE_LOOP)}. A multi-solve endpoint written the "
+            f"obvious way holds the loop for seconds — measured 1682ms for a 10ms "
+            f"bid check. Make it a {SOLVER_PREFIX}* function and hand it to "
+            f"run_in_threadpool, or add it here with the reason."
         )
 
     def test_every_state_change_bumps_the_version(self):

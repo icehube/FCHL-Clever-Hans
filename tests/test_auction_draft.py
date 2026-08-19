@@ -11,26 +11,60 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config import SALARY_CAP, MIN_SALARY
+from tests.helpers import pool_top
 
 # Module-level state shared across ordered test methods
 _state: dict = {}
 
-PICKS = [
-    # (player, team, salary)
-    ("Connor McDavid", "GVR", 11.4),
-    ("Filip Forsberg", "BOT", 5.0),
-    ("Sidney Crosby", "SRL", 5.5),
-    ("Sebastian Aho", "BOT", 4.5),
-    ("Roman Josi", "LPT", 7.0),
-    ("Mitch Marner", "HSM", 4.7),
-    ("Sergei Bobrovsky", "BOT", 3.0),
-    ("Steven Stamkos", "MAC", 3.5),
-    ("Zach Hyman", "BOT", 3.0),
-    ("J.T. Miller", "ZSK", 5.0),
+BID_CHECK_PRICE = 2.0
+
+# Which teams buy, in which order, at what price. The TEAMS and SALARIES are the
+# script; the PLAYERS are derived (see `_script`). Two later assertions read
+# straight off this table and would go quietly wrong if it changed: BOT buys
+# exactly four (`test_15`) for exactly $15.5M (`test_16`).
+_SCRIPT = [
+    ("GVR", 11.4), ("BOT", 5.0), ("SRL", 5.5), ("BOT", 4.5), ("LPT", 7.0),
+    ("HSM", 4.7), ("BOT", 3.0), ("MAC", 3.5), ("BOT", 3.0), ("ZSK", 5.0),
 ]
 
-BID_CHECK_PLAYER = "Vincent Trocheck"
-BID_CHECK_PRICE = 2.0
+
+def _script() -> tuple[list[tuple[str, str, float]], str]:
+    """The ten picks plus a spare, derived by the ROLE each assertion needs.
+
+    This table used to be ten literal names. It was, as it happens, almost
+    exactly the top ten by projected points — which is the tell that the names
+    were never the point. Three of them were, though, and the derivation has to
+    keep them or the assertions stop meaning anything:
+
+    * **pick 5** is described as the top D-man,
+    * **pick 6** must be an **RFA2**, because `test_08` asserts the sale
+      converts him to group 3,
+    * **pick 7** is a goalie.
+
+    The eleventh name is the bid-check target for `test_04` and `test_12`, and
+    the one property it needs is that the ten picks do NOT take him: those two
+    tests compare advice on the same player early and late, and a player who has
+    left the pool answers with the not-found branch instead. Taking him from the
+    same `pool_top(20)` slice the picks come from is what guarantees that.
+
+    Called from `test_01`, after the reset and before pick 1: `pool_top` ranks
+    whatever is in the pool right now, and `main.auction_state` does not exist
+    at all until the client starts, so this cannot be module-level.
+    """
+    d = pool_top(1, position="D")[0]
+    g = pool_top(1, position="G")[0]
+    rfa = pool_top(1, group="RFA2")[0]
+    roles = {d, g, rfa}
+    assert len(roles) == 3, (
+        f"the top D, the top G and the top RFA2 are not three distinct players "
+        f"({roles}) — one pick would be drafted twice"
+    )
+    # Enough of the top of the pool to fill the seven remaining picks and the
+    # spare, with the three role picks excluded so nobody is bought twice.
+    rest = [n for n in pool_top(20) if n not in roles]
+    ordered = [rest[0], rest[1], rest[2], rest[3], d, rfa, g, rest[4], rest[5], rest[6]]
+    picks = [(name, team, salary) for name, (team, salary) in zip(ordered, _SCRIPT)]
+    return picks, rest[7]
 
 
 @pytest.fixture(scope="module")
@@ -98,6 +132,7 @@ class TestAuctionDraftSimulation:
         _state["baseline_milp_points"] = main.milp_solution.total_points
         _state["baseline_market_ceiling"] = main.market_info.market_ceiling
         _state["milp_history"] = [main.milp_solution.total_points]
+        _state["picks"], _state["spare"] = _script()
         _state["prev_available"] = len(state["available_players"])
         _state["team_salaries"] = {
             code: _team_salary(t) for code, t in state["teams"].items()
@@ -109,70 +144,71 @@ class TestAuctionDraftSimulation:
         assert _state["baseline_available"] > 600, "Should have hundreds of available players"
         assert _state["baseline_bot_roster"] > 0, "BOT should have keepers"
 
-    def test_02_pick_01_mcdavid_to_gvr(self, client):
-        """Pick 1: McDavid to GVR at $11.4M — top player, big budget hit."""
+    def test_02_pick_01_top_of_the_pool_to_gvr(self, client):
+        """Pick 1: the top available player to GVR at $11.4M — big budget hit."""
         self._assign_and_verify(client, 0)
 
-    def test_03_pick_02_forsberg_to_bot(self, client):
-        """Pick 2: Forsberg to BOT at $5.0M — BOT pick."""
+    def test_03_pick_02_to_bot(self, client):
+        """Pick 2: $5.0M — BOT pick."""
         self._assign_and_verify(client, 1)
 
     def test_04_bid_check_early(self, client):
-        """Bid-check Trocheck early (BOT has plenty of budget)."""
+        """Bid-check the spare early (BOT has plenty of budget)."""
         r = client.post("/bid-check", data={
-            "player": BID_CHECK_PLAYER,
+            "player": _state["spare"],
             "price": str(BID_CHECK_PRICE),
             "bidders": "",
         })
         assert r.status_code == 200
         _state["early_bid_check"] = r.text
 
-    def test_05_pick_03_crosby_to_srl(self, client):
-        """Pick 3: Crosby to SRL at $5.5M."""
+    def test_05_pick_03_to_srl(self, client):
+        """Pick 3: SRL at $5.5M."""
         self._assign_and_verify(client, 2)
 
-    def test_06_pick_04_aho_to_bot(self, client):
-        """Pick 4: Aho to BOT at $4.5M."""
+    def test_06_pick_04_to_bot(self, client):
+        """Pick 4: BOT at $4.5M."""
         self._assign_and_verify(client, 3)
 
-    def test_07_pick_05_josi_to_lpt(self, client):
-        """Pick 5: Josi to LPT at $7.0M — top D-man."""
+    def test_07_pick_05_top_d_to_lpt(self, client):
+        """Pick 5: the top D-man to LPT at $7.0M."""
         self._assign_and_verify(client, 4)
 
-    def test_08_pick_06_marner_to_hsm(self, client):
-        """Pick 6: Marner to HSM at $4.7M — RFA2 should convert to group 3."""
+    def test_08_pick_06_an_rfa2_to_hsm(self, client):
+        """Pick 6: an RFA2 to HSM at $4.7M — should convert to group 3."""
         self._assign_and_verify(client, 5)
         # Verify RFA group conversion
+        name = _state["picks"][5][0]
         state = _get_state(client)
         hsm_acquired = state["teams"]["HSM"]["acquired_players"]
-        marner = next((p for p in hsm_acquired if p["name"] == "Mitch Marner"), None)
-        assert marner is not None, "Marner should be in HSM acquired"
-        assert marner["group"] == "3", f"RFA2 should convert to group 3, got {marner['group']}"
+        sold = next((p for p in hsm_acquired if p["name"] == name), None)
+        assert sold is not None, f"{name} should be in HSM acquired"
+        assert sold["group"] == "3", f"RFA2 should convert to group 3, got {sold['group']}"
 
-    def test_09_pick_07_bobrovsky_to_bot(self, client):
-        """Pick 7: Bobrovsky to BOT at $3.0M — goalie pick."""
+    def test_09_pick_07_a_goalie_to_bot(self, client):
+        """Pick 7: a goalie to BOT at $3.0M."""
         self._assign_and_verify(client, 6)
 
-    def test_10_pick_08_stamkos_to_mac(self, client):
-        """Pick 8: Stamkos to MAC at $3.5M."""
+    def test_10_pick_08_to_mac(self, client):
+        """Pick 8: MAC at $3.5M."""
         self._assign_and_verify(client, 7)
 
-    def test_11_pick_09_hyman_to_bot(self, client):
-        """Pick 9: Hyman to BOT at $3.0M."""
+    def test_11_pick_09_to_bot(self, client):
+        """Pick 9: BOT at $3.0M."""
         self._assign_and_verify(client, 8)
 
     def test_12_bid_check_late(self, client):
-        """Bid-check Trocheck late (BOT budget is tighter)."""
+        """Bid-check the same spare late (BOT budget is tighter)."""
         r = client.post("/bid-check", data={
-            "player": BID_CHECK_PLAYER,
+            "player": _state["spare"],
             "price": str(BID_CHECK_PRICE),
             "bidders": "",
         })
         assert r.status_code == 200
         _state["late_bid_check"] = r.text
 
-    def test_13_pick_10_miller_to_zsk(self, client):
-        """Pick 10: Miller to ZSK at $5.0M — final pick."""
+    def test_13_pick_10_to_zsk(self, client):
+        """Pick 10: ZSK at $5.0M — final pick."""
         self._assign_and_verify(client, 9)
 
     # --- Cross-cutting assertions after all 10 picks ---
@@ -239,7 +275,7 @@ class TestAuctionDraftSimulation:
 
     def _assign_and_verify(self, client, pick_index: int):
         """Assign a player and verify per-pick invariants."""
-        player, team, salary = PICKS[pick_index]
+        player, team, salary = _state["picks"][pick_index]
 
         # Snapshot before
         state_before = _get_state(client)
@@ -356,7 +392,7 @@ class TestLateAuctionCollapse:
     def test_03_bid_check_with_reduced_field(self, late_client):
         """Bid advice should reflect the smaller field."""
         r = late_client.post("/bid-check", data={
-            "player": "Artemi Panarin",
+            "player": pool_top(1)[0],
             "price": "2.0",
             "bidders": "",
         })
@@ -407,8 +443,9 @@ class TestLateAuctionCollapse:
         state_before = _get_state(late_client)
         bot_before = _team_salary(state_before["teams"]["BOT"])
 
+        player = pool_top(1)[0]
         r = late_client.post("/assign", data={
-            "player": "Artemi Panarin",
+            "player": player,
             "team": "BOT",
             "salary": str(MIN_SALARY),
         })
@@ -419,12 +456,17 @@ class TestLateAuctionCollapse:
         assert abs(bot_after - bot_before - MIN_SALARY) < 0.01, (
             f"Salary should increase by ${MIN_SALARY}M"
         )
-        assert "Artemi Panarin" not in state_after["available_players"]
+        assert player not in state_after["available_players"]
 
     def test_08_bid_check_at_floor(self, late_client):
-        """Bid recommendation should reflect floor ceiling."""
+        """Bid recommendation should reflect floor ceiling.
+
+        `pool_top` reads the live pool, so this is the NEXT player down — test_07
+        just bought the one above him. A name that has left the pool answers with
+        the not-found branch, which carries no verdict at all.
+        """
         r = late_client.post("/bid-check", data={
-            "player": "Filip Forsberg",
+            "player": pool_top(1)[0],
             "price": str(MIN_SALARY),
             "bidders": "",
         })

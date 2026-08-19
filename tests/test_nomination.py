@@ -506,21 +506,30 @@ class TestBothPricesReachThePanel:
         import pathlib
 
         tree = ast.parse(pathlib.Path("optimizer.py").read_text())
-        offenders = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef):
-                continue
-            for call in ast.walk(node):
-                if (
-                    isinstance(call, ast.Call)
-                    and isinstance(call.func, ast.Name)
-                    and call.func.id == "NominationPick"
-                    and node.name != "_nomination_pick"
-                ):
-                    offenders.append(f"{node.name}:{call.lineno}")
+        # By LINE SPAN rather than by enclosing node type. The first version
+        # walked `ast.FunctionDef` nodes, which is a list of the places a call
+        # can hide rather than a rule — a `NominationPick(...)` at module level
+        # was invisible to it, proven by mutation 2026-08-18 (a module-level
+        # `_UNUSED_FALLBACK` left all 47 selected tests green). One span covers
+        # module level, `async def`, comprehensions and lambdas at once.
+        factory = next(
+            (n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and n.name == "_nomination_pick"),
+            None,
+        )
+        assert factory is not None, "_nomination_pick is gone — this guard is moot"
 
+        offenders = [
+            call.lineno
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "NominationPick"
+            and not (factory.lineno <= call.lineno <= factory.end_lineno)
+        ]
         assert not offenders, (
-            "these build a NominationPick directly instead of calling "
-            f"_nomination_pick, so their two prices are not guaranteed to "
-            f"describe the same player: {offenders}"
+            "optimizer.py builds a NominationPick outside _nomination_pick "
+            f"(line{'s' if len(offenders) > 1 else ''} {offenders}), so those two "
+            "prices are not guaranteed to describe the same player"
         )

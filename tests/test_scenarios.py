@@ -144,10 +144,25 @@ class TestEndgameCeilingBinds:
             )
 
     def test_a_substantial_share_of_the_pool_is_capped(self):
+        """Counted the way the PANEL counts, which is not the same number.
+
+        This asserted a raw `live < model` for months, and raw is the wrong
+        definition for the claim it makes: the tooltip and the strike-through
+        render off `market.is_capped`, which quantizes to the one decimal both
+        panels print. Measured 2026-08-18 on this state — **83 raw against 28
+        quantized** of 677, because 55 of the 83 differ by less than a cent and
+        render as two identical figures. The old floor of 40 sat between the two,
+        so it passed only by counting rows that show nothing.
+
+        Same rule, one definition, for the same reason `market.is_capped` exists
+        at all (2026-08-18, `2176a56`). `TestPriceColumn`'s hand-written copy is
+        deliberate and different: it asserts an equivalence against rendered
+        markup, where importing the predicate would make the test a tautology.
+        """
         state = scenarios.load(ENDGAME)
         model, live, _ = _priced(state)
-        capped = [n for n in model if live[n] < model[n] - 1e-9]
-        assert len(capped) >= 40, (
+        capped = [n for n in model if market.is_capped(model[n], live[n])]
+        assert len(capped) >= 20, (
             f"only {len(capped)} of {len(model)} players are capped — the "
             f"tooltip-left in bid_limits.html renders per capped row, so a "
             f"handful makes the placement check a coin flip"

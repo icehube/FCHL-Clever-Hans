@@ -748,12 +748,19 @@ class TestNominationPanelPrices:
             assert player and market and model, (
                 f"a nomination card did not render both figures: {flat[:300]}"
             )
+            # Anchored to the price line's own opening tag: the card carries an
+            # earlier `title` on the NHL logo, and a bare search took that one
+            # (it read "EDM").
+            title = re.search(r'title="([^"]*)"[^>]*>\s*Expected:', flat)
             cards.append({
                 "player": html.unescape(player.group(1)),
                 "market": market.group(1),
                 "model": model.group(2),
                 "struck": model.group(1) is not None,
                 "arrow": "&#9660;" in flat,
+                # The hover sentence quotes both figures, so it is the one place
+                # they can silently be the SAME figure twice.
+                "title": html.unescape(title.group(1)) if title else "",
             })
         return cards
 
@@ -815,9 +822,18 @@ class TestNominationPanelPrices:
             "price any more, so this test no longer exercises the marker — the "
             "state has lost its teeth, pick one where the ceiling cuts a pick"
         )
-        assert "the market ceiling caps it at" in page, (
-            "a marked figure must explain itself on hover"
-        )
+        marked = [c for c in self._cards(page) if c["struck"]]
+        for card in marked:
+            model = main.model_prices[card["player"]].expected_price
+            market = main.market_prices[card["player"]]
+            assert f"Model says ${model:.1f}M" in card["title"], (
+                f"{card['player']}: the hover sentence must quote the MODEL "
+                f"figure (${model:.1f}M); it says {card['title']!r}"
+            )
+            assert f"caps it at ${market:.1f}M" in card["title"], (
+                f"{card['player']}: the hover sentence must quote the MARKET "
+                f"figure (${market:.1f}M); it says {card['title']!r}"
+            )
 
 
 class TestExplain:

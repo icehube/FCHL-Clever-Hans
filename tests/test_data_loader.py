@@ -236,6 +236,20 @@ class TestLiveDataInvariants:
         _, biddable = loaded
         assert len(biddable) > 100, "a pool this small cannot fill 11 rosters"
 
+    def test_every_pool_key_is_its_own_players_name(self, state):
+        """The dict key and `Player.name` are one identity, not two.
+
+        The pool key is this app's primary key — `/assign` pops by it, the market
+        and model price dicts are keyed on it, `_dom_id` hashes it. Anything that
+        looks a player up by `player.name` instead of by the key it iterated is
+        relying on this, and `optimizer._nomination_pick` does exactly that for
+        both figures the nomination panel prints side by side. Before 2026-08-18
+        nothing tested it, and `to_json`/`from_json` store the key verbatim, so a
+        mismatch would round-trip faithfully rather than heal.
+        """
+        wrong = {k: p.name for k, p in state.available_players.items() if k != p.name}
+        assert not wrong, f"pool keys disagree with their own Player.name: {wrong}"
+
     def test_the_rfa_flag_agrees_with_the_fchl_team_column(self, loaded):
         """Two independent columns have to tell the same story.
 

@@ -469,6 +469,21 @@ class TestAuctionStateSerialization:
         assert isinstance(restored.transaction_log[0], TransactionRecord)
 
 
+    def test_the_pool_key_survives_a_round_trip_as_the_players_name(self):
+        """`from_json` keys the pool by the STORED key, not by `p.name`.
+
+        So the two agreeing is an invariant the loader establishes and this layer
+        merely preserves — a mismatch would persist across a save/load rather
+        than being repaired by it. Pinned here because
+        `optimizer._nomination_pick` looks both of the nomination panel's figures
+        up by `player.name` while every caller iterates by key; the live-data half
+        is `test_data_loader.py::test_every_pool_key_is_its_own_players_name`.
+        """
+        restored = AuctionState.from_json(self._make_state().to_json())
+        wrong = {k: p.name for k, p in restored.available_players.items() if k != p.name}
+        assert not wrong, f"pool keys disagree with their own Player.name: {wrong}"
+
+
 class TestSnapshotFieldsCannotDrift:
     """The same field set is maintained by hand in three places.
 

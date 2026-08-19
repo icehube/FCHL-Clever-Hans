@@ -20,7 +20,7 @@ from config import (
     ROSTER_SIZE,
     SALARY_CAP,
 )
-from tests.helpers import a_buyout_candidate, section_of
+from tests.helpers import a_buyout_candidate, pool_top, section_of
 from market import compute_market_ceiling, compute_market_price, MarketInfo
 from optimizer import solve_optimal_roster
 from price_model import predict_price, load_model_params
@@ -325,17 +325,18 @@ class TestAPIEdgeCases:
     def test_assign_same_player_twice(self, client):
         """Second assignment of same player should be a no-op."""
         state_before = _get_state(client)
+        player = pool_top(1)[0]
 
         # Assign once
         client.post("/assign", data={
-            "player": "Artemi Panarin",
+            "player": player,
             "team": "BOT",
             "salary": "5.0",
         })
 
         # Try to assign again
         r = client.post("/assign", data={
-            "player": "Artemi Panarin",
+            "player": player,
             "team": "SRL",
             "salary": "3.0",
         })
@@ -345,8 +346,8 @@ class TestAPIEdgeCases:
         # Should only be on BOT, not SRL
         bot_names = {p["name"] for p in state_after["teams"]["BOT"]["acquired_players"]}
         srl_names = {p["name"] for p in state_after["teams"]["SRL"]["acquired_players"]}
-        assert "Artemi Panarin" in bot_names
-        assert "Artemi Panarin" not in srl_names
+        assert player in bot_names
+        assert player not in srl_names
 
         # Undo the first assign to restore state
         client.post("/undo")
@@ -497,7 +498,7 @@ class TestAPIEdgeCases:
         """Assigning with negative salary — should still work (data entry error)."""
         client.post("/reset")
         r = client.post("/assign", data={
-            "player": "Artemi Panarin",
+            "player": pool_top(1)[0],
             "team": "BOT",
             "salary": "-1.0",
         })
@@ -508,7 +509,7 @@ class TestAPIEdgeCases:
     def test_assign_zero_salary(self, client):
         """Assigning with zero salary."""
         r = client.post("/assign", data={
-            "player": "Filip Forsberg",
+            "player": pool_top(1)[0],
             "team": "BOT",
             "salary": "0",
         })
@@ -518,7 +519,7 @@ class TestAPIEdgeCases:
     def test_assign_huge_salary(self, client):
         """Assigning with salary > MAX_SALARY."""
         r = client.post("/assign", data={
-            "player": "Sidney Crosby",
+            "player": pool_top(1)[0],
             "team": "BOT",
             "salary": "50.0",
         })

@@ -196,10 +196,11 @@ class TestCacheActuallySaves:
 
     def test_a_mutation_makes_it_recompute(self, client, count_marginal_solves):
         """Guards the counter itself: zero everywhere would also 'pass' above."""
-        name = _a_player(skip={"Artemi Panarin"}).name
+        victim = _a_player().name                    # the pick that invalidates
+        name = _a_player(skip={victim}).name         # the bid that must recompute
         self._bid(client, name)
         client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "5.0"})
+            "player": victim, "team": "BOT", "salary": "5.0"})
         count_marginal_solves["n"] = 0
         self._bid(client, name)
         assert count_marginal_solves["n"] > 0, (

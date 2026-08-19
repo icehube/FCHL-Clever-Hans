@@ -63,13 +63,14 @@ class TestIndexPage:
 class TestAssign:
     def test_assign_player(self, client):
         """Assigning a player should update state."""
+        player = pool_top(1)[0]
         r = client.post("/assign", data={
-            "player": "Artemi Panarin",
+            "player": player,
             "team": "BOT",
             "salary": "5.0",
         })
         assert r.status_code == 200
-        assert "Artemi Panarin" in r.text
+        assert player in r.text
 
     def test_assign_invalid_player(self, client):
         """Assigning non-existent player should not crash."""
@@ -85,7 +86,7 @@ class TestBidCheck:
     def test_bid_check(self, client):
         """Bid check should return advice."""
         r = client.post("/bid-check", data={
-            "player": "J.T. Miller",
+            "player": pool_top(1)[0],
             "bidders": "SRL,MAC",
             "price": "2.0",
             "highest_bidder": "SRL",
@@ -108,7 +109,7 @@ class TestBidCheck:
         on a bargain. Elite player, low price, no opponents left.
         """
         r = client.post("/bid-check", data={
-            "player": "Connor McDavid",
+            "player": pool_top(1)[0],
             "bidders": "BOT",
             "price": "2.5",
             "highest_bidder": "BOT",
@@ -126,7 +127,7 @@ class TestBidCheck:
     def test_contested_bidding_unaffected(self, client):
         """Opponents still active: normal BID advice and a real ceiling."""
         r = client.post("/bid-check", data={
-            "player": "Connor McDavid",
+            "player": pool_top(1)[0],
             "bidders": "BOT,SRL,MAC",
             "price": "2.5",
             "highest_bidder": "SRL",
@@ -145,7 +146,7 @@ class TestBidCheck:
         """
         with cannot_raise("HSM"):
             r = client.post("/bid-check", data={
-                "player": "Connor McDavid",
+                "player": pool_top(1)[0],
                 "bidders": "BOT,HSM",
                 "price": "2.5",
                 "highest_bidder": "BOT",
@@ -195,7 +196,7 @@ class TestBidCheck:
     def test_uncontested_overpay_still_drops(self, client):
         """No opponents left, but above value — DROP and name the overpay."""
         r = client.post("/bid-check", data={
-            "player": "Connor McDavid",
+            "player": pool_top(1)[0],
             "bidders": "BOT",
             "price": "11.4",
             "highest_bidder": "BOT",
@@ -226,7 +227,7 @@ class TestAssignSalaryIsLive:
         """
         with cannot_raise("HSM"):
             r = client.post("/bid-check", data={
-                "player": "Connor McDavid",
+                "player": pool_top(1)[0],
                 "bidders": "BOT,HSM",
                 "price": "2.5",
                 "highest_bidder": "BOT",
@@ -1613,7 +1614,7 @@ class TestBidSessionSurvives:
     def test_bid_check_cannot_touch_the_nomination_region(self, client):
         """The converse: a price change must not drop a nomination pick."""
         r = client.post("/bid-check", data={
-            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN,SRL",
+            "player": pool_top(1)[0], "price": "3.0", "bidders": "BOT,LGN,SRL",
         })
         assert r.status_code == 200
         assert 'id="bid-panel"' in r.text
@@ -1626,7 +1627,7 @@ class TestBidSessionSurvives:
         bid form still finds it without it riding along on every keystroke.
         """
         bid = client.post("/bid-check", data={
-            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN",
+            "player": pool_top(1)[0], "price": "3.0", "bidders": "BOT,LGN",
         })
         assert 'id="player-list"' not in bid.text
         assert 'list="player-list"' in bid.text, "the input must still reference it"
@@ -1658,7 +1659,7 @@ class TestAssignSurvivesAPriceChange:
 
     def _bid(self, client):
         return client.post("/bid-check", data={
-            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT,LGN,SRL",
+            "player": pool_top(1)[0], "price": "3.0", "bidders": "BOT,LGN,SRL",
         })
 
     def test_price_input_swaps_only_the_advice_block(self, client):
@@ -1850,10 +1851,18 @@ class TestTheBuyoutPicker:
 class TestRoundThreeMutators:
     """Round 3 mutators: minors movement, scenario load, change_log + cascade."""
 
-    def _draft_to(self, client, team: str, player: str = "Artemi Panarin", salary: str = "5.0"):
-        """Draft a player to a team so it has at least one acquired player to test on."""
-        r = client.post("/assign", data={"player": player, "team": team, "salary": salary})
-        assert r.status_code == 200
+    def _draft_to(self, client, team: str, player: str | None = None, salary: str = "5.0"):
+        """Draft a player to a team so it has at least one acquired player to test on.
+
+        Derived and routed through `helpers.assign`, which fails AT the pick.
+        This helper used to default to a literal name and assert only
+        `status_code == 200` — and `/assign` answers 200 WITH A TOAST when it
+        rejects, so the day that name left `players.csv` all five tests built on
+        it would have passed against a pick that never happened, surfacing
+        somewhere else entirely.
+        """
+        player = player or pool_top(1)[0]
+        assign(client, player, team, float(salary))
         return player
 
     def test_move_to_minors_round_trip(self, client):

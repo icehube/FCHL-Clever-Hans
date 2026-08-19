@@ -27,19 +27,20 @@ class TestToastHeaders:
 
     def test_assign_success_toast(self, client):
         """Successful assign returns success toast."""
+        player = pool_top(1)[0]
         r = client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "5.0",
+            "player": player, "team": "BOT", "salary": "5.0",
         })
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
         assert "showToast" in trigger
         assert trigger["showToast"]["type"] == "success"
-        assert "Panarin" in trigger["showToast"]["message"]
+        assert player in trigger["showToast"]["message"]
         client.post("/undo")
 
     def test_assign_invalid_team_toast(self, client):
         """Assign with invalid team returns error toast, not 500."""
         r = client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "FAKE", "salary": "5.0",
+            "player": pool_top(1)[0], "team": "FAKE", "salary": "5.0",
         })
         assert r.status_code == 200  # Not 500
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
@@ -79,7 +80,7 @@ class TestAssignValidation:
     def test_salary_clamped_to_min(self, client):
         """Salary below MIN_SALARY should be clamped up."""
         r = client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "0.1",
+            "player": pool_top(1)[0], "team": "BOT", "salary": "0.1",
         })
         assert r.status_code == 200
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
@@ -89,7 +90,7 @@ class TestAssignValidation:
     def test_salary_clamped_to_max(self, client):
         """Salary above MAX_SALARY should be clamped down."""
         r = client.post("/assign", data={
-            "player": "Filip Forsberg", "team": "BOT", "salary": "50.0",
+            "player": pool_top(1)[0], "team": "BOT", "salary": "50.0",
         })
         assert r.status_code == 200
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
@@ -107,12 +108,13 @@ class TestAssignValidation:
         """
         import main
 
+        player = pool_top(1)[0]
         for raw, expected in [("2.54", 2.5), ("3.06", 3.1), ("1.96", 2.0)]:
             r = client.post("/assign", data={
-                "player": "Artemi Panarin", "team": "BOT", "salary": raw,
+                "player": player, "team": "BOT", "salary": raw,
             })
             assert r.status_code == 200
-            p = main.auction_state.teams["BOT"].find_player("Artemi Panarin")
+            p = main.auction_state.teams["BOT"].find_player(player)
             assert p.salary == expected, f"${raw}M recorded as ${p.salary}M"
             client.post("/undo")
 
@@ -121,11 +123,12 @@ class TestAssignValidation:
         behaviour worth pinning. What matters is that it lands on a step."""
         import main
 
+        player = pool_top(1)[0]
         r = client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "2.55",
+            "player": player, "team": "BOT", "salary": "2.55",
         })
         assert r.status_code == 200
-        p = main.auction_state.teams["BOT"].find_player("Artemi Panarin")
+        p = main.auction_state.teams["BOT"].find_player(player)
         tenths = p.salary * 10
         assert abs(tenths - round(tenths)) < 1e-9, f"${p.salary}M is off-step"
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
@@ -140,16 +143,17 @@ class TestAssignValidation:
         """
         import main
 
+        player = pool_top(1)[0]
         client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "2.5",
+            "player": player, "team": "BOT", "salary": "2.5",
         })
         r = client.post("/adjust-salary", data={
-            "team_code": "BOT", "player_name": "Artemi Panarin",
+            "team_code": "BOT", "player_name": player,
             "new_salary": "2.54",
         })
         assert r.status_code == 200
         t = main.auction_state.teams["BOT"]
-        assert t.find_player("Artemi Panarin").salary == 2.5
+        assert t.find_player(player).salary == 2.5
         tenths = t.total_salary * 10
         assert abs(tenths - round(tenths)) < 1e-9, f"${t.total_salary}M is off-step"
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
@@ -159,11 +163,12 @@ class TestAssignValidation:
 
     def test_adjust_salary_stays_quiet_on_a_legal_price(self, client):
         """No toast when the typed value is recorded verbatim."""
+        player = pool_top(1)[0]
         client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "2.5",
+            "player": player, "team": "BOT", "salary": "2.5",
         })
         r = client.post("/adjust-salary", data={
-            "team_code": "BOT", "player_name": "Artemi Panarin",
+            "team_code": "BOT", "player_name": player,
             "new_salary": "3.1",
         })
         assert r.status_code == 200
@@ -175,7 +180,7 @@ class TestAssignValidation:
         """The note must fire only on a real change — a spurious 'adjusted'
         on every pick would train the operator to ignore it."""
         r = client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "2.5",
+            "player": pool_top(1)[0], "team": "BOT", "salary": "2.5",
         })
         assert r.status_code == 200
         trigger = json.loads(r.headers.get("HX-Trigger", "{}"))
@@ -200,7 +205,7 @@ class TestOOBSwapIDs:
     def test_ids_match_after_assign(self, client):
         """After assigning a player, OOB IDs still match."""
         client.post("/assign", data={
-            "player": "Artemi Panarin", "team": "BOT", "salary": "5.0",
+            "player": pool_top(1)[0], "team": "BOT", "salary": "5.0",
         })
         idx = client.get("/")
         main_ids = set(re.findall(r'id="bo-([^"]+)"', idx.text))
@@ -351,7 +356,7 @@ class TestCounterfactualAutoLoads:
     def _live_panel(self, client) -> str:
         """A bid panel with a single bidder, so the Assign form renders too."""
         r = client.post("/bid-check", data={
-            "player": "Connor McDavid", "price": "3.0", "bidders": "BOT",
+            "player": pool_top(1)[0], "price": "3.0", "bidders": "BOT",
         })
         assert r.status_code == 200
         assert 'hx-post="/assign"' in r.text, "fixture needs the Assign form"

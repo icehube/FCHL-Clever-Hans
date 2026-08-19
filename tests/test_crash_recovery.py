@@ -96,7 +96,7 @@ def _an_available_player() -> str:
     return next(iter(main.auction_state.available_players))
 
 
-def _good_state_with_pick(state_dir, player="Connor McDavid", team="BOT"):
+def _good_state_with_pick(state_dir, player=None, team="BOT"):
     """A saved auction with one pick in it, as current + backup on disk.
 
     Written by the app itself rather than by hand: a fixture JSON blob would
@@ -107,6 +107,11 @@ def _good_state_with_pick(state_dir, player="Connor McDavid", team="BOT"):
 
     with TestClient(main.app) as c:
         c.post("/reset")
+        # After the reset, not as a default argument: the pool only exists once
+        # the app has started, and a default is evaluated at import. Assigned
+        # back to `player` because this function RETURNS the name its callers
+        # then assert was recovered.
+        player = player or _an_available_player()
         _draft(c, player, team, 8.0)
     current = state_dir / "auction_state.json"
     assert current.exists(), "the draft did not reach disk"

@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 # the event loop. See `_publish_if_current` for the whole rule.
 from starlette.concurrency import run_in_threadpool
 
-from config import MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
+from config import BUYOUT_PENALTY_RATE, MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
 # Imported as a module so `data_loader.loaded_disambiguations` is read live. It
 # is mutated in place, so a from-import would happen to work today — but it
 # would also survive data_loader switching to a rebind, silently and wrongly.
@@ -709,8 +709,14 @@ def _solve_buyout_indicators(
     # the minors ($2.0M, fully on cap) are legal buyouts the Analyzer already
     # offered while the scan said nothing about them. Costs 4 more solves.
     #
-    # Materialised here, on the caller's thread, so no worker reads
-    # `team.all_players` while another is deepcopying the state it belongs to.
+    # Materialised here, on the caller's thread, and the mechanism is narrower
+    # than "before the fan-out": `roster_players` LAZILY ASSIGNS `_roster_cache`
+    # (state.py), a plain dataclass field, so computing this list inside a worker
+    # would have one thread writing BOT's `__dict__` while another `deepcopy`s
+    # it. That is benign today only by luck — the field already exists, so the
+    # dict does not resize and `deepcopy` cannot raise "changed size during
+    # iteration"; the clone would just carry a torn cache. Moving this line into
+    # the pool would look free and would not be.
     candidates = [q for q in state.teams[MY_TEAM].all_players if q.can_be_bought_out]
     if not candidates:
         return {}
@@ -744,8 +750,6 @@ def _solve_one_buyout(
     other workers read the same `state`, which is fine — nothing here writes to
     it, and it is the caller's private snapshot in the first place.
     """
-    from config import BUYOUT_PENALTY_RATE
-
     try:
         clone = deepcopy(state)
         bt = clone.teams[MY_TEAM]

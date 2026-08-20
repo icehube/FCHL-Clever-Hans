@@ -100,6 +100,47 @@ nothing failed.
 
 ### Investigated
 
+- **Pool pruning — the cheaper-solve lever `BACKLOG.md` has named since
+  2026-08-06 — is measured unsafe, and the way it fails is silent.** A cold
+  `/bid-check` is **988–1030ms** with **98–99% of it inside CBC** across 10
+  solves, so the entry was right that the solve is the entire cost. Keeping the
+  top 50 by projected points per position (705 players → 150) gives a
+  **byte-identical answer on all seven pinned scenarios** and a 2–3.7x faster
+  solve. That result is the trap rather than the finding: every scenario sits at
+  **$1.9M or more of BOT budget per open roster spot**, and pruning by points is
+  only safe while the budget is loose enough that the cheap filler never matters.
+
+  Squeezing BOT's budget toward the reserve floor breaks it, in the worst
+  possible way:
+
+  | budget per open spot | full pool | top-50-by-points |
+  |---|---|---|
+  | $2.00M | 1233 Optimal | 1233 Optimal |
+  | $1.00M | 1076 Optimal | **1069 Optimal** — 7 points low, no signal |
+  | $0.70M | 999 Optimal | **Infeasible** |
+  | $0.60M | 961 Optimal | **Infeasible** |
+
+  Adding "and the K cheapest per position" does **not** rescue it — 912 against
+  999 at $0.70M — because which players matter depends on the budget
+  *interaction*, not on points or price along either axis alone. A wrong
+  `Optimal` wearing a confident number is precisely the `keepFiles=True` failure
+  class (950 against 1355) that `TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow`
+  exists to catch, and this one would reach the bid advisor rather than a scan.
+  The tight-budget regime is not hypothetical either: it is reachable **through
+  play**, since buyout penalties, `/trade-between` and `/adjust-salary` all warn
+  rather than refuse, and `BACKLOG.md` already records $20.5M of penalties on a
+  fresh BOT getting there.
+
+  No code changed. Three `BACKLOG.md` entries did: the `main.py (bid_check)`
+  finding now strikes pruning by name and carries the table, the closed
+  interaction-budget entry no longer propagates the dead lever, and the
+  `optimizer.py (solve_optimal_roster)` short-roster entry — which "already
+  frames" pointed at — now says a short-roster path has to be exact rather than a
+  heuristic over "the N players you CAN buy", because that heuristic is the thing
+  just measured wrong. Surviving candidates, none of them measured: a warm-start
+  basis, fewer binary variables via position aggregation, or fewer binary-search
+  steps.
+
 - **Audited all 31 `/grill` rounds to see whether the findings were actually
   fixed. They were, with two exceptions — and the weak link is not the fixing,
   it is the promise to file.** Two independent axes, because they catch different

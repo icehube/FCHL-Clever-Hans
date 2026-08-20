@@ -385,3 +385,88 @@ class TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow:
                 f"{serial[code].total_points} serial — a concurrent solve is "
                 f"reading another one's model or solution file"
             )
+
+
+class TestAScanInParallelAgreesWithItselfInSeries:
+    """The scans fan their solves out; the answers must not depend on that.
+
+    Both scans solved one team (or one hypothetical) at a time until 2026-08-19b
+    put them in a worker thread, and one at a time inside it until this. The
+    speedup is real — measured on a fresh league, `/solve-standings` **1294ms ->
+    384ms** and Scan Roster **1630ms -> 454ms**, and in the endgame scenario
+    **2174ms -> 569ms** for the roster scan, which is its worst case rather than
+    its best (a late-draft BOT owns 23 eligible contracts against 15 fresh).
+
+    So the risk is not speed, it is a WRONG answer arriving faster. Both dicts
+    are rendered as authoritative — the Proj column carries a rank badge, the
+    dots carry a verdict — so these compare the parallel result against the same
+    per-item solvers called one at a time, which is what the loops used to do.
+
+    **Key order is asserted, not incidental.** `pool.map` yields in input order,
+    which is the only reason the result is deterministic; a refactor to
+    `as_completed` would still pass a values-only comparison while making the
+    dict's order depend on which CBC subprocess finished first. It costs ~4s of
+    suite time to run each solve twice, which is worth it here in a way that the
+    29 repeats of an ast walk removed from the names guard were not: this is the
+    correctness proof for the change.
+    """
+
+    def test_the_proj_column_is_the_same_solved_ten_at_once(self, client):
+        state, prices = main.auction_state, main.market_prices
+        codes = [
+            code for code, t in state.teams.items()
+            if not t.is_done and code != main.MY_TEAM
+        ]
+        assert len(codes) > 1, f"need several live opponents to fan out, got {codes}"
+
+        parallel = main._solve_exact_projections(state, prices)
+        serial = {}
+        for code in codes:
+            _, points = main._solve_one_opponent(state, prices, code)
+            if points is not None:
+                serial[code] = points
+
+        assert list(parallel.items()) == list(serial.items()), (
+            f"solving the opponents concurrently changed the Proj column:\n"
+            f"  parallel {parallel}\n  serial   {serial}\n"
+            f"Every one of these renders as an exact figure and BOT's carries a "
+            f"rank badge."
+        )
+
+    def test_the_dots_are_the_same_solved_many_at_once(self, client):
+        state, prices = main.auction_state, main.market_prices
+        current = (
+            main.milp_solution.total_points
+            if main.milp_solution and main.milp_solution.status == "Optimal" else 0
+        )
+        candidates = [
+            p for p in state.teams[main.MY_TEAM].all_players if p.can_be_bought_out
+        ]
+        assert len(candidates) > 1, (
+            f"need several eligible players to fan out, got {len(candidates)}"
+        )
+
+        parallel = main._solve_buyout_indicators(state, prices, current)
+        serial = dict(
+            main._solve_one_buyout(state, prices, current, p) for p in candidates
+        )
+
+        assert list(parallel.items()) == list(serial.items()), (
+            f"solving the buyout hypotheticals concurrently changed the "
+            f"verdicts:\n  parallel {parallel}\n  serial   {serial}\n"
+            f"A wrong 'keep' here is the 2026-08-07 'no buyout helps' failure."
+        )
+
+    def test_the_worker_budget_is_capped_below_the_core_count(self):
+        """A count, not a thread pool the machine picks.
+
+        Each concurrent solve is a CBC **subprocess**, so this is a core budget:
+        uncapped on the 20-core dev box it would put 15 processes on a draft-day
+        laptop with 4. The floor matters as much — `os.cpu_count()` returns None
+        on some platforms, and `max_workers=0` raises.
+        """
+        assert 1 <= main.SCAN_WORKERS <= 8, (
+            f"SCAN_WORKERS is {main.SCAN_WORKERS}; it has to stay a small cap "
+            f"rather than this machine's core count, because the draft runs on a "
+            f"laptop and each solve is a CBC subprocess"
+        )

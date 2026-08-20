@@ -10,8 +10,10 @@ import os
 import re
 from datetime import datetime
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from functools import partial
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
@@ -401,6 +403,18 @@ exact_projections: dict[str, int] = {}
 # `_publish_if_current` is the whole rule.
 _state_version = 0
 
+# How many MILPs the two manual scans solve at once inside their worker thread.
+#
+# Not in `config.py`: that file is the league — cap, roster shape, CBA rules —
+# and this is machine tuning. Each concurrent solve is a **CBC subprocess**, so
+# this is a core budget, not a thread count, and the cap matters much more than
+# the formula. The dev box has 20 cores and the draft runs on a laptop;
+# oversubscribing a 4-core machine with 15 CBC processes would be slower than
+# solving them one at a time, and most of the win is already there at 4.
+# `os.cpu_count()` rather than `os.process_cpu_count()` because CLAUDE.md's
+# floor is Python 3.12.
+SCAN_WORKERS = min(8, max(1, os.cpu_count() or 2))
+
 
 # Marginal values for the current state epoch, keyed by player name. Cleared
 # wholesale by _recompute() rather than versioned: a version counter has the
@@ -610,27 +624,49 @@ def _solve_exact_projections(
     A non-Optimal solve leaves the team OUT of the dict rather than storing a
     zero, so it keeps showing the estimate. Reporting a team as 0 points because
     a solver failed is worse than reporting it approximately.
+
+    **Solved `SCAN_WORKERS` at a time**, which is safe for the reason
+    `TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow` pins: PuLP names its scratch
+    files per solve and CBC is a subprocess, so the GIL is released across it.
+    `pool.map` yields in INPUT order, so the dict is built in the same order the
+    serial loop built it — there is no completion-order nondeterminism to reason
+    about, and `TestAScanInParallelAgreesWithItselfInSeries` asserts that order
+    as well as the values.
     """
-    solved: dict[str, int] = {}
-    for code, t in state.teams.items():
-        if t.is_done or code == MY_TEAM:
-            continue
-        try:
-            sol = solve_optimal_roster(t, state.available_players, prices)
-        except Exception as e:
-            # Broad on purpose — a solver blowing up on one opponent must not
-            # cost the other nine — but never silent. The basis marker reveals
-            # that a cell is still an estimate (`exact 9/10`) and cannot say
-            # which team or why, so this is the only place that failure is
-            # diagnosable.
-            logging.warning(
-                "No exact projection for %s: %s: %s — that team keeps its "
-                "estimate and the Proj column says so", code, type(e).__name__, e,
-            )
-            continue
-        if sol.status == "Optimal":
-            solved[code] = int(sol.total_points)
-    return solved
+    codes = [
+        code for code, t in state.teams.items()
+        if not t.is_done and code != MY_TEAM
+    ]
+    if not codes:
+        # `max_workers=0` raises, and an all-done league is a real state.
+        return {}
+    with ThreadPoolExecutor(max_workers=min(SCAN_WORKERS, len(codes))) as pool:
+        results = pool.map(partial(_solve_one_opponent, state, prices), codes)
+        return {code: points for code, points in results if points is not None}
+
+
+def _solve_one_opponent(
+    state: AuctionState, prices: dict[str, float], code: str
+) -> tuple[str, int | None]:
+    """One opponent's optimum, or `None` if it could not be had.
+
+    Its own `except`, and that placement is required rather than tidy: this runs
+    in a pool worker, and an exception raised here would otherwise surface when
+    the RESULT is consumed — taking down the whole scan instead of one team.
+    Broad on purpose — a solver blowing up on one opponent must not cost the
+    other nine — but never silent. The basis marker reveals that a cell is still
+    an estimate (`exact 9/10`) and cannot say which team or why, so this log is
+    the only place that failure is diagnosable.
+    """
+    try:
+        sol = solve_optimal_roster(state.teams[code], state.available_players, prices)
+    except Exception as e:
+        logging.warning(
+            "No exact projection for %s: %s: %s — that team keeps its "
+            "estimate and the Proj column says so", code, type(e).__name__, e,
+        )
+        return code, None
+    return code, int(sol.total_points) if sol.status == "Optimal" else None
 
 
 def _solve_buyout_indicators(
@@ -644,11 +680,14 @@ def _solve_buyout_indicators(
     per-player clones come off `state` — the caller's private snapshot — so
     nothing here can see a roster change half-applied by a pick that lands while
     it is solving.
-    """
-    from config import BUYOUT_PENALTY_RATE
 
-    solved: dict[str, str] = {}
-    team = state.teams[MY_TEAM]
+    **Solved `SCAN_WORKERS` at a time**, in input order — see
+    `_solve_exact_projections` for why that is safe and why the order matters.
+    This is the more expensive of the two scans and the endgame is its WORST
+    case, not its best: measured 2026-08-19, 15 eligible players on a fresh
+    league (1630ms) against 23 in the endgame scenario (2174ms), because a
+    late-draft BOT owns more group 2/3 contracts. Standings runs the other way.
+    """
     # Only what's eligible: a dot beside a player who can't be bought out is
     # worse than no dot, because it reads as a verdict on a decision that isn't
     # available.
@@ -658,17 +697,47 @@ def _solve_buyout_indicators(
     # is a property of the contract group alone, so BOT's 4 group-3 players in
     # the minors ($2.0M, fully on cap) are legal buyouts the Analyzer already
     # offered while the scan said nothing about them. Costs 4 more solves.
-    for p in (q for q in team.all_players if q.can_be_bought_out):
-        try:
-            clone = deepcopy(state)
-            bt = clone.teams[MY_TEAM]
-            bt.remove_player(p.name)
-            bt.penalties += p.salary * BUYOUT_PENALTY_RATE
-            bo_sol = solve_optimal_roster(bt, state.available_players, prices)
-            solved[p.name] = "buyout" if bo_sol.total_points > current_points else "keep"
-        except Exception:
-            solved[p.name] = "keep"
-    return solved
+    #
+    # Materialised here, on the caller's thread, so no worker reads
+    # `team.all_players` while another is deepcopying the state it belongs to.
+    candidates = [q for q in state.teams[MY_TEAM].all_players if q.can_be_bought_out]
+    if not candidates:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(SCAN_WORKERS, len(candidates))) as pool:
+        verdicts = pool.map(
+            partial(_solve_one_buyout, state, prices, current_points), candidates
+        )
+        return dict(verdicts)
+
+
+def _solve_one_buyout(
+    state: AuctionState,
+    prices: dict[str, float],
+    current_points: float,
+    player: PlayerOnRoster,
+) -> tuple[str, str]:
+    """Would buying this one player out beat `current_points`?
+
+    Own `except` for the same reason as `_solve_one_opponent`: raising in a pool
+    worker would cost the whole scan rather than one dot. `keep` on failure is
+    the conservative answer — it says "no help here", not "buy him out".
+
+    The `deepcopy` is per player and always was: the clone is mutated (the player
+    removed, the penalty added), so it cannot be shared. It reads `state` while
+    other workers read the same `state`, which is fine — nothing here writes to
+    it, and it is the caller's private snapshot in the first place.
+    """
+    from config import BUYOUT_PENALTY_RATE
+
+    try:
+        clone = deepcopy(state)
+        bt = clone.teams[MY_TEAM]
+        bt.remove_player(player.name)
+        bt.penalties += player.salary * BUYOUT_PENALTY_RATE
+        sol = solve_optimal_roster(bt, state.available_players, prices)
+        return player.name, "buyout" if sol.total_points > current_points else "keep"
+    except Exception:
+        return player.name, "keep"
 
 
 def _publish_if_current[V](

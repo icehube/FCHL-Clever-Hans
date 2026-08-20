@@ -40,6 +40,34 @@ work that genuinely needs a draft to settle.
   for the glyph. The `placeholder` stays on the Start Auction field, because that
   field is free text and the hint is what stops a typo; it is simply no longer
   what names it.
+- **The RFA and UFA nomination cards are one `pick_card` macro.** 43 lines
+  duplicated for 43 lines, beside the `pick_prices` macro that had already
+  collapsed their price line — filed 2026-08-18 and deferred out of that commit.
+  Normalised, the two blocks differ in exactly two places: the `<h3>` text and
+  the RFA-only prior-team line. Nothing else, to the character, including the
+  position/logo line the backlog entry warned might diverge.
+- **`show_prior` is semantic and defaults off.** Only an RFA has a prior team
+  holding rights over him, so the line is absent from the UFA card because there
+  is nothing to print, not because it was forgotten. A caller that wants it must
+  ask.
+- **Verified by byte-diffing the rendered output**, not by the suite alone:
+  `GET /` is byte-identical, and `GET /nominate` differs only by two runs of
+  insignificant whitespace inside the RFA card's own text node, collapsed by the
+  `{%- if %}` that lets one macro serve both cards.
+- **The refactor's mutation check found a real hole and it is now closed.**
+  Deleting the whole `show_prior` block passed **all 892 tests** — nothing read
+  the prior-team line. The heading parameter was already covered (by
+  `TestMidBidClutterCanBeDismissed`, which finds a card by its heading text),
+  this half was not. Two tests added. The second one exists because the obvious
+  one is not enough: `players.csv` fills PRIOR FCHL TEAM for RFA1/RFA2 rows and
+  nothing else — 22 of 2158 — so `{% if show_prior and ... %}`'s data guard
+  masks the flag, and flipping the default to `True` or passing
+  `show_prior=True` on the UFA call *both* survived the whole suite as
+  equivalent mutants. Stamping a prior team onto the pool's UFAs kills them.
+  That matters because the CSV is replaced before every draft, so an export that
+  starts filling the column for group 3 is a live possibility and the answer is
+  still no. All four mutants now die, one site per patch.
+
 - **Guarded as a rule, not as six labels**, by
   `tests/test_endpoints.py::TestNoBidControlIsUnnamed` — the same shape and the
   same reason as `test_no_control_in_either_trade_form_is_unnamed`, which the

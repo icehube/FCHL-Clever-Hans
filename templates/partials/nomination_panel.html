@@ -36,6 +36,38 @@
         <span class="font-normal opacity-50">· Model <span{% if pick.capped %} class="line-through"{% endif %}>{{ model }}</span></span>
     </div>
 {%- endmacro %}
+{#- One nomination card, called twice. The two halves were duplicated 43 lines
+   for 43 lines, differing only in the heading and in whether the prior-team line
+   renders — which is how the duplicated `(M)` suffix in the trade lists got past
+   two rounds of review: deleting either copy left the suite green.
+
+   `show_prior` is SEMANTIC, not styling, and that is why it defaults off. Only
+   an RFA has a prior team holding rights over him; a UFA has none, so the line
+   is absent from the UFA card because there is nothing to print, not because it
+   was forgotten. A caller that wants it must say so. -#}
+{% macro pick_card(pick, heading, show_prior=False) -%}
+<div class="mb-2 nomination-pick">
+        <h3 class="font-semibold text-sm mb-1">{{ heading }}</h3>
+        <div class="card bg-base-300 p-3 text-sm">
+            <div class="font-bold text-accent">{{ pick.player.name }}</div>
+            <div class="text-xs opacity-70">
+                {{ pick.player.position }} · <img src="/nhl_logos/{{ pick.player.nhl_team }}.svg" alt="{{ pick.player.nhl_team }}" class="h-5 inline object-contain" title="{{ pick.player.nhl_team }}"> · {{ pick.player.projected_points }}pts
+                {%- if show_prior and pick.player.prior_fchl_team %}
+                · Prior: {{ pick.player.prior_fchl_team }} @ ${{ pick.player.salary }}M
+                {%- endif %}
+            </div>
+            <div class="badge badge-sm badge-outline mt-1">{{ pick.strategy }}</div>
+            <div class="text-xs opacity-80 mt-1">{{ pick.reasoning }}</div>
+        {{ pick_prices(pick) }}
+            <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="mt-2">
+                <input type="hidden" name="player" value="{{ pick.player.name }}">
+                <input type="hidden" name="price" value="0.5">
+                <input type="hidden" name="bidders" value="{{ default_bidders }}">
+                <button type="submit" class="btn btn-primary btn-xs w-full">Bid on {{ pick.player.name }}</button>
+            </form>
+        </div>
+    </div>
+{%- endmacro %}
 <div id="nomination-panel">
     <div class="flex items-center gap-2 mb-2">
         <h2 class="card-title text-accent text-base">Auction</h2>
@@ -74,47 +106,10 @@
        need, not clutter. Removed on afterRequest rather than on click because
        htmx aborts a request whose triggering element leaves the DOM. #}
     {% if rfa_pick is defined and rfa_pick %}
-    <div class="mb-2 nomination-pick">
-        <h3 class="font-semibold text-sm mb-1">RFA Pick (Secret Bid)</h3>
-        <div class="card bg-base-300 p-3 text-sm">
-            <div class="font-bold text-accent">{{ rfa_pick.player.name }}</div>
-            <div class="text-xs opacity-70">
-                {{ rfa_pick.player.position }} · <img src="/nhl_logos/{{ rfa_pick.player.nhl_team }}.svg" alt="{{ rfa_pick.player.nhl_team }}" class="h-5 inline object-contain" title="{{ rfa_pick.player.nhl_team }}"> · {{ rfa_pick.player.projected_points }}pts
-                {% if rfa_pick.player.prior_fchl_team %}
-                · Prior: {{ rfa_pick.player.prior_fchl_team }} @ ${{ rfa_pick.player.salary }}M
-                {% endif %}
-            </div>
-            <div class="badge badge-sm badge-outline mt-1">{{ rfa_pick.strategy }}</div>
-            <div class="text-xs opacity-80 mt-1">{{ rfa_pick.reasoning }}</div>
-        {{ pick_prices(rfa_pick) }}
-            <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="mt-2">
-                <input type="hidden" name="player" value="{{ rfa_pick.player.name }}">
-                <input type="hidden" name="price" value="0.5">
-                <input type="hidden" name="bidders" value="{{ default_bidders }}">
-                <button type="submit" class="btn btn-primary btn-xs w-full">Bid on {{ rfa_pick.player.name }}</button>
-            </form>
-        </div>
-    </div>
+    {{ pick_card(rfa_pick, "RFA Pick (Secret Bid)", show_prior=True) }}
     {% endif %}
 
     {% if ufa_pick is defined and ufa_pick %}
-    <div class="mb-2 nomination-pick">
-        <h3 class="font-semibold text-sm mb-1">UFA Pick (Open Bid)</h3>
-        <div class="card bg-base-300 p-3 text-sm">
-            <div class="font-bold text-accent">{{ ufa_pick.player.name }}</div>
-            <div class="text-xs opacity-70">
-                {{ ufa_pick.player.position }} · <img src="/nhl_logos/{{ ufa_pick.player.nhl_team }}.svg" alt="{{ ufa_pick.player.nhl_team }}" class="h-5 inline object-contain" title="{{ ufa_pick.player.nhl_team }}"> · {{ ufa_pick.player.projected_points }}pts
-            </div>
-            <div class="badge badge-sm badge-outline mt-1">{{ ufa_pick.strategy }}</div>
-            <div class="text-xs opacity-80 mt-1">{{ ufa_pick.reasoning }}</div>
-        {{ pick_prices(ufa_pick) }}
-            <form hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" class="mt-2">
-                <input type="hidden" name="player" value="{{ ufa_pick.player.name }}">
-                <input type="hidden" name="price" value="0.5">
-                <input type="hidden" name="bidders" value="{{ default_bidders }}">
-                <button type="submit" class="btn btn-primary btn-xs w-full">Bid on {{ ufa_pick.player.name }}</button>
-            </form>
-        </div>
-    </div>
+    {{ pick_card(ufa_pick, "UFA Pick (Open Bid)") }}
     {% endif %}
 </div>

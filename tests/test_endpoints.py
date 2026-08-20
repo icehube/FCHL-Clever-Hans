@@ -759,6 +759,66 @@ class TestNominate:
         assert r.status_code == 200
         assert "Auction" in r.text
 
+    def test_only_the_rfa_card_shows_the_prior_team(self, client):
+        """`show_prior` is the one flag `pick_card` added, and it defaults off.
+
+        Not a styling toggle: only an RFA has a prior team holding rights over
+        him, so the line is absent from the UFA card because there is nothing to
+        print. Before the 2026-08-20 macro the two cards were separate markup and
+        that was structural; afterwards it is one keyword argument with a
+        default — the shape that let the duplicated `(M)` suffix in the trade
+        lists survive two reviews, because deleting either copy left the suite
+        green.
+
+        Added because the mutation check for that refactor found this uncovered:
+        deleting the whole `show_prior` block passed all 892 tests. The heading
+        parameter was already covered (by `TestMidBidClutterCanBeDismissed`,
+        which locates a card by its heading text); this half was not.
+        """
+        page = client.get("/nominate").text
+        cards = re.findall(r'nomination-pick"(.*?)</form>', page, re.S)
+        assert len(cards) == 2, f"expected an RFA and a UFA card, got {len(cards)}"
+        rfa, ufa = cards
+        assert "RFA Pick" in rfa and "UFA Pick" in ufa, "the cards came back in another order"
+        assert "Prior:" in rfa, "the RFA card lost its prior-team line"
+        assert "Prior:" not in ufa, (
+            "the UFA card grew a prior-team line, which it can never fill"
+        )
+
+
+    def test_the_ufa_card_refuses_a_prior_team_even_when_the_data_carries_one(self, client):
+        """The flag, not the data guard, is what keeps the line off the UFA card.
+
+        `players.csv` populates PRIOR FCHL TEAM for RFA1/RFA2 rows and nothing
+        else (22 of 2158 today), so `{% if show_prior and ... %}`'s second half
+        masks the first: measured 2026-08-20, flipping the default to `True` and
+        passing `show_prior=True` on the UFA call BOTH survived the whole suite.
+        That is an equivalent mutant on this CSV, not coverage — and the CSV is
+        replaced before every draft.
+
+        So stamp a prior team onto the pool's UFAs and check the card still
+        refuses it. A UFA has no prior team holding rights over him under the
+        CBA; if a future export starts filling that column for group 3, the
+        answer is still no.
+        """
+        import main
+
+        a_real_code = next(iter(main.auction_state.teams))
+        for player in main.auction_state.available_players.values():
+            if not player.is_rfa:
+                player.prior_fchl_team = a_real_code
+
+        cards = re.findall(r'nomination-pick"(.*?)</form>',
+                           client.get("/nominate").text, re.S)
+        assert len(cards) == 2, f"expected an RFA and a UFA card, got {len(cards)}"
+        rfa, ufa = cards
+        assert "UFA Pick" in ufa, "the cards came back in another order"
+        assert "Prior:" not in ufa, (
+            "the UFA card printed a prior team because the DATA had one — "
+            "show_prior is what is supposed to decide that"
+        )
+        assert "Prior:" in rfa, "and the RFA card still shows its own"
+
 
 class TestNominationPanelPrices:
     """Both prices on screen, and the marker only where the ceiling actually cuts.

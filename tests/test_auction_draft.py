@@ -53,12 +53,13 @@ def _script() -> tuple[list[tuple[str, str, float]], str]:
     """
     d = pool_top(1, position="D")[0]
     g = pool_top(1, position="G")[0]
-    rfa = pool_top(1, group="RFA2")[0]
+    # Skipping the two already claimed, because the roles genuinely overlap: the
+    # pool holds 9 RFA2s today and they include a D and a G, so on another CSV
+    # the top D could BE the top RFA2. Asserting they came out distinct would
+    # only turn that into a hard failure of this whole file — in the one file
+    # whose point is surviving a new players.csv.
+    rfa = pool_top(1, group="RFA2", skip={d, g})[0]
     roles = {d, g, rfa}
-    assert len(roles) == 3, (
-        f"the top D, the top G and the top RFA2 are not three distinct players "
-        f"({roles}) — one pick would be drafted twice"
-    )
     # Enough of the top of the pool to fill the seven remaining picks and the
     # spare, with the three role picks excluded so nobody is bought twice.
     rest = [n for n in pool_top(20) if n not in roles]

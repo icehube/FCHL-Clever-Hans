@@ -75,7 +75,10 @@ def assign(client: Any, player: str, team: str, salary: float) -> Any:
 
 
 def pool_top(
-    n: int = 1, position: str | None = None, group: str | None = None
+    n: int = 1,
+    position: str | None = None,
+    group: str | None = None,
+    skip: set[str] | frozenset[str] = frozenset(),
 ) -> list[str]:
     """The n highest-scoring available players, by name.
 
@@ -98,23 +101,31 @@ def pool_top(
     top D-man and one as a goalie, and those three are the only reason these
     filters exist. Both are exact matches on `Player.position` / `Player.group`
     — `"F"`/`"D"`/`"G"` and `"3"`/`"RFA1"`/`"RFA2"` are the whole vocabulary
-    (measured on the live pool: 705 available, 234 D, 64 G, 9 RFA2). The assert
-    below is what turns a filter that matches nothing into a failure naming the
-    filter, rather than an IndexError at the call site.
+    (measured 2026-08-19 on the live pool: 705 available, 234 D, 64 G, 9 RFA2).
+    The assert below is what turns a filter that matches nothing into a failure
+    naming the filter, rather than an IndexError at the call site.
+
+    `skip` is for a caller assembling SEVERAL roles that have to be distinct
+    people. The roles overlap by nature — 9 RFA2s in the pool today and they
+    include a D and a G — so "top D" and "top RFA2" can be one player on a
+    different CSV, and a caller that only checks afterwards can do nothing but
+    fail. Excluding what is already claimed keeps `n=1`, which matters: asking
+    for a couple of spares instead would break on a pool thin in that role.
     """
     import main
 
     ranked = sorted(
         (
             p for p in main.auction_state.available_players.values()
-            if (position is None or p.position == position)
+            if p.name not in skip
+            and (position is None or p.position == position)
             and (group is None or p.group == group)
         ),
         key=lambda p: -p.projected_points,
     )
     assert len(ranked) >= n, (
         f"only {len(ranked)} players in the pool match position={position!r} "
-        f"group={group!r}, wanted {n}"
+        f"group={group!r} (skipping {len(skip)}), wanted {n}"
     )
     return [p.name for p in ranked[:n]]
 

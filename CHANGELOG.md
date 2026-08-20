@@ -20,6 +20,75 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-20]
+
+### Fixed
+
+- **The standings worker's error net did not cover its own body.** `try` wrapped
+  only the `solve_optimal_roster` call; `sol.status` and the `int()` conversion
+  sat outside it, under a docstring that claimed to cover them. The asymmetry
+  with `_solve_one_buyout`, whose body always was inside its try, is what gave it
+  away. Nothing reachable makes `total_points` non-numeric today — it is a
+  `float` on the dataclass — so this is a guarantee made true rather than a live
+  bug, but the *shape* of the failure is worth recording, because parallelising
+  the scan made it worse than it had been in the serial loop: an exception
+  escaping a pool worker surfaces when the **result** is consumed, inside the
+  `with`, so `shutdown(wait=True)` waits for the other seven solves to finish
+  before raising. A serial loop raised at once; the pool would hang for about a
+  second and then 500. Forced with a mutant (patch asserted to hit exactly one
+  site) returning `total_points=None` from an `"Optimal"` solve: pre-fix,
+  `TypeError: int() argument must be … not 'NoneType'` killed the whole scan;
+  post-fix that one team falls back to its estimate and `#proj-basis` counts it.
+
+- **The buyout worker swallowed every failure without a word.** `except
+  Exception: return player.name, "keep"` — pre-existing, but this batch rewrote
+  the block and gave its standings twin a log line, which is what made the gap
+  visible. The consequence is precise: `buyout_dots.html` has two colours and no
+  way to say *unknown*, so a solver blowing up on all fifteen contracts paints
+  fifteen green dots, which reads as "no buyout helps". That is the 2026-08-07
+  bug's exact appearance with the evidence removed. Now logs the player and the
+  exception type, and still answers `"keep"` — the conservative verdict is right,
+  the silence was not.
+
+### Changed
+
+- **`BUYOUT_PENALTY_RATE` hoisted to `main.py`'s top-level config import.** The
+  function-local `from config import` ran once per scan when it sat at the top of
+  a serial loop; after the fan-out it ran once per **player** — up to 23 times,
+  from 8 threads, each taking the import lock. `config.py` imports nothing, so
+  there was never a cycle to avoid.
+
+- **The buyout scan's thread-safety comment now names the mechanism it rests
+  on.** It said the candidate list is materialised on the caller's thread so "no
+  worker reads `team.all_players` while another is deepcopying". True but too
+  broad to protect anything: the actual hazard is that `roster_players` **lazily
+  assigns** `_roster_cache`, a plain dataclass field, so computing that list
+  inside a worker would have one thread writing BOT's `__dict__` while another
+  `deepcopy`s it. It is benign today only by luck — the field already exists, so
+  the dict cannot resize and `deepcopy` cannot raise *changed size during
+  iteration*; the clone would just carry a torn cache. Stated the old way, moving
+  that comprehension into the pool looks free.
+
+### Added
+
+- **Tests for the two `max_workers=0` guards**, which nothing reached.
+  `ThreadPoolExecutor(max_workers=0)` raises `ValueError`, so each scan's
+  `if not <work>: return {}` is load-bearing rather than tidy: without it,
+  `/solve-standings` 500s in a league where **every** opponent is done — a legal
+  end-of-draft state the CBA allows and that CLAUDE.md records happening to 3+
+  teams every draft — and `/buyout-indicators` 500s on a BOT with no group 2/3
+  contracts. Existing coverage marked at most one team done. Mutation-checked by
+  deleting each guard in turn, one site each: both mutants raise `max_workers
+  must be greater than 0` at the `ThreadPoolExecutor` line its own test drives.
+
+  The standings test asserts `#proj-basis` reads exactly **`exact`**, not
+  `estimated`, and a first draft had that backwards. With every opponent done
+  nothing on screen is an estimate — their figures are finals and BOT's is its
+  own optimum — which is why `standings_basis.html` branches on the count of
+  *estimates* rather than of exact figures. The code was right and the assertion
+  was wrong; recorded because reasoning from "the dict is empty" to "the marker
+  says estimated" is the mistake, and it was made here.
+
 ## [2026-08-19f]
 
 ### Changed
@@ -95,7 +164,7 @@ rediscover the same non-problem.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1168 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1193 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

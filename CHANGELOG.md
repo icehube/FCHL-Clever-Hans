@@ -98,6 +98,61 @@ nothing failed.
   was wrong; recorded because reasoning from "the dict is empty" to "the marker
   says estimated" is the mistake, and it was made here.
 
+### Investigated
+
+- **Audited all 31 `/grill` rounds to see whether the findings were actually
+  fixed. They were, with two exceptions — and the weak link is not the fixing,
+  it is the promise to file.** Two independent axes, because they catch different
+  failures. **The paper trail** (mechanical): every entry ever added to
+  `BACKLOG.md` across its 109 revisions — **104 distinct findings**, 20 open
+  today, 84 closed, sum reconciled — each classified by what the commit that
+  *removed* it did, since CLAUDE.md requires the write-up in the same commit as
+  the deletion. That trail has **no holes**: of 84 closures, 21 of the initially
+  unexplained ones were a single deliberate event (the 2026-07-05 owner-decision
+  triage, which predates `/grill` entirely) and all 4 unexplained `[grill]`
+  entries traced to real resolutions — the flags were artifacts of a fix and its
+  entry-removal landing in different commits, or of the fix landing in a
+  different file than the entry named. **The reports** (read): all 55 verdict
+  messages, ~158KB, since only these can show a finding flagged and never
+  written down anywhere.
+
+  **What the audit found.** Two findings were flagged and never filed and are
+  still true — now filed as `[2026-08-20] [audit]`: `_warn_at_startup`'s banner
+  concatenation (2026-08-07) and the pool table's empty filter state
+  (2026-08-16). Three more were named in a sentence promising *"these go to
+  `BACKLOG.md`"* and never arrived, surviving only because later work happened to
+  fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
+  `floor_demand` inconsistency (now consistent, with a comment at
+  `main.py:1237 (bid_check)` naming that exact trap), and the negative `Spots` display
+  (clamped). **So a report saying "this goes to the backlog" is not evidence that
+  it did** — three of the four items named in that sentence in the very first
+  grill round never appeared in the file. Every dropped item was in a *closing
+  narrative* rather than in a numbered finding; the numbered findings were
+  without exception fixed or filed. A further 11 prose asides were raised and
+  dismissed *with a stated reason*, which is a judged non-finding rather than a
+  deferred one and correctly absent from `BACKLOG.md`.
+
+  Also closed: **round 20 — today's parallel-scan grill — had never been
+  re-reviewed.** It reported NEEDS WORK with five findings, all five were fixed
+  earlier today, but the protocol's step-5 re-review never ran so no verdict
+  closed it. Re-established the diff (`fe4edde..HEAD`) and reviewed it fresh:
+  **SHIP IT**, nothing new. Round 13's missing verdict is *correct* — a plan-mode
+  grill puts its remediation in the plan file — and its span ends with all five
+  of its findings resolved across three commits.
+
+  Two instrument notes worth keeping, both of which would have produced a wrong
+  answer. **`rtk` truncates `git log`**: the unproxied form returned 50 of 316
+  commits, so anything needing full history goes through `rtk proxy` or reads the
+  file in Python (it rewrites `grep`/`wc` too, so counts printed through them are
+  its own summaries). And **the transcript is self-contaminating** — this
+  session's own audit text matched both `NEEDS WORK` and `SHIP IT` and made round
+  20 look closed, so the scan is cut at the turn that requested the audit, pinned
+  by string search rather than a line number that drifts as the file grows. A
+  first pass at the backlog join also keyed entries on their
+  `file:line (symbol)` header and silently **merged two distinct `optimizer.py`
+  findings**; keying on the finding's body prose instead is what makes the 104
+  count trustworthy.
+
 ## [2026-08-19f]
 
 ### Changed

@@ -22,6 +22,15 @@ rediscover the same non-problem.
 
 ## [2026-08-20]
 
+Adversarial review of yesterday's parallel-scan batch. Both scans were
+re-measured on both states afterwards, against the pre-review commit run in a
+worktree side by side rather than against the published numbers: 398/431/179/561ms
+against 436/460/182/573ms, so the fixes are neutral to slightly better and
+yesterday's 384/454/182/569ms stand within noise. All 11 `proj-<CODE>` figures
+and both dot sets (15/9 fresh, 23/15 endgame) are **identical** — the error
+handling below changed no answer, which is what it should do on a run where
+nothing failed.
+
 ### Fixed
 
 - **The standings worker's error net did not cover its own body.** `try` wrapped

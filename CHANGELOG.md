@@ -20,6 +20,86 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-19f]
+
+### Changed
+
+- **Both manual scans now solve their MILPs in parallel inside the worker
+  thread.** They were moved off the event loop earlier today, which stopped them
+  blocking the cockpit but left them a serial loop. Concurrent CBC was already
+  measured safe and pinned, so this is the payoff:
+
+  | state | endpoint | before | after | |
+  |---|---|---|---|---|
+  | fresh | `/solve-standings` | 1294ms | **384ms** | 3.4x |
+  | fresh | `/buyout-indicators` | 1630ms | **454ms** | 3.6x |
+  | endgame | `/solve-standings` | 264ms | **182ms** | 1.5x |
+  | endgame | `/buyout-indicators` | 2174ms | **569ms** | 3.8x |
+
+  Every published figure is **byte-identical** before and after on both states —
+  all 11 `proj-<CODE>` spans and all 15/23 dot verdicts diffed, not eyeballed.
+  The endgame standings case gains least, as expected: eight done teams are not
+  solved, so there are only two MILPs to overlap.
+
+  **Learned while measuring, and it inverts what CLAUDE.md said:** the endgame is
+  the ROSTER scan's *worst* case, not its best — 23 eligible contracts against 15
+  on a fresh league, because a late-draft BOT owns more group 2/3 players. Only
+  the standings direction (cheaper late, because done teams are final) had been
+  written down, and it is easy to assume both scans behave the same way.
+
+  Three shape notes, all forced rather than chosen. Each loop body became a
+  per-item `_solve_one_*` keeping **its own** `try`/`except`, because an exception
+  raised in a pool worker surfaces when the *result* is consumed — a shared net
+  would cost the whole scan instead of one team or one dot. `functools.partial`
+  rather than a lambda, because `lambda c: _solve_one_opponent(...)` is a call in
+  the ast and fails `test_nothing_calls_a_solver_except_through_a_thread`, while
+  the workers must carry the `_solve_` prefix to satisfy
+  `test_only_recompute_may_solve_on_the_loop` — both guards were written to force
+  exactly this shape and needed no amendment. And `pool.map` yields in **input
+  order**, which is the only reason the result is deterministic, so the new test
+  asserts key order as well as values: a refactor to `as_completed` would
+  otherwise pass a values-only comparison while making the dict depend on which
+  CBC subprocess finished first.
+
+  `SCAN_WORKERS` lives in `main.py`, not `config.py` — that file is the league
+  (cap, roster shape, CBA rules) and a worker count is machine tuning. Capped at
+  8 rather than taken from `os.cpu_count()`: each concurrent solve is a CBC
+  **subprocess**, so it is a core budget, and uncapped on this 20-core box it
+  would put 15 processes on a 4-core draft-day laptop.
+
+- **The per-team cache for automatic exact standings is dead, and the
+  `BACKLOG.md` entry now says so with the numbers.** It proposed invalidating a
+  team's cached optimum only when *that team's* roster or budget changed, because
+  "the pool losing one player rarely moves an opponent's optimum". Measured over
+  five picks on a fresh league: **28 of 45 cached rows (62%) would have been
+  stale**, single-pick swings reached **−26 points**, and one pick moved **9 of 9**
+  other opponents twice in five. Every one of those renders as exact and BOT's
+  carries a rank badge, so it is the same class of error as the done-team
+  projection bug. The whole-column invalidation `_recompute()` already does is
+  correct. The entry was **corrected rather than deleted** — the want is real, and
+  an idea that simply vanishes invites the next person to re-propose the cache.
+
+- **The trade-off, measured rather than assumed: a concurrent request got
+  slower.** A warm `/bid-check` fired 30ms into a scan costs **43ms**, against
+  the **3ms** the same measurement gave this morning when the scan was a serial
+  loop in one thread — because the scan now occupies up to 8 CBC subprocesses
+  instead of one, and the loop competes with them for cores. That is the right
+  trade at these magnitudes (43ms is 12x inside the 500ms interaction budget, and
+  still 39x better than the 1682ms this all started from), but it is a real cost
+  and it scales with `SCAN_WORKERS` — which is the second reason that cap is not
+  `os.cpu_count()`. If a draft-day laptop ever makes typing feel sticky during a
+  scan, lower the cap before looking anywhere else.
+
+### Investigated
+
+- **Parallelism does not help anything on the request path**, so nothing there
+  changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
+  and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
+  a fan-out — its lever is still a cheaper solve, as `main.py:1168 (bid_check)`
+  says. Even at 384ms the standings scan is far too expensive for an action path:
+  on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
+  "never put this on an action path" stands.
+
 ## [2026-08-19e]
 
 Grill of the hard-coded-names sweep. Four findings, all in the new code, all

@@ -97,13 +97,25 @@ From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items 
 - ~~**Buyout Analyzer: Scan button + dropdown of my roster → select → "Execute Buyout".**~~ Closed 2026-08-06 as **already built** — `buyout_panel.html` has the Scan button plus a row of one-click per-player buttons (better than a dropdown: no open-then-select), the verdict block, and Execute Buyout. Nothing is typed. The entry described a flow that had already been replaced; the only real gap left there is the minors-have-no-dots finding under frontend/UX. **The dropdown half was reopened and decided the other way on 2026-08-08** — see the testing-pass section below. Don't read the parenthetical above as still standing: it was right about the interaction and wrong about the length.
 - **Decompose Model $ into its drivers — how much comes from projected points vs. NHL team quality** (and reputation/lag salary, which is the third big term). Needs a per-coefficient contribution breakdown out of `price_model.py`; the two-stage log-normal form means contributions are multiplicative on price, so decide whether to show them in log space or as "% of predicted price".
 - **Make the exact standings automatic rather than a button.** `GET /solve-standings`
-  (2026-08-17) answers the Proj column exactly, but it costs 1262ms on a fresh league
-  and the operator has to remember to press it — the default on screen is still the
-  estimate, now labelled. The cheap path is a per-team cache invalidated only when
-  THAT team's roster or budget changes: the pool losing one player rarely moves an
-  opponent's optimum, so a full re-solve of all ten on every pick is mostly waste.
-  Not filed as a finding because nothing is wrong at a line — the number is right and
-  says what it is. Revisit if draft-day use shows the button being forgotten.
+  (2026-08-17) answers the Proj column exactly and the operator has to remember to
+  press it — the default on screen is still the estimate, now labelled. The want is
+  real; **the mechanism this entry proposed until 2026-08-19 is dead, measured.** It
+  said the cheap path was a per-team cache invalidated only when THAT team's roster
+  or budget changes, because "the pool losing one player rarely moves an opponent's
+  optimum". Rarely was doing far too much work: over five picks on a fresh league,
+  **28 of 45 cached rows (62%) would have been stale**, single-pick swings reached
+  **−26 points**, and one pick moved **9 of 9** other opponents twice in five. Every
+  one of those figures renders as exact and BOT's carries a rank badge, so this is
+  the same class of error as the done-team projection bug (`#2` when BOT was `#1`).
+  The whole-column invalidation `_recompute()` already does is correct. So the only
+  honest route is a cheaper solve, and the parallel scan work (2026-08-19f) took the
+  fresh-league cost **1294ms → 384ms** — still far too much for an action path,
+  where it would sit on top of `/assign`'s 150ms against a 500ms budget. What is
+  left is not a cache: it is either a cheaper solve still, or an out-of-band refresh
+  that lets the column arrive a beat after the pick (which needs a polling or SSE
+  channel the app does not have). Revisit if draft-day use shows the button being
+  forgotten — and do **not** re-propose the per-team cache without re-measuring the
+  62%.
 - **Save State button that jumps between live state and a scenario**, so testing a what-if doesn't cost the real draft state. Interacts with the scenario loader (`POST /load-scenario`) and the undo snapshot chain — check that switching can't strand a snapshot.
 
 ### From the 2026-08-07 testing pass
@@ -220,8 +232,6 @@ class of thing from the 157px the old select clipped silently.
 ### Performance
 
 - ~~**Interaction budget: every UI interaction < 500ms.**~~ Met. Measured 2026-08-06 on a fresh state (BOT 12 rostered, 704-player pool): warm `/bid-check` **9ms**, `/assign` **150ms**, `/nominate` **130ms**, `/undo` **127ms**, `GET /` **20ms**, `/explain` **215ms** cold and **9ms** warm once cached. Nothing is over budget, so the entry is closed on measurement rather than on more work. Two things stay true and are not defects: the *first* bid check on a new player is still ~1000ms (~10 MILP solves in the marginal — the lever there is a cheaper solve, e.g. pool pruning, not fewer solves), and `/trade-evaluate` is still unmeasured because it needs a built-up trade form. Where a regression would actually hurt, the guard is a solve count rather than wall-clock (`tests/test_bid_cache.py`, `tests/test_counterfactual_cache.py`) — timing assertions go flaky under load and the solve count is the cause anyway.
-
-- **The two manual scans could be ~3x faster by solving inside the thread in parallel.** Now that concurrent CBC is measured safe and pinned (`tests/test_event_loop.py::TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow`), the per-team and per-player loops in `main.py`'s `_solve_exact_projections` / `_solve_buyout_indicators` are embarrassingly parallel: measured 2026-08-19, **11 solves took 401ms concurrently against 1134ms serially**, which would put a ~1.6s roster scan near ~550ms. Not urgent, and deliberately not bundled with taking the scans off the loop: the loop fix removed the *blocking*, which is what actually hurt on draft day, and a scan that takes 1.6s while the cockpit stays responsive is a very different problem from one that freezes it. Whoever picks this up should decide the worker count against a draft-day laptop rather than the dev machine's core count, and keep the answers-match assertion — the collision failure mode is silent (`status="Optimal"`, 950 points against 1355).
 
 ---
 

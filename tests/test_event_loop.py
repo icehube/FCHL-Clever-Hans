@@ -24,6 +24,7 @@ construction once the solve is off the loop (a JSON dump against 15 MILPs).
 """
 
 import ast
+import re
 import threading
 import time
 from pathlib import Path
@@ -469,4 +470,78 @@ class TestAScanInParallelAgreesWithItselfInSeries:
             f"SCAN_WORKERS is {main.SCAN_WORKERS}; it has to stay a small cap "
             f"rather than this machine's core count, because the draft runs on a "
             f"laptop and each solve is a CBC subprocess"
+        )
+
+
+class TestAScanWithNothingToSolve:
+    """An empty work list must answer, not raise.
+
+    Both scans return early on one, and that guard is not cosmetic:
+    `ThreadPoolExecutor(max_workers=0)` raises `ValueError: max_workers must be
+    greater than 0`, so without it the endpoint 500s. Neither branch was
+    exercised when the parallel fan-out landed — the existing standings coverage
+    marks at most ONE team done — which is how a guard preventing a live 500
+    shipped untested.
+
+    Both states are legal rather than contrived. **Every opponent done** is the
+    end of a real draft: the CBA lets teams stop before filling 24, CLAUDE.md
+    records that 3+ do every draft, and `test_auction_draft.py` already walks all
+    ten to done. **BOT with no eligible contracts** is rarer but is the same
+    branch, and the Analyzer offers nothing in that state either — the scan has
+    to agree with it rather than fall over.
+    """
+
+    def test_standings_answers_when_every_opponent_is_done(self, client):
+        for code in [c for c in main.auction_state.teams if c != main.MY_TEAM]:
+            client.post("/team-done", data={"team_code": code})
+        assert not [
+            c for c, t in main.auction_state.teams.items()
+            if not t.is_done and c != main.MY_TEAM
+        ], "the fixture failed to retire every opponent"
+
+        r = client.get("/solve-standings")
+
+        assert r.status_code == 200, (
+            f"/solve-standings raised with no opponent left to solve — the "
+            f"empty-list guard is what stops ThreadPoolExecutor(max_workers=0). "
+            f"This is the end of a real draft, not an edge case."
+        )
+        assert main.exact_projections == {}, (
+            f"a done team's roster is final, so the scan must not invent figures "
+            f"for one: {main.exact_projections}"
+        )
+        # And the marker reads a plain "exact", which looks wrong for a scan that
+        # solved nothing and is not: with every opponent done there is nothing
+        # left to guess, because a done team's figure is its FINAL and BOT's is
+        # its own MILP optimum. `standings_basis.html` branches on the count of
+        # ESTIMATES for exactly this state (measured 2026-08-18) — asserting
+        # "estimated" here is the mistake its comment predicts, and this test
+        # made it before making it this way.
+        marker = re.search(r'id="proj-basis"[^>]*>(.*?)</span>', r.text, re.S)
+        assert marker and marker.group(1).strip() == "exact", (
+            f"nothing on screen is an estimate — every opponent is done, so their "
+            f"figures are finals and BOT's is its own optimum — but the marker "
+            f"reads {marker.group(1).strip()!r} if marker else '(absent)'"
+        )
+
+    def test_the_roster_scan_answers_when_nothing_is_eligible(self, client):
+        team = main.auction_state.teams[main.MY_TEAM]
+        # Contract group is the whole rule (`can_be_bought_out`), so moving every
+        # player out of the eligible groups is the only way to empty the list.
+        for p in team.all_players:
+            p.group = "RFA1"
+        team._invalidate_cache()
+        assert not [p for p in team.all_players if p.can_be_bought_out], (
+            "the fixture failed to make BOT's roster ineligible"
+        )
+
+        r = client.get("/buyout-indicators")
+
+        assert r.status_code == 200, (
+            "/buyout-indicators raised with nothing eligible to solve — same "
+            "empty-list guard as the standings scan"
+        )
+        assert "buyout-light" not in r.text, (
+            "no player is eligible, so there is no dot to paint — and a dot here "
+            "would be a verdict on a decision that is not available"
         )

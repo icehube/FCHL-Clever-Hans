@@ -40,6 +40,38 @@ work that genuinely needs a draft to settle.
   for the glyph. The `placeholder` stays on the Start Auction field, because that
   field is free text and the hint is what stops a typo; it is simply no longer
   what names it.
+- **`measure_layout.py` tells three failures apart, where it had one.** Filed
+  2026-08-13: `report` printed `(absent)`, `min_contents` skipped a `None` with
+  no line at all, and `attribution` did `if not res: continue` — so a rotted
+  selector in `TARGETS` was indistinguishable from an element that legitimately
+  does not render. That is not hypothetical; `#league-state > table` went stale
+  the moment the 2026-08-11 fix wrapped that table, and the instrument silently
+  could not see the 955px element it was written to find. Now `(BAD SELECTOR)`
+  (invalid CSS — `querySelector` **throws**, which used to abandon the whole
+  probe), `(no match)` (valid, matches nothing: the stale-`TARGETS` case) and
+  `(not rendered)` (matched but `display:none`, the case that made a hidden
+  `#logs-panel` table measure 0 and read as a real number). `min_contents` and
+  `attribution` print a line for **every** target rather than skipping, since a
+  silent skip on min-content is the number a layout investigation turns on.
+  Rendered-ness is `getClientRects().length`, not a zero width — a zero from
+  `getBoundingClientRect()` is exactly the ambiguity being removed.
+- **Verified by running the instrument, not by pytest** — it is not collected and
+  has no test. `--selftest` appends one target of each kind and is the same
+  idiom as `--whatif`: inject the failure into a real run and read the real
+  output. All three reporters are exercised, because each collapsed the three
+  differently and a branch nobody has watched print is what this entry was
+  about.
+- **One thing it immediately surfaced was NOT a bug, and the first diagnosis of
+  it was wrong.** `#logs-panel div[role=tabpanel]:first-of-type table` came back
+  `(no match)`, which read as a rotted selector, and the reasoning that it must
+  be one — `:first-of-type` is per element name, so the first `<div>` child is
+  the `role=tablist` — was written into the file before being checked. Measured:
+  the tabpanels are *inside* the tablist, so the selector matches, rendered, from
+  the first pick onward. The miss is about the STATE: `main_measure()` POSTs
+  `/reset` first, and the Auction tab renders no table with an empty transaction
+  log. The selector is unchanged and now carries that note, so the next reader
+  does not repeat the hunt.
+
 - **The RFA and UFA nomination cards are one `pick_card` macro.** 43 lines
   duplicated for 43 lines, beside the `pick_prices` macro that had already
   collapsed their price line — filed 2026-08-18 and deferred out of that commit.

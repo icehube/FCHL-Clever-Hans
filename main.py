@@ -651,8 +651,19 @@ def _solve_one_opponent(
     """One opponent's optimum, or `None` if it could not be had.
 
     Its own `except`, and that placement is required rather than tidy: this runs
-    in a pool worker, and an exception raised here would otherwise surface when
-    the RESULT is consumed — taking down the whole scan instead of one team.
+    in a pool worker, so an exception escaping here surfaces when the RESULT is
+    consumed — taking down the whole scan instead of one team, and doing it
+    slowly, because the pool's `shutdown(wait=True)` first waits for every other
+    solve in flight.
+
+    **The whole body is inside it, which the first version got wrong**: the try
+    wrapped only the solve, leaving `sol.status` and the `int()` conversion
+    outside a net whose docstring claimed to cover them. Nothing reachable makes
+    `total_points` non-numeric today — it is a `float` on the dataclass — so this
+    is the guarantee being made true rather than a live bug, and the asymmetry
+    with `_solve_one_buyout` (whose body always was inside its try) is what gave
+    it away.
+
     Broad on purpose — a solver blowing up on one opponent must not cost the
     other nine — but never silent. The basis marker reveals that a cell is still
     an estimate (`exact 9/10`) and cannot say which team or why, so this log is
@@ -660,13 +671,13 @@ def _solve_one_opponent(
     """
     try:
         sol = solve_optimal_roster(state.teams[code], state.available_players, prices)
+        return code, int(sol.total_points) if sol.status == "Optimal" else None
     except Exception as e:
         logging.warning(
             "No exact projection for %s: %s: %s — that team keeps its "
             "estimate and the Proj column says so", code, type(e).__name__, e,
         )
         return code, None
-    return code, int(sol.total_points) if sol.status == "Optimal" else None
 
 
 def _solve_buyout_indicators(
@@ -722,6 +733,12 @@ def _solve_one_buyout(
     worker would cost the whole scan rather than one dot. `keep` on failure is
     the conservative answer — it says "no help here", not "buy him out".
 
+    **And it logs**, which it did not until 2026-08-20. A silent fallback here is
+    the 2026-08-07 failure with the evidence removed: every dot green reads as
+    "no buyout helps", and if the cause were a solver blowing up on all fifteen
+    there was nothing anywhere to say so. The dots cannot express "unknown" — the
+    template has two colours — so the log is the only place this is visible.
+
     The `deepcopy` is per player and always was: the clone is mutated (the player
     removed, the penalty added), so it cannot be shared. It reads `state` while
     other workers read the same `state`, which is fine — nothing here writes to
@@ -736,7 +753,11 @@ def _solve_one_buyout(
         bt.penalties += player.salary * BUYOUT_PENALTY_RATE
         sol = solve_optimal_roster(bt, state.available_players, prices)
         return player.name, "buyout" if sol.total_points > current_points else "keep"
-    except Exception:
+    except Exception as e:
+        logging.warning(
+            "No buyout verdict for %s: %s: %s — his dot stays green, which reads "
+            "as 'keep him'", player.name, type(e).__name__, e,
+        )
         return player.name, "keep"
 
 

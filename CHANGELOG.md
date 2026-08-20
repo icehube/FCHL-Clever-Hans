@@ -20,6 +20,61 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-19e]
+
+Grill of the hard-coded-names sweep. Four findings, all in the new code, all
+about it being *narrower or more brittle than it read*.
+
+### Changed
+
+- **The guard read `test_*.py`, which excluded the file where a literal would do
+  the most damage.** `helpers.py` is imported by every test module, so one stale
+  name there goes stale for the whole suite at once; `conftest.py` and the three
+  `measure_*.py` instruments were out too. Now every `tests/*.py`. Zero hits
+  there today, so widening was free — and it is safe for a reason worth writing
+  down: the guard matches a name only when it **is the entire string constant**,
+  which is the only form that gets used as *data*. A name inside a longer string
+  is invisible, so the docstrings that discuss real players do not trip it
+  (`helpers.a_buyout_candidate` names one who is still in the pool). Prose naming
+  a player goes stale; it cannot make a test silently stop testing.
+- **It also paid 29 `client` resets — a MILP solve each — to do it.** Per-file
+  parametrisation measured 0.11s of setup per case, **3.48s** total, for a check
+  that runs in microseconds; one test over all files is **0.40s** and reports
+  *more*, because the message names every offender by file and line instead of
+  failing on the first file. The reset itself stays and is not optional: a buyout
+  removes a player from the roster **and** the pool, so on a state another test
+  left behind, `available + rosters` would be missing him and a test naming him
+  would pass.
+- **The role derivation could itself break on a new `players.csv`** — in the one
+  file whose point is surviving one. `test_auction_draft._script` derived the top
+  D, the top G and the top RFA2 independently and then asserted they came out
+  distinct, so a CSV where the top D *is* the top RFA2 would kill the whole file
+  at `test_01`. Not hypothetical: the pool holds 9 RFA2s today and they include a
+  D (Miro Heiskanen) and a G (Igor Shesterkin), so it takes only one of them
+  being best at their position. Reproduced by forcing that shape — the old
+  derivation returned 2 distinct players of 3; the new one returns 11 of 11 with
+  the roles still on picks 5/6/7. `pool_top` gained `skip` for it, which keeps
+  `n=1` — asking for spare candidates instead would break on a pool thin in that
+  role.
+- **`test_15` and `test_16` hand-copied the script table**, as `== 4` and
+  `5.0 + 4.5 + 3.0 + 3.0`, while a comment written in the same commit claimed
+  they "read straight off" it. They now do. The cost of the copy was not
+  tidiness: edit a row and the copy goes stale, so the assertion fails describing
+  the wrong reason — or, if two edits cancel, passes while checking nothing.
+  Proved by moving MAC's pick to BOT: derived, the file passes at 5 picks /
+  $19.0M; with the hand-copied figures restored on top of the same edit, both
+  tests fail.
+
+### Investigated
+
+- **Synthetic unit-test names cannot start failing the guard on a refresh.**
+  `test_state.py` names players `Alice` / `Bob` / `Minor1`, and the worry was
+  that a future CSV would collide with one. Measured: **0 of 2155** pool names is
+  a single token — every one is `First Last` — so a one-word synthetic name is
+  structurally safe. This is the concern that ruled out matching capitalised
+  tokens (`"Charlie"` collides with five real players *today*), and it is why the
+  whole-name rule is the one that stays quiet.
+
 ## [2026-08-19d]
 
 ### Changed

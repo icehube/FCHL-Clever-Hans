@@ -19,13 +19,19 @@ _state: dict = {}
 BID_CHECK_PRICE = 2.0
 
 # Which teams buy, in which order, at what price. The TEAMS and SALARIES are the
-# script; the PLAYERS are derived (see `_script`). Two later assertions read
-# straight off this table and would go quietly wrong if it changed: BOT buys
-# exactly four (`test_15`) for exactly $15.5M (`test_16`).
+# script; the PLAYERS are derived (see `_script`).
 _SCRIPT = [
     ("GVR", 11.4), ("BOT", 5.0), ("SRL", 5.5), ("BOT", 4.5), ("LPT", 7.0),
     ("HSM", 4.7), ("BOT", 3.0), ("MAC", 3.5), ("BOT", 3.0), ("ZSK", 5.0),
 ]
+
+# Derived from the table above rather than written out beside it. `test_15` and
+# `test_16` used to carry `== 4` and `5.0 + 4.5 + 3.0 + 3.0`, which is the table
+# copied by hand: editing a row of the script would leave the copy stale, and
+# the assertion would then fail describing the wrong reason — or, if two edits
+# cancelled, pass while checking nothing.
+_BOT_PICKS = sum(1 for team, _ in _SCRIPT if team == "BOT")
+_BOT_SPEND = round(sum(salary for team, salary in _SCRIPT if team == "BOT"), 1)
 
 
 def _script() -> tuple[list[tuple[str, str, float]], str]:
@@ -222,10 +228,12 @@ class TestAuctionDraftSimulation:
         assert actual == expected, f"Expected {expected} available, got {actual}"
 
     def test_15_bot_roster_grew(self, client):
-        """BOT should have 4 more players."""
+        """BOT should have one more player per BOT row in the script."""
         state = _get_state(client)
         bot_acquired = len(state["teams"]["BOT"]["acquired_players"])
-        assert bot_acquired == 4, f"BOT should have 4 acquired, got {bot_acquired}"
+        assert bot_acquired == _BOT_PICKS, (
+            f"BOT should have {_BOT_PICKS} acquired, got {bot_acquired}"
+        )
 
     def test_16_bot_budget_consistent(self, client):
         """BOT remaining budget = SALARY_CAP - total_salary."""
@@ -233,7 +241,7 @@ class TestAuctionDraftSimulation:
         total_salary = _team_salary(state["teams"]["BOT"])
         remaining = SALARY_CAP - total_salary
         bot_salary_increase = total_salary - _state["baseline_bot_salary"]
-        expected_increase = 5.0 + 4.5 + 3.0 + 3.0  # BOT picks
+        expected_increase = _BOT_SPEND
         assert abs(bot_salary_increase - expected_increase) < 0.01, (
             f"BOT salary should increase by ${expected_increase}M, "
             f"got ${bot_salary_increase:.1f}M"

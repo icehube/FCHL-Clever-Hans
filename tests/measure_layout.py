@@ -121,8 +121,19 @@ PROBE = """
       overflowX: cs.overflowX, overflowY: cs.overflowY,
     };
   }
-  const g = document.querySelector('.auction-grid');
-  out.__meta = {
+  // The grid summary gets the SAME three-way as every target above. It used to
+  // read `.auction-grid` bare, and getComputedStyle(null) throws — so a rename of
+  // the one hand-written grid in the app took the whole probe down and report()
+  // printed nothing at all, while min_contents() answered `(no match)` for the
+  // identical selector. Measured 2026-08-20. That is the exact failure the MISS
+  // vocabulary exists to remove, in the one selector that was not in TARGETS,
+  // and a layout refactor is both what renames it and why you are running this.
+  let g;
+  try { g = document.querySelector('.auction-grid'); }
+  catch (e) { g = undefined; out.__meta = {miss: 'bad-selector'}; }
+  if (g === null) out.__meta = {miss: 'no-match'};
+  else if (g && g.getClientRects().length === 0) out.__meta = {miss: 'not-rendered'};
+  else if (g) out.__meta = {
     // A grid container's computed grid-template-columns is the USED track
     // sizes in px, so this is the whole track argument in one read.
     tracks: getComputedStyle(g).gridTemplateColumns,
@@ -214,10 +225,18 @@ def report(page, width: int, label: str) -> None:
     data = page.evaluate(PROBE, TARGETS)
     m = data.pop("__meta")
     print(f"\n{'=' * 78}\n{label} @ {width}px\n{'=' * 78}")
-    print(f"  tracks (used px)   : {m['tracks']}")
-    print(f"  grid client / scroll: {m['gridClientWidth']} / {m['gridScrollWidth']}"
-          f"   overflow = {m['gridScrollWidth'] - m['gridClientWidth']:+d}")
-    print(f"  page scrollWidth    : {m['pageScrollWidth']}  (innerWidth {m['innerWidth']})")
+    if "miss" in m:
+        # Losing the grid summary is not a reason to lose the per-target table:
+        # those measurements are independent of `.auction-grid` resolving, and
+        # they are what tells you where the panels actually went.
+        print(f"  .auction-grid       : {MISS[m['miss']]} — no track or page"
+              f" summary for this width; the table below still stands")
+    else:
+        print(f"  tracks (used px)   : {m['tracks']}")
+        print(f"  grid client / scroll: {m['gridClientWidth']} / {m['gridScrollWidth']}"
+              f"   overflow = {m['gridScrollWidth'] - m['gridClientWidth']:+d}")
+        print(f"  page scrollWidth    : {m['pageScrollWidth']}"
+              f"  (innerWidth {m['innerWidth']})")
     print(f"\n  {'element':<44} {'left':>6} {'right':>7} {'client':>7} {'scroll':>7}  ovf-x")
     for sel, v in data.items():
         if "miss" in v:

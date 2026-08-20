@@ -10,6 +10,7 @@ import os
 import re
 from datetime import datetime
 
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
@@ -1344,7 +1345,7 @@ async def trade_evaluate(request: Request):
 
 
 @contextmanager
-def _undoable(*, rollback: bool):
+def _undoable(*, rollback: bool) -> Iterator[None]:
     """capture -> attempt -> commit, so a REJECTED request costs no undo depth.
 
     save_snapshot() captures and commits in one call, so calling it before the
@@ -1357,6 +1358,12 @@ def _undoable(*, rollback: bool):
     it can mutate and then raise, which is the only case rollback_to has to
     undo. Never restore_snapshot() here: that is Ctrl+Z, and spending a chain
     entry is what it means.
+
+    The contract is ValueError and nothing wider, which is what the four
+    hand-rolled sites did before this existed: another exception mid-mutation
+    neither rolls back nor commits, so the partial mutation survives into a 500.
+    Widening to Exception would change error semantics on the undo path, so it is
+    a deliberate limit rather than an oversight.
     """
     before = auction_state.capture_snapshot()
     try:
@@ -1393,7 +1400,8 @@ async def trade_execute(request: Request, trade_id: str = Form("")):
     # other and can raise partway.
     try:
         with _undoable(rollback=True):
-            execute_trade(auction_state, trade_give, trade_receive, source_team_code=source_team)
+            execute_trade(auction_state, trade_give, trade_receive,
+                          source_team_code=source_team)
     except ValueError as e:
         last_trade_eval = None
         return _toast(

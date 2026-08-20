@@ -22,6 +22,82 @@ rediscover the same non-problem.
 
 ## [2026-08-20]
 
+Adversarial review of the backlog-clearing batch below (`b01f303..6d5b4f0`),
+then the fixes. Six findings, all resolved; nothing was a live defect in the
+running app — no endpoint contract, state format or MILP path moved. What was
+wrong is that **two of the batch's own claims were untrue**, one of them in the
+file that overrides everything else.
+
+### Fixed
+
+- **CLAUDE.md was instructing a pattern that fails the suite.** The `_undoable`
+  commit changed `TestEveryMutatingPostTakesASnapshot` and left both bullets that
+  document it untouched: one still said *"`save_snapshot()` and
+  `commit_snapshot()` both count"* — `commit_snapshot` had left
+  `SNAPSHOTTING_CALLS` — and the other still told you to write
+  `capture_snapshot() → attempt → commit_snapshot(before)`, which is now the
+  **body** of `_undoable`. An endpoint written from that bullet is reported as
+  taking no snapshot at all. Both now name `_undoable`, say why
+  `commit_snapshot` stopped counting, and carry the escape hatch the guard's own
+  comment already anticipated.
+- **`measure_layout.py`'s `__meta` block was exempt from the three-way it sits
+  beside.** The commit that added the three-way claimed it removed the case where
+  a throwing selector abandons the whole probe. It did — for `TARGETS`. `__meta`
+  still read `.auction-grid` bare, and `getComputedStyle(null)` throws. Measured
+  by renaming the class in the live DOM: `page.evaluate(PROBE, TARGETS)` raised
+  `TypeError`, `report()` printed **nothing**, and the exception came out of
+  `main_measure()`'s width loop — while `min_contents()` answered `(no match)`
+  for the identical selector, so the instrument's two halves disagreed.
+  `.auction-grid` is the one hand-written grid in the app: what a layout refactor
+  renames, which is also why you would be running this. `report()` now prints the
+  marker and keeps going, because losing the grid summary is not a reason to lose
+  17 measurements — and on the reproduction the table is the useful part, showing
+  all three `.area-*` boxes at full width, which is what the rename did.
+- **Then the fix itself was a finding.** Guarding `__meta` gave `PROBE` two
+  implementations of the same three-way, and grepping found a third in
+  `MIN_CONTENT` and a fourth in `ATTRIBUTE` — the rule existed three times and
+  the one place that needed it most had none. `PROBE_FN` holds it once and is
+  injected into each payload as a string (each is its own `page.evaluate` and has
+  to be a single arrow-function expression). Verified against a worktree at the
+  previous commit: the whole `--selftest` run across four widths is
+  byte-identical, 10300 bytes either way.
+
+### Changed
+
+- **The bid-panel naming rule scans `<select>` and `<textarea>` too**, for the
+  same reason the trade-form test it models itself on does: the control added
+  later is the one a narrower scan waves through. Both branches carry zero
+  selects today, so one added tomorrow sailed through a test whose docstring
+  claims to state the general rule. Pinned by adding an unnamed `<select>` to the
+  panel and watching it redden.
+- **And each arm of that rule now guards itself.** `assert suspects` fired only
+  when **both** came back empty — measured, the pre-auction branch is 2 fields +
+  2 glyph buttons and the live one 2 + 3, so losing the whole field arm to an
+  attribute-style change left the glyph buttons holding the assertion up while
+  the input coverage silently vanished. Separate floors, separate messages naming
+  which scan rotted; checked by breaking each regex in turn and reading the
+  actual assertion rather than the traceback's source listing, which quotes both.
+- **`_undoable` is annotated `-> Iterator[None]`** — CLAUDE.md asks for hints on
+  signatures, 27 of `main.py`'s 30 private defs comply, and a `@contextmanager`
+  generator is where the annotation is least guessable from the body. Its
+  docstring now also states the contract it always had: `ValueError` and nothing
+  wider, so another exception mid-mutation neither rolls back nor commits —
+  unchanged from the four hand-rolled sites, and a deliberate limit rather than
+  an oversight.
+- **Two comments that had stopped matching their own code.** The guard's block
+  still opened *"Two ways … and both count"* above a one-element set, and the
+  same edit had left a 108-char docstring line.
+
+### Investigated
+
+- **One import line shifted every `main.py` reference in both docs**, and three
+  of the six were pointing at a plain `def`, so they landed one line above their
+  own function and `test_backlog_refs` failed — as designed. All six re-anchored
+  in the same commit, including the three the guard did **not** catch:
+  `_symbol_ranges` starts a span at the first **decorator**, so a reference to an
+  `@app.post` line stays in range while being exactly as stale. Worth knowing
+  before trusting a green run as proof that no reference drifted.
+
 Clearing the backlog's cheap tail — items that are small, self-contained and
 not blocked on draft-day experience, so that what is left in `BACKLOG.md` is the
 work that genuinely needs a draft to settle.

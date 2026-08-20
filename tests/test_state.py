@@ -988,8 +988,9 @@ class TestEveryMutatingPostTakesASnapshot:
     snapshot or naming it here with a reason, in the same commit.
 
     **What this can and cannot prove.** It proves that a `save_snapshot()` call
-    or a `with _undoable(...)` block appears somewhere in each handler's body. It does NOT prove the call is
-    reachable, that it runs before the mutation, or that it runs on every path
+    or a `with _undoable(...)` block appears somewhere in each handler's body. It
+    does NOT prove the call is reachable, that it runs before the mutation, or
+    that it runs on every path
     — a call inside a branch that never fires reads as covered. And it only
     inspects `@app.post`; a GET that mutated `auction_state` would sail past.
     No GET does today (checked 2026-08-07 across all 24 routes, and the two
@@ -1002,12 +1003,14 @@ class TestEveryMutatingPostTakesASnapshot:
     prove a snapshot is taken on the path that matters.
     """
 
-    # Two ways to put a state on the undo chain, and both count. `save_snapshot`
-    # captures and commits in one step, which is right for an endpoint that
-    # cannot reject after that point. An endpoint that CAN reject uses the
-    # `_undoable` context manager, which captures, commits only on the success
-    # path and rolls back where the operation can mutate before it raises — so a
-    # refusal leaves the chain untouched.
+    # Two shapes put a state on the undo chain, and they live in two constants
+    # because the ast walk matches them differently — one is a method call on
+    # `auction_state`, the other a bare name. `save_snapshot` captures and
+    # commits in one step, which is right for an endpoint that cannot reject
+    # after that point. An endpoint that CAN reject uses the `_undoable` context
+    # manager, which captures, commits only on the success path and rolls back
+    # where the operation can mutate before it raises — so a refusal leaves the
+    # chain untouched.
     #
     # `capture_snapshot` deliberately does NOT appear here, because capturing
     # without committing snapshots nothing, and `commit_snapshot` no longer does

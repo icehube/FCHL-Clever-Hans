@@ -988,7 +988,7 @@ class TestEveryMutatingPostTakesASnapshot:
     snapshot or naming it here with a reason, in the same commit.
 
     **What this can and cannot prove.** It proves that a `save_snapshot()` call
-    appears somewhere in each handler's body. It does NOT prove the call is
+    or a `with _undoable(...)` block appears somewhere in each handler's body. It does NOT prove the call is
     reachable, that it runs before the mutation, or that it runs on every path
     — a call inside a branch that never fires reads as covered. And it only
     inspects `@app.post`; a GET that mutated `auction_state` would sail past.
@@ -1004,11 +1004,24 @@ class TestEveryMutatingPostTakesASnapshot:
 
     # Two ways to put a state on the undo chain, and both count. `save_snapshot`
     # captures and commits in one step, which is right for an endpoint that
-    # cannot reject after that point. An endpoint that CAN reject captures
-    # first and calls `commit_snapshot` only on the success path, so a refusal
-    # leaves the chain untouched — `capture_snapshot` deliberately does NOT
-    # appear here, because capturing without committing snapshots nothing.
-    SNAPSHOTTING_CALLS = {"save_snapshot", "commit_snapshot"}
+    # cannot reject after that point. An endpoint that CAN reject uses the
+    # `_undoable` context manager, which captures, commits only on the success
+    # path and rolls back where the operation can mutate before it raises — so a
+    # refusal leaves the chain untouched.
+    #
+    # `capture_snapshot` deliberately does NOT appear here, because capturing
+    # without committing snapshots nothing, and `commit_snapshot` no longer does
+    # either: since 2026-08-20 its only caller in `main.py` IS `_undoable`, so
+    # accepting the name would accept a hand-rolled pairing that the four
+    # endpoints stopped using. If a fifth endpoint needs the raw form, add it
+    # back here and say why the context manager did not fit.
+    SNAPSHOTTING_CALLS = {"save_snapshot"}
+
+    # `_undoable(...)` is a plain function call, not `auction_state.method()`, so
+    # the walk below has to look for both shapes. Missing this is not a false
+    # negative that shows up somewhere else: the guard would report all four
+    # rejecting endpoints as taking no snapshot at all.
+    SNAPSHOTTING_HELPERS = {"_undoable"}
 
     # Every POST that legitimately takes no snapshot, and why. Not a
     # suppression list — an entry is a claim that the endpoint does not change
@@ -1042,8 +1055,12 @@ class TestEveryMutatingPostTakesASnapshot:
                 route = dec.args[0].value
                 found[route] = any(
                     isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Attribute)
-                    and n.func.attr in self.SNAPSHOTTING_CALLS
+                    and (
+                        (isinstance(n.func, ast.Attribute)
+                         and n.func.attr in self.SNAPSHOTTING_CALLS)
+                        or (isinstance(n.func, ast.Name)
+                            and n.func.id in self.SNAPSHOTTING_HELPERS)
+                    )
                     for n in ast.walk(node)
                 )
         return found
@@ -1070,9 +1087,10 @@ class TestEveryMutatingPostTakesASnapshot:
         )
         assert not missing, (
             f"these POST endpoints change state but take no undo snapshot: "
-            f"{missing}. Either call auction_state.save_snapshot() (or "
-            f"capture_snapshot/commit_snapshot if the endpoint can reject), or "
-            f"add the route to NO_SNAPSHOT_NEEDED with the reason it needs none."
+            f"{missing}. Either call auction_state.save_snapshot() (or wrap the "
+            f"operation in `with _undoable(rollback=...)` if the endpoint can "
+            f"reject), or add the route to NO_SNAPSHOT_NEEDED with the reason it "
+            f"needs none."
         )
 
     def test_the_allow_list_has_no_stale_entries(self):

@@ -40,6 +40,21 @@ work that genuinely needs a draft to settle.
   for the glyph. The `placeholder` stays on the Start Auction field, because that
   field is free text and the hint is what stops a typo; it is simply no longer
   what names it.
+- **Guarded as a rule, not as six labels**, by
+  `tests/test_endpoints.py::TestNoBidControlIsUnnamed` — the same shape and the
+  same reason as `test_no_control_in_either_trade_form_is_unnamed`, which the
+  entry itself cites. Both branches of the template are covered, from both mounts
+  (`GET /`'s section slice and `/bid-check`'s bare fragment), because a
+  per-branch fix would otherwise pass a single-page assertion while leaving the
+  other half silent. A `<button>` is named by its own text, so the rule is
+  *"visible text with no letter or digit in it is not a name"* rather than
+  "everything carries `aria-label`" — that is what makes a glyph stepper a
+  finding and `Assign to BOT ($0.5M)`, `Start Auction` and the bidder logos not
+  ones. Mutation-checked: each of the eight labels stripped in turn, one site per
+  patch, every one reddening the new tests (the Start Auction player field kills
+  two, as designed) and, on the widest mutant, **nothing else** across
+  `test_endpoints`, `test_htmx_interactions`, `test_browser_ui` and
+  `test_offline_assets`.
 - **`measure_layout.py` tells three failures apart, where it had one.** Filed
   2026-08-13: `report` printed `(absent)`, `min_contents` skipped a `None` with
   no line at all, and `attribution` did `if not res: continue` — so a rotted
@@ -72,6 +87,8 @@ work that genuinely needs a draft to settle.
   log. The selector is unchanged and now carries that note, so the next reader
   does not repeat the hunt.
 
+### Changed
+
 - **The RFA and UFA nomination cards are one `pick_card` macro.** 43 lines
   duplicated for 43 lines, beside the `pick_prices` macro that had already
   collapsed their price line — filed 2026-08-18 and deferred out of that commit.
@@ -99,22 +116,30 @@ work that genuinely needs a draft to settle.
   That matters because the CSV is replaced before every draft, so an export that
   starts filling the column for group 3 is a live possibility and the answer is
   still no. All four mutants now die, one site per patch.
-
-- **Guarded as a rule, not as six labels**, by
-  `tests/test_endpoints.py::TestNoBidControlIsUnnamed` — the same shape and the
-  same reason as `test_no_control_in_either_trade_form_is_unnamed`, which the
-  entry itself cites. Both branches of the template are covered, from both mounts
-  (`GET /`'s section slice and `/bid-check`'s bare fragment), because a
-  per-branch fix would otherwise pass a single-page assertion while leaving the
-  other half silent. A `<button>` is named by its own text, so the rule is
-  *"visible text with no letter or digit in it is not a name"* rather than
-  "everything carries `aria-label`" — that is what makes a glyph stepper a
-  finding and `Assign to BOT ($0.5M)`, `Start Auction` and the bidder logos not
-  ones. Mutation-checked: each of the eight labels stripped in turn, one site per
-  patch, every one reddening the new tests (the Start Auction player field kills
-  two, as designed) and, on the widest mutant, **nothing else** across
-  `test_endpoints`, `test_htmx_interactions`, `test_browser_ui` and
-  `test_offline_assets`.
+- **The four endpoints that can reject a request share one `_undoable`.**
+  `BACKLOG.md`, 2026-08-07: they each repeated `capture_snapshot → try → except
+  ValueError → _toast → commit_snapshot`. Attempted, judged, and landed — the
+  entry asked for a shared helper and the honest answer turned out to be yes, but
+  not for the reason it gave. It is **not** a line saving: `main.py` grows 13
+  lines, because the helper's docstring carries the protocol that four
+  paraphrases of it used to carry between them (and one of the four,
+  `move_to_roster`, had quietly stopped carrying it at all). What it buys is that
+  `capture_snapshot`, `commit_snapshot` and `rollback_to` now have exactly **one**
+  caller each, inside `_undoable`, so the pairing cannot come apart at an
+  endpoint — and `rollback=True/False` states the per-site decision as an
+  argument instead of as the presence or absence of a line. Each site keeps its
+  own one-line reason for the flag; only the invariant moved.
+- **That made `TestEveryMutatingPostTakesASnapshot` stronger, not weaker.**
+  `commit_snapshot` left `SNAPSHOTTING_CALLS`, because an endpoint that calls
+  `capture_snapshot` and forgets to commit used to satisfy the guard — capturing
+  without committing snapshots nothing. `_undoable` is a bare-name call rather
+  than `auction_state.method()`, so the ast walk had to learn a second shape;
+  getting that wrong is not a subtle false negative, it reports all four
+  endpoints as taking no snapshot at all, which is how this was noticed.
+  Mutation-checked, one site per patch: dropping `/buyout`'s `with` block reddens
+  the guard *and* an undo test; flipping the trade to `rollback=False` reddens
+  `test_a_failed_trade_still_rolls_back`; committing on the failure path inside
+  `_undoable` reddens all four `TestARejectedEditCostsNoUndoDepth` cases.
 
 Adversarial review of yesterday's parallel-scan batch. Both scans were
 re-measured on both states afterwards, against the pre-review commit run in a

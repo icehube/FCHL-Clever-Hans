@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
 from functools import partial
 
@@ -1343,6 +1343,31 @@ async def trade_evaluate(request: Request):
     return _render(request, "partials/trade_panel.html", ctx)
 
 
+@contextmanager
+def _undoable(*, rollback: bool):
+    """capture -> attempt -> commit, so a REJECTED request costs no undo depth.
+
+    save_snapshot() captures and commits in one call, so calling it before the
+    operation is known to succeed evicts the oldest chain entry at MAX_SNAPSHOTS
+    while the restore_snapshot() on the error path pops from the other end — a
+    refusal reads as a no-op while quietly destroying a real undo step.
+
+    `rollback` is not a style choice. Pass False only when the operation
+    validates before it mutates, so a refusal has changed nothing; pass True when
+    it can mutate and then raise, which is the only case rollback_to has to
+    undo. Never restore_snapshot() here: that is Ctrl+Z, and spending a chain
+    entry is what it means.
+    """
+    before = auction_state.capture_snapshot()
+    try:
+        yield
+    except ValueError:
+        if rollback:
+            auction_state.rollback_to(before)
+        raise
+    auction_state.commit_snapshot(before)
+
+
 @app.post("/trade-execute", response_class=HTMLResponse)
 async def trade_execute(request: Request, trade_id: str = Form("")):
     """Execute a previously evaluated trade."""
@@ -1364,22 +1389,17 @@ async def trade_execute(request: Request, trade_id: str = Form("")):
     trade_receive = last_trade_eval.receive
     source_team = last_trade_eval.source_team_code
 
-    # Capture, attempt, commit on success. A rejected trade must leave the undo
-    # chain exactly as it found it: save_snapshot evicts the oldest entry once
-    # the chain is full, so snapshotting speculatively costs a real undo step
-    # on every refusal. The rollback is still needed here — execute_trade
-    # removes from one team before adding to another and can raise partway.
-    before = auction_state.capture_snapshot()
+    # rollback=True: execute_trade removes from one team before adding to the
+    # other and can raise partway.
     try:
-        execute_trade(auction_state, trade_give, trade_receive, source_team_code=source_team)
+        with _undoable(rollback=True):
+            execute_trade(auction_state, trade_give, trade_receive, source_team_code=source_team)
     except ValueError as e:
-        auction_state.rollback_to(before)
         last_trade_eval = None
         return _toast(
             _render(request, "partials/all_panels.html"),
             f"Trade failed: {e}", "error",
         )
-    auction_state.commit_snapshot(before)
     last_trade_eval = None
 
     # Log trade transactions for both teams (when source_team is known)
@@ -1455,22 +1475,19 @@ async def buyout(request: Request, player: str = Form(...)):
         bo_salary = p.salary
         bo_nhl_team = p.nhl_team
 
-    # Capture, attempt, commit on success — a refused buyout must not cost an
-    # undo step. Ineligible players are refused routinely (the Analyzer only
-    # offers group 2/3, but /buyout takes any name), so this path is walked.
-    # The rollback stays: execute_buyout can raise after mutating.
-    before = auction_state.capture_snapshot()
+    # rollback=True: execute_buyout can raise after mutating. Ineligible players
+    # are refused routinely (the Analyzer only offers group 2/3, but /buyout takes
+    # any name), so this path is walked.
     try:
-        execute_buyout(auction_state, player)
+        with _undoable(rollback=True):
+            execute_buyout(auction_state, player)
     except ValueError as e:
-        auction_state.rollback_to(before)
         # Report the actual reason: this used to say "not found" for every
         # failure, so an ineligible-group refusal named the wrong problem.
         return _toast(
             _render(request, "partials/all_panels.html"),
             f"Buyout failed: {e}", "error",
         )
-    auction_state.commit_snapshot(before)
 
     # Log buyout transaction
     if p:
@@ -1960,19 +1977,17 @@ async def move_to_minors(
     t = auction_state.teams.get(team_code)
     if t is None:
         return _render(request, "partials/all_panels.html")
-    # Capture, attempt, commit on success. No rollback: send_to_minors
-    # validates before mutating, so a refusal has changed nothing. "Send down"
-    # sits next to every roster row and refuses an unbenched player, so this is
-    # the most-clicked rejection in the app — it must cost no undo depth.
-    before = auction_state.capture_snapshot()
+    # rollback=False: send_to_minors validates before mutating. "Send down" sits
+    # next to every roster row and refuses an unbenched player, so this is the
+    # most-clicked rejection in the app — it must cost no undo depth.
     try:
-        t.send_to_minors(player_name)
+        with _undoable(rollback=False):
+            t.send_to_minors(player_name)
     except ValueError as e:
         return _toast(
             _render(request, "partials/all_panels.html"),
             str(e), "error",
         )
-    auction_state.commit_snapshot(before)
     _log_change("move-to-minors", team_code, f"{player_name} → minors")
     _recompute()
     _save_state()
@@ -1989,18 +2004,16 @@ async def move_to_roster(
     t = auction_state.teams.get(team_code)
     if t is None:
         return _render(request, "partials/all_panels.html")
-    # Capture, attempt, commit on success. No rollback: recall_from_minors
-    # validates before mutating, so a refusal has changed nothing.
-    before = auction_state.capture_snapshot()
+    # rollback=False: recall_from_minors validates before mutating.
     try:
-        t.recall_from_minors(player_name)
+        with _undoable(rollback=False):
+            t.recall_from_minors(player_name)
     except ValueError as e:
         # Surface the real reason: this used to hardcode "not in minors", which
         # is an actively wrong explanation for a roster-capacity refusal.
         return _toast(
             _render(request, "partials/all_panels.html"), str(e), "error",
         )
-    auction_state.commit_snapshot(before)
     _log_change("move-to-roster", team_code, f"{player_name} → active")
     _recompute()
     _save_state()

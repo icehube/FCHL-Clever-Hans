@@ -280,6 +280,28 @@ time on a multi-line anchor. Assert the patch replaced **exactly one** site
 before running the suite, and be suspicious of any mutant that dies in no test at
 all: the likely explanation is that it was never applied.
 
+**The mutant harness has two more ways to lie, both seen 2026-08-20.** (1) A loop
+that runs past its tool timeout is killed with SIGTERM, `finally` never runs, and
+the file is left **mutated** in the working tree — a later `git add -A` would
+commit it. Install a `SIGTERM`/`SIGINT` handler that restores, run anything over
+a few minutes detached rather than in the foreground, and verify restoration by
+comparing the file against the original text, never by assuming the `finally`
+fired. (2) Backticks inside a double-quoted `python3 -c "..."` are command
+substitution: a patch that writes a comment containing `` `code` `` silently
+writes it with the backticked text **deleted**. Use a quoted heredoc
+(`<<'PY'`) for anything that embeds code in prose, and read back what landed.
+That one put a factually wrong claim into a comment — the reasoning it stated had
+not been measured, and when measured it was false.
+
+**Also 2026-08-20: a data guard can mask the flag beside it.** `{% if show_prior
+and pick.player.prior_fchl_team %}` — flipping `show_prior`'s default and passing
+it explicitly *both* survived the whole suite, because `players.csv` fills PRIOR
+FCHL TEAM for 22 of 2158 rows and no UFA is one of them. Equivalent mutants, not
+coverage. When a mutant survives, ask whether the data makes it equivalent before
+concluding the code is untested — and if the data is what saves you, pin the
+intent by supplying the data that would break it, because `players.csv` is
+replaced before every draft.
+
 ## Code conventions
 
 - Python 3.12+ (the venv runs 3.14.4 — verified 2026-08-19; nothing pins a version, so this is the floor, not the target), type hints on signatures

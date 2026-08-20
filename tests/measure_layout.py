@@ -99,20 +99,39 @@ MISS = {
     "not-rendered": "(not rendered)",   # matched, but display:none — 0 is not a width
 }
 
-PROBE = """
-(selectors) => {
-  const out = {};
-  for (const sel of selectors) {
+# The three-way itself, injected into each payload below. It was written THREE
+# times — the target loop, min-content, attribution — and the grid summary, which
+# needed it most, did not have it at all: `.auction-grid` was read bare, and
+# getComputedStyle(null) throws, so a rename of the one hand-written grid in the
+# app took the whole probe down while min_contents() answered `(no match)` for
+# the identical selector (measured 2026-08-20). Three copies is three chances for
+# that to happen again; `squeeze` and `loadTradeChoices` are the same story here.
+#
+# Injected as a string rather than shared at runtime because each of these is its
+# own `page.evaluate` payload and must be a single arrow-function expression.
+PROBE_FN = """
+  const probe = (sel) => {
     let el;
     // querySelector THROWS on a syntactically invalid selector, which used to
     // abandon the whole probe and report nothing about any target.
     try { el = document.querySelector(sel); }
-    catch (e) { out[sel] = {miss: 'bad-selector'}; continue; }
-    if (!el) { out[sel] = {miss: 'no-match'}; continue; }
+    catch (e) { return {miss: 'bad-selector'}; }
+    if (!el) return {miss: 'no-match'};
     // getClientRects() is empty for display:none and non-empty for a rendered
     // box of any size — the distinction a zero from getBoundingClientRect()
     // cannot make, and the reason a hidden #logs-panel table read as 0px wide.
-    if (el.getClientRects().length === 0) { out[sel] = {miss: 'not-rendered'}; continue; }
+    if (el.getClientRects().length === 0) return {miss: 'not-rendered'};
+    return {el};
+  };
+"""
+
+PROBE = """
+(selectors) => {""" + PROBE_FN + """
+  const out = {};
+  for (const sel of selectors) {
+    const hit = probe(sel);
+    if (hit.miss) { out[sel] = hit; continue; }
+    const el = hit.el;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     out[sel] = {
@@ -121,25 +140,17 @@ PROBE = """
       overflowX: cs.overflowX, overflowY: cs.overflowY,
     };
   }
-  // The grid summary gets the SAME three-way as every target above. It used to
-  // read `.auction-grid` bare, and getComputedStyle(null) throws — so a rename of
-  // the one hand-written grid in the app took the whole probe down and report()
-  // printed nothing at all, while min_contents() answered `(no match)` for the
-  // identical selector. Measured 2026-08-20. That is the exact failure the MISS
-  // vocabulary exists to remove, in the one selector that was not in TARGETS,
-  // and a layout refactor is both what renames it and why you are running this.
-  let g;
-  try { g = document.querySelector('.auction-grid'); }
-  catch (e) { g = undefined; out.__meta = {miss: 'bad-selector'}; }
-  if (g === null) out.__meta = {miss: 'no-match'};
-  else if (g && g.getClientRects().length === 0) out.__meta = {miss: 'not-rendered'};
-  else if (g) out.__meta = {
+  // The grid summary goes through the same probe() as every target above, which
+  // is the whole point of hoisting it: this is the one selector that was never
+  // in TARGETS and so never got the treatment TARGETS got.
+  const grid = probe('.auction-grid');
+  out.__meta = grid.miss ? grid : {
     // A grid container's computed grid-template-columns is the USED track
     // sizes in px, so this is the whole track argument in one read.
-    tracks: getComputedStyle(g).gridTemplateColumns,
-    gridClientLeft: g.getBoundingClientRect().left + g.clientLeft,
-    gridClientWidth: g.clientWidth,
-    gridScrollWidth: g.scrollWidth,
+    tracks: getComputedStyle(grid.el).gridTemplateColumns,
+    gridClientLeft: grid.el.getBoundingClientRect().left + grid.el.clientLeft,
+    gridClientWidth: grid.el.clientWidth,
+    gridScrollWidth: grid.el.scrollWidth,
     pageScrollWidth: document.scrollingElement.scrollWidth,
     innerWidth: window.innerWidth,
   };
@@ -152,12 +163,10 @@ PROBE = """
 # situ (inheritance and percentages intact). Sizing one item reflows the
 # tracks, so never hold two at min-content at once.
 MIN_CONTENT = """
-(sel) => {
-  let el;
-  try { el = document.querySelector(sel); }
-  catch (e) { return {miss: 'bad-selector'}; }
-  if (!el) return {miss: 'no-match'};
-  if (el.getClientRects().length === 0) return {miss: 'not-rendered'};
+(sel) => {""" + PROBE_FN + """
+  const hit = probe(sel);
+  if (hit.miss) return hit;
+  const el = hit.el;
   const w0 = el.style.width, m0 = el.style.minWidth;
   el.style.minWidth = '0';
   el.style.width = 'min-content';
@@ -171,12 +180,10 @@ MIN_CONTENT = """
 # For each grid area, the deepest descendant whose min-content is within 2px of
 # the area's — i.e. the element actually setting the floor.
 ATTRIBUTE = """
-(areaSel) => {
-  let area;
-  try { area = document.querySelector(areaSel); }
-  catch (e) { return {miss: 'bad-selector'}; }
-  if (!area) return {miss: 'no-match'};
-  if (area.getClientRects().length === 0) return {miss: 'not-rendered'};
+(areaSel) => {""" + PROBE_FN + """
+  const hit = probe(areaSel);
+  if (hit.miss) return hit;
+  const area = hit.el;
   const mc = el => {
     const w0 = el.style.width, m0 = el.style.minWidth;
     el.style.minWidth = '0'; el.style.width = 'min-content';

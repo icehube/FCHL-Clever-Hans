@@ -3073,16 +3073,39 @@ class TestNoBidControlIsUnnamed:
         return markup[markup.index('<div id="bid-panel"'):]
 
     def _unnamed(self, panel: str) -> list[str]:
-        suspects = [
-            tag for tag in re.findall(r"<input\b[^>]*>", panel)
+        """Every control here that cannot take a name from its own content.
+
+        `<select>` and `<textarea>` are scanned even though the bid panel has
+        none today, for the same reason the trade-form test scans `<select>`:
+        the control added later is the one a narrower scan waves through, and
+        the panel is where a filter dropdown would plausibly land.
+
+        The two arms are counted SEPARATELY. A single `assert suspects` fired
+        only when both came back empty, so losing the whole field arm to an
+        attribute-style change left the glyph buttons holding the assertion up
+        while the input coverage silently vanished — measured 2026-08-20, the
+        pre-auction branch is 2 fields + 2 glyph buttons and the live one 2 + 3,
+        so either arm alone satisfies it. Floors rather than equalities, so
+        adding a control is not a test edit.
+        """
+        fields = [
+            tag for tag in re.findall(r"<(?:input|select|textarea)\b[^>]*>", panel)
             if not re.search(r'type="hidden"', tag)
         ]
+        glyphs = []
         for tag, inner in re.findall(r"(<button\b[^>]*>)(.*?)</button>", panel, re.S):
             text = html.unescape(re.sub(r"<[^>]*>", "", inner))
             if not any(c.isalnum() for c in text):
-                suspects.append(tag)
-        assert suspects, "found no bid controls at all — the slice rotted"
-        return [t for t in suspects if "aria-label=" not in t]
+                glyphs.append(tag)
+        assert len(fields) >= 2, (
+            f"found {len(fields)} non-hidden fields, expected the player and the "
+            f"price at least — the field scan rotted, not the template"
+        )
+        assert len(glyphs) >= 2, (
+            f"found {len(glyphs)} glyph buttons, expected the two price steppers "
+            f"at least — the button scan rotted, not the template"
+        )
+        return [t for t in fields + glyphs if "aria-label=" not in t]
 
     def test_the_start_auction_form_names_every_control(self, client):
         panel = self._bid_panel(client.get("/").text)

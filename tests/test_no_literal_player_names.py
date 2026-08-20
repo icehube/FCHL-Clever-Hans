@@ -31,6 +31,19 @@ CSV could fail a synthetic-name unit test for no reason, at exactly the moment
 you want the suite quiet. So the surname class stays a gap, and the way to close
 it at a call site is to assert the *derived* name rather than a fragment of it.
 
+**Whole constants only, which is what makes it precise.** A name is flagged when
+it IS the entire string — `{"player": "Connor McDavid"}`, `assert name in r.text`
+— because that is the only form that gets *used as data*. A name mentioned inside
+a longer string is invisible, so the docstrings that discuss real players (
+`helpers.a_buyout_candidate` names one, and he is still in the pool) do not trip
+it. That is deliberate: prose naming a player goes stale, but it cannot make a
+test silently stop testing.
+
+**Every `.py` under `tests/`, not just `test_*.py`.** The first version globbed
+`test_*.py` and so did not read `helpers.py` — the one file imported by everyone,
+where a single literal would go stale for the whole suite at once. `conftest.py`
+and the `measure_*.py` instruments are in for the same reason.
+
 **What this can and cannot prove.** It proves no test names a player the current
 pool contains. It does not prove the suite would survive an arbitrary CSV — a
 pool with no goalies, or with twenty players, breaks things no naming discipline
@@ -79,17 +92,26 @@ def _string_constants(path: Path) -> list[tuple[int, str]]:
     ]
 
 
-@pytest.mark.parametrize(
-    "path", sorted(TESTS.glob("test_*.py")), ids=lambda p: p.name
-)
-def test_no_test_file_names_a_player(path, client):
-    """`client` for the fresh state the pool is read from, not for requests."""
-    if path.name in NAMES_ARE_THE_POINT:
-        pytest.skip(f"allowlisted: {NAMES_ARE_THE_POINT[path.name]}")
+def test_no_test_file_names_a_player(client):
+    """One test over every file, rather than one per file.
 
+    `client` is here for the fresh state the pool is read from, not to make
+    requests — and it has to be the resetting fixture rather than the
+    session-scoped transport: a buyout removes a player from the roster AND the
+    pool, so on a state somebody else left behind, `available + rosters` would
+    be missing him and a test naming him would pass.
+
+    That reset costs a MILP solve, which is why this is a single test. Per-file
+    parametrisation paid it **29 times** (measured: 0.11s setup each, ~3.2s, for
+    a check that takes microseconds) and bought nothing — the message below names
+    every offender by file and line, so one failure reports more than a
+    parametrised one would.
+    """
     pool = _pool_names()
     offenders = [
         f"{path.name}:{line} names {value!r}"
+        for path in sorted(TESTS.glob("*.py"))
+        if path.name not in NAMES_ARE_THE_POINT
         for line, value in _string_constants(path)
         if value in pool
     ]

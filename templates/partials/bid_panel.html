@@ -90,8 +90,9 @@
        Bidder clicks and price changes auto-resubmit /bid-check. #}
     <form id="bid-form" hx-post="/bid-check" hx-target="#bid-panel" hx-swap="outerHTML" hx-sync="this:replace" class="mt-2">
         <div class="flex flex-wrap gap-2 items-center">
-            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" readonly class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
-            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
+            <input type="text" name="player" value="{{ bid_advice.player_name }}" list="player-list" readonly
+                   aria-label="Player being bid on" class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <button type="button" class="btn btn-xs btn-ghost px-1" aria-label="Lower the bid by $0.1M" onclick="adjustPrice(-0.1)">-</button>
             {# `change` on a number input fires on BLUR, and clicking Assign is
                what blurs it — so this request is triggered BY the click it can
                destroy. hx-select narrows the swap to the advice block, leaving
@@ -99,11 +100,12 @@
                marginal-value cache this was masked: the response took ~1000ms
                and landed ~900ms after mouseup. At ~9ms it lands mid-click. #}
             <input type="number" name="price" step="0.1" min="0.5" value="{{ bid_price if bid_price is defined else 0.5 }}" id="bid-price"
+                   aria-label="Current bid in $M"
                    hx-post="/bid-check" hx-target="#bid-advice"
                    hx-select="#bid-advice" hx-swap="outerHTML"
                    hx-trigger="change" hx-include="closest form"
                    class="input input-xs input-bordered bg-base-300 w-16">
-            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
+            <button type="button" class="btn btn-xs btn-ghost px-1" aria-label="Raise the bid by $0.1M" onclick="adjustPrice(0.1)">+</button>
         </div>
         <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else default_bidders }}">
         <input type="hidden" name="highest_bidder" id="highest-bidder-hidden" value="{{ highest_bidder if highest_bidder is defined else '' }}">
@@ -193,10 +195,10 @@
         <div class="flex flex-wrap gap-2 items-center">
             {# Keep what was typed, so a misspelling is corrected rather than
                retyped from scratch mid-auction. #}
-            <input type="text" name="player" placeholder="Player being bid on" value="{{ bid_player_text if bid_player_text is defined else '' }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
-            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(-0.1)">-</button>
-            <input type="number" name="price" step="0.1" min="0.5" value="0.5" id="bid-price" class="input input-xs input-bordered bg-base-300 w-16">
-            <button type="button" class="btn btn-xs btn-ghost px-1" onclick="adjustPrice(0.1)">+</button>
+            <input type="text" name="player" aria-label="Player being bid on" placeholder="Player being bid on" value="{{ bid_player_text if bid_player_text is defined else '' }}" list="player-list" required class="input input-xs input-bordered bg-base-300 flex-1 min-w-[120px]">
+            <button type="button" class="btn btn-xs btn-ghost px-1" aria-label="Lower the bid by $0.1M" onclick="adjustPrice(-0.1)">-</button>
+            <input type="number" name="price" step="0.1" min="0.5" value="0.5" id="bid-price" aria-label="Opening bid in $M" class="input input-xs input-bordered bg-base-300 w-16">
+            <button type="button" class="btn btn-xs btn-ghost px-1" aria-label="Raise the bid by $0.1M" onclick="adjustPrice(0.1)">+</button>
             <button type="submit" class="btn btn-xs btn-secondary">Start Auction</button>
         </div>
         <input type="hidden" name="bidders" value="{{ default_bidders }}">

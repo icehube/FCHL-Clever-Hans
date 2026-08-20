@@ -22,6 +22,40 @@ rediscover the same non-problem.
 
 ## [2026-08-20]
 
+Clearing the backlog's cheap tail — items that are small, self-contained and
+not blocked on draft-day experience, so that what is left in `BACKLOG.md` is the
+work that genuinely needs a draft to settle.
+
+### Fixed
+
+- **Six controls in the bid panel had no usable accessible name.** `BACKLOG.md`
+  filed this on 2026-08-15 as *"the bid panel's price input has no accessible
+  name … a fix here should name both"* — two attributes on one form. The file has
+  **two** forms, mutually exclusive, and the real inventory was six: both player
+  inputs (the active one had nothing at all; the Start Auction one was named only
+  by Chrome's fallback to its `placeholder`, which is the anti-pattern rather
+  than the fix), both price inputs, and the four `-`/`+` steppers. The steppers
+  are the `&times;` close-button class from 2026-08-14 — a name exists and names
+  nothing — so they are labelled for what they do (`Lower the bid by $0.1M`), not
+  for the glyph. The `placeholder` stays on the Start Auction field, because that
+  field is free text and the hint is what stops a typo; it is simply no longer
+  what names it.
+- **Guarded as a rule, not as six labels**, by
+  `tests/test_endpoints.py::TestNoBidControlIsUnnamed` — the same shape and the
+  same reason as `test_no_control_in_either_trade_form_is_unnamed`, which the
+  entry itself cites. Both branches of the template are covered, from both mounts
+  (`GET /`'s section slice and `/bid-check`'s bare fragment), because a
+  per-branch fix would otherwise pass a single-page assertion while leaving the
+  other half silent. A `<button>` is named by its own text, so the rule is
+  *"visible text with no letter or digit in it is not a name"* rather than
+  "everything carries `aria-label`" — that is what makes a glyph stepper a
+  finding and `Assign to BOT ($0.5M)`, `Start Auction` and the bidder logos not
+  ones. Mutation-checked: each of the eight labels stripped in turn, one site per
+  patch, every one reddening the new tests (the Start Auction player field kills
+  two, as designed) and, on the widest mutant, **nothing else** across
+  `test_endpoints`, `test_htmx_interactions`, `test_browser_ui` and
+  `test_offline_assets`.
+
 Adversarial review of yesterday's parallel-scan batch. Both scans were
 re-measured on both states afterwards, against the pre-review commit run in a
 worktree side by side rather than against the published numbers: 398/431/179/561ms

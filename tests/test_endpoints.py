@@ -2976,6 +2976,87 @@ class TestTheTradeFormCanSeeTheMinors:
         assert incoming.name in bot
 
 
+class TestNoBidControlIsUnnamed:
+    """Stated as the general rule, the same shape as
+    `TestTheTradeFormCanSeeTheMinors::test_no_control_in_either_trade_form_is_unnamed`
+    and for the same reason.
+
+    `bid_panel.html` has TWO forms and the backlog entry named one attribute on
+    one of them. The real inventory was six unnamed or uselessly-named controls:
+    both player inputs, both price inputs, and the four `-`/`+` steppers. The
+    steppers are the `&times;` close-button class from 2026-08-14 — a name
+    exists and names nothing, which is worse than absent because it looks
+    handled.
+
+    Both branches of the template are covered, because they are mutually
+    exclusive: the active form renders only with `bid_advice`, the Start Auction
+    form only without, so a per-branch fix can pass a single-page assertion
+    while leaving the other half silent.
+
+    A `<button>` is named by its own text, so requiring `aria-label` on all of
+    them would be wrong (Assign, Start Auction and the bidder logos are fine).
+    The rule is "visible text with no letter or digit in it is not a name",
+    which is what makes a glyph stepper a finding and `Assign to BOT` not one.
+    """
+
+    def _bid_panel(self, markup: str) -> str:
+        """The #bid-panel fragment out of a full page or a /bid-check response.
+
+        `/bid-check` returns the panel alone, so it needs no slicing; `GET /`
+        buries it at the end of `<section id="auction-control">`, after the
+        nomination panel. Slice rather than scan the page: the team panel has
+        inputs of its own and `.choice-row` labels that name their checkboxes by
+        wrapping them, which this rule would read as unnamed.
+        """
+        if 'id="auction-control"' in markup:
+            markup = section_of(markup, "auction-control")
+        return markup[markup.index('<div id="bid-panel"'):]
+
+    def _unnamed(self, panel: str) -> list[str]:
+        suspects = [
+            tag for tag in re.findall(r"<input\b[^>]*>", panel)
+            if not re.search(r'type="hidden"', tag)
+        ]
+        for tag, inner in re.findall(r"(<button\b[^>]*>)(.*?)</button>", panel, re.S):
+            text = html.unescape(re.sub(r"<[^>]*>", "", inner))
+            if not any(c.isalnum() for c in text):
+                suspects.append(tag)
+        assert suspects, "found no bid controls at all — the slice rotted"
+        return [t for t in suspects if "aria-label=" not in t]
+
+    def test_the_start_auction_form_names_every_control(self, client):
+        panel = self._bid_panel(client.get("/").text)
+        assert "Start Auction" in panel, "this is not the pre-auction branch"
+        unnamed = self._unnamed(panel)
+        assert not unnamed, f"controls with no accessible name: {unnamed}"
+
+    def test_the_live_bid_form_names_every_control(self, client):
+        name = pool_top(1)[0]
+        r = client.post(
+            "/bid-check", data={"player": name, "bidders": "", "price": "0.5"}
+        )
+        assert r.status_code == 200
+        panel = self._bid_panel(r.text)
+        assert "bid-advice" in panel, "this is not the live-advice branch"
+        unnamed = self._unnamed(panel)
+        assert not unnamed, f"controls with no accessible name: {unnamed}"
+
+    def test_the_placeholder_is_not_the_name(self, client):
+        """`placeholder` is not an accessible name, and it disappears on type.
+
+        Kept on the Start Auction field because it is useful AS a placeholder —
+        that field is free text and the hint is what stops a typo — but the
+        entry filed it as the anti-pattern it is, so pin that the name no longer
+        rides on it.
+        """
+        panel = self._bid_panel(client.get("/").text)
+        field = re.search(r'<input[^>]*name="player"[^>]*>', panel)
+        assert field and "placeholder=" in field.group(0)
+        assert "aria-label=" in field.group(0), (
+            f"the player field is still named by its placeholder: {field.group(0)}"
+        )
+
+
 class TestDoneTeamsAreNotProjectedForward:
     """A team that has stopped drafting must not be projected as if it hadn't.
 

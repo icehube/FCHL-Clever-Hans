@@ -28,7 +28,55 @@ running app — no endpoint contract, state format or MILP path moved. What was
 wrong is that **two of the batch's own claims were untrue**, one of them in the
 file that overrides everything else.
 
+Then one more pass, on a theme the day kept turning up: a **guard that reads as
+coverage and is not**. That is the first entry below.
+
 ### Fixed
+
+- **Every template reference in these two files was checked for existence and
+  nothing else, and six of the nine had drifted.** `test_reference_resolves`
+  verified that a `.py` reference sits inside the function it names, then — for
+  any non-`.py` path — asserted only that the file resolves and the line is in
+  range, and returned. The documented reason was real (an HTML file has no
+  enclosing symbol) but the cost had never been counted. Counted 2026-08-20:
+  the `league_state.html` one was **35 lines** off the `.table-scroll-x` it
+  claimed, two `bid_limits.html` ones were 15 off, and three more — two in
+  `team_panel.html`, one in this file — were 9 to 15 off. The suite was green on
+  every one of them. (Those six are named here without their old line numbers on
+  purpose. A **historical** line number points nowhere you should go, so writing
+  it in `file:line` form would make this guard flag the changelog forever — and
+  the guard would be right to. Same reasoning as the rule itself: a reference
+  that does not resolve is worse than no reference. Found the honest way, by
+  writing this entry with the numbers in and watching four cases redden.) The deferred entry knew about exactly one drift,
+  of 17 lines, and set "if it bites again" as its trigger; the trigger had
+  already fired four more times unnoticed, which is the general lesson: a
+  latent-cost deferral needs the cost **measured at defer time**, because
+  nothing will measure it later. A template reference now carries a literal
+  **anchor** in its parenthetical instead of a symbol — `(table-scroll-x)`,
+  `(hx-trigger="change")`, `(milp.status != "Optimal")` — and the anchor must be
+  ON the cited line. Stricter than the Python rule on purpose: there is no
+  symbol span to absorb a few lines of drift, so exact is the only thing left
+  that means anything. Two details make the stricter rule cheap rather than a
+  chore: comparison is **whitespace-normalized** with backticks stripped, which
+  answers the objection that killed this idea for three days (a re-indent or a
+  re-wrap no longer breaks an anchor), and a failure **greps the file and names
+  the line the anchor is actually on**, so the message *is* the re-anchor. An
+  anchor need not be unique — `table-scroll-x` is on three lines of
+  `team_panel.html` — because the assertion is "on the cited line". The missing
+  parenthetical is now a loud failure too, matching what the Python side already
+  did via `n.isidentifier()`, so the next entry cannot opt out. All nine
+  references re-anchored in the same commit, no template edited. `_REF` itself
+  is unchanged: it already accepted `\(([^)]+)\)`, so a quoted-attribute anchor
+  parses without a regex change, which `test_reference_pattern_still_matches`
+  now states with a sample. And the module gained the coverage it was itself
+  missing — `test_the_anchor_rule_can_actually_fail` derives a true
+  (path, line, anchor) triple **from the template at run time** rather than
+  writing one down (a hardcoded line here would rot exactly like the ones being
+  fixed) and asserts three things that die to different mutants: the true
+  reference passes, a citation one line off fails *and names the real line*, and
+  a missing anchor fails. Without it, restoring the old bare `return` left the
+  whole suite green, since the live references are all correct once a
+  re-anchoring pass lands.
 
 - **CLAUDE.md was instructing a pattern that fails the suite.** The `_undoable`
   commit changed `TestEveryMutatingPostTakesASnapshot` and left both bullets that
@@ -1086,7 +1134,7 @@ about the change being *undefended* rather than wrong.
 
 ### Investigated
 
-- **A grill pass found two things in the new panel and one pre-existing bug behind them.** Fixed here: the NHL column's header was clickable and inert (`sortTable` reads `textContent`, the cell holds only an `<img>`, so every row tied and the order never moved — measured in Chrome), now non-sortable and pinned by `test_no_header_offers_a_sort_that_cannot_work`, which states the general rule so a future icon column is caught too; and the two row fragments had drifted into two contracts, `_log_team_link.html` taking an explicit `row` while `_log_nhl_logo.html` read the loop variable `t` by name — both now take `row`. The pre-existing half is `bid_limits.html:21`, which has the same dud sort on its own NHL column, filed rather than fixed because the right answer there is an `img[alt]` fallback in shared JS, not removing the affordance.
+- **A grill pass found two things in the new panel and one pre-existing bug behind them.** Fixed here: the NHL column's header was clickable and inert (`sortTable` reads `textContent`, the cell holds only an `<img>`, so every row tied and the order never moved — measured in Chrome), now non-sortable and pinned by `test_no_header_offers_a_sort_that_cannot_work`, which states the general rule so a future icon column is caught too; and the two row fragments had drifted into two contracts, `_log_team_link.html` taking an explicit `row` while `_log_nhl_logo.html` read the loop variable `t` by name — both now take `row`. The pre-existing half is `bid_limits.html:36 (data-sort-col="3")`, which has the same dud sort on its own NHL column, filed rather than fixed because the right answer there is an `img[alt]` fallback in shared JS, not removing the affordance.
 
 - **Two claims in the panel were checked in Chrome rather than read off the CSS.** The trimmed DaisyUI build does carry `.tab:is(input[type=radio]):after{content:attr(aria-label)}`, so the labels render as real text — confirmed as "Auction (6)" / "Transaction (2)" / "Change (0)" at 27px tall, clearing WCAG 2.5.8's 24px. And the grid stays contained at 1280 on **all three** tabs (overflow 0 each), not just the default one, which the browser suite alone would not have shown.
 

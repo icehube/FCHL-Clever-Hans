@@ -2607,6 +2607,45 @@ class TestTheViewSticks:
         assert not hasattr(main.auction_state, "viewed_team")
 
 
+class TestTheRosterKeyExplainsTheTargetRows:
+    """The panel's best output was conveyed by a colour and a slant, unlabelled.
+
+    A MILP target row is `text-info opacity-50 italic` and carries no Actions
+    cell; nothing on screen said so, so "these are the players to buy" read as
+    possibly-already-mine. The key is conditional on targets being present,
+    because that conditionality is what pays for it — a panel with no target rows
+    has no ambiguity to resolve and is tight at 1280px.
+    """
+
+    KEY = "suggested buy"
+
+    def test_the_key_is_there_when_targets_are(self, client):
+        panel = section_of(client.get("/").text, "team-panel")
+        assert "italic" in panel, "no target rows on a fresh BOT — wrong premise"
+        assert self.KEY in panel, "the target rows are still unexplained"
+
+    def test_it_names_all_three_row_states(self, client):
+        """Naming only the blue rows leaves green-vs-plain as a second mystery."""
+        panel = section_of(client.get("/").text, "team-panel")
+        for state in (self.KEY, "drafted", "keeper"):
+            assert state in panel, f"the key does not mention {state!r}"
+
+    def test_it_is_absent_on_an_opponent(self, client):
+        """The half that can fail against a key rendered unconditionally.
+
+        `show_milp` requires `is_my_team`, so an opponent's panel has no target
+        rows at all — a key there would describe a styling that is not on screen.
+        """
+        client.get("/team-view/SRL")
+        try:
+            panel = section_of(client.get("/").text, "team-panel")
+            assert "italic" not in panel, "an opponent should have no target rows"
+            assert self.KEY not in panel, \
+                "the key describes rows this panel does not render"
+        finally:
+            client.get("/team-view/BOT")
+
+
 class TestBuyoutScanIsOfferedOnlyWhereItWorks:
     """The scan's OOB swaps land in `bo-` dots that exist for BOT only.
 

@@ -90,6 +90,37 @@ rediscover the same non-problem.
 
 ### Changed
 
+- **The roster panel now says what an italic blue row means.** The panel's most
+  valuable output — "these are the players to buy" — was conveyed entirely by
+  `text-info opacity-50 italic` plus a missing Actions cell, with no legend, no
+  header and no per-row marker. An operator who did not already know the
+  convention had no way to tell a MILP target from a player they own.
+
+  Three states are rendered, not two, which is the correction to the original
+  finding: a target, a player *drafted this auction* (`text-success`), and a
+  keeper carried over (no class at all). Naming only the blue rows would have
+  left green-vs-plain as a second undocumented convention, so the key names all
+  three.
+
+  Each label **wears the class it describes** rather than sitting beside a colour
+  swatch — which is where this departs from `bid_limits.html`'s legend grammar
+  deliberately. Those are text colours, so a filled square would advertise a
+  background the rows do not have; here the label is the sample.
+
+  The entry was deferred because every obvious fix cost something, and a legend
+  line's cost was permanent chrome in a panel already tight at 1280px. That is
+  answered by making it **conditional on `milp_targets`** — already computed in
+  the template, so no second derivation. With a full roster, a failed MILP, or an
+  opponent on screen there are no target rows, and the only distinction left
+  (green vs plain) is "when did I get him", which is information rather than the
+  "is this even mine?" ambiguity the key exists to remove. Measured after the
+  change: at 1280px `#team-panel` spans 856–1271 with grid overflow +0, so the
+  added height changed no horizontal containment.
+
+  Three tests, all three mutants killed. The load-bearing one is
+  `test_it_is_absent_on_an_opponent` — the only one that can fail against a key
+  rendered unconditionally.
+
 - `scenarios.py` no longer carries an inline copy of `_reserved_top`.
   `_scenario_endgame_ceiling_binds` had
   `set(sorted(price, key=lambda n: (-price[n], n))[:25])` written out, character

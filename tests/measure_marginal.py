@@ -24,9 +24,12 @@ two and a must-have after three.
 cost a second, and it was not judged worth the surface.** All three candidates
 below reproduce the reference byte-for-byte on 168 subjects (28 scenario + 140
 swept), and the fastest — C2, one min-cost solve in place of the probe search —
-is 1.55-1.60x on the big-pool states, 1.45x overall, and **0.79x** on
+is 1.55-1.60x on the big-pool states, 1.45x overall, and **~0.8x** on
 `endgame-sole-bidder`, where the reference already short-circuits in three
-solves. Shipping it would put a second MILP formulation, a confirm loop and two
+solves. (Two runs of that one gave 0.79x and 0.84x. Quoting either to two
+figures would be false precision: the noise floor is 1-2% on the ~1100ms
+subjects and wider on a 1238ms total, which is why `--null` exists.)
+Shipping it would put a second MILP formulation, a confirm loop and two
 float-epsilon subtleties on the hottest path in the app, each of which took a
 wrong draft to get right; see `CHANGELOG.md`. The harness stays so the next
 attempt starts here rather than from scratch.
@@ -554,8 +557,12 @@ def _floor_to_grid(value: float) -> float:
 
     So: representation error of a grid multiple is ~1e-16 relative, solver
     tolerance is ~4e-8, and 1e-9 on the QUOTIENT sits between them — it lifts
-    `18.999999999999996` to 19 and leaves `29.999999587965327` at 29. Do not
-    widen it to "be safe": at 1e-7 the first case regresses.
+    `18.999999999999996` to 19 and leaves `29.999999587965327` at 29. The room
+    above 1e-9 is real but finite: measured, the smallest epsilon that regresses
+    the second case is **4.12e-7**, so 1e-8 and 1e-7 are both still safe and 1e-6
+    is not. (An earlier draft of this said 1e-7 regressed. That was reasoned from
+    the ~4e-8 error scale rather than measured, and it is wrong by a factor of
+    four — the error is in the quotient, not the value.)
     """
     return math.floor(value / SALARY_INCREMENT + 1e-9) * SALARY_INCREMENT
 
@@ -761,6 +768,22 @@ CANDIDATES = {
     "C2 mincost": marginal_c2,
 }
 
+# The reference, entered as a candidate. `--null` adds it, and it is the only
+# thing that makes the SMALL numbers here believable: C1's 1.06x is meaningless
+# unless a candidate that is literally the reference scores ~1.00x. Measured
+# 2026-08-21 on a fresh pool, 6 repetitions per subject — spread 1.01-1.02x,
+# stdev 6-8ms on ~1100ms, and the null candidate scored **1.00x** (0.99x on a
+# 4-subject `--quick` run — the same 1-2% band, and read as a band rather than
+# as a number, which is the mistake the 0.79x figure made). So the harness
+# resolves a few percent and C1's 1.06x is signal. Re-run it before believing
+# any future claim under ~1.1x.
+#
+# The floor is not one number, it scales with the total: on `endgame-sole-bidder`
+# (1275ms across 15 cheap subjects) the null itself reads **1.04x**, so C1's
+# 1.04x/1.13x on that state are not resolvable and only C2's direction is. Read
+# the null column for the state you are quoting, never the aggregate.
+NULL_CANDIDATE = {"null (=ref)": optimizer.compute_marginal_value}
+
 
 def _timed(fn, *args) -> tuple[float, float]:
     t0 = time.perf_counter()
@@ -904,12 +927,16 @@ def sweep(label: str, state: AuctionState) -> list[dict]:
         print(f"    {label}: BOT has no open spots, nothing to sweep")
         return []
 
+    # Priced ONCE, outside the loop. Both ceilings are computed from opponents
+    # only — BOT's own budget never sets its own cap — so squeezing BOT cannot
+    # move a market price, and re-pricing per level is pure cost. Measured rather
+    # than reasoned: 0 of 705 prices differ at 1.90, 1.00 and 0.60 per spot, and
+    # the ceiling stays 11.4 throughout. An earlier draft re-priced inside the
+    # loop with a comment claiming prices move with the squeeze; they do not.
+    prices, _ = priced(state)
     rows = []
     for per_spot in SWEEP_PER_SPOT:
         set_headroom(bot, round(per_spot * spots, 1))
-        # Prices move with the squeeze: a poorer BOT does not change opponents'
-        # ceilings, but rebuilding is what the app would do, so measure that.
-        prices, _ = priced(state)
         for role, player in subjects(state, prices):
             args = (player, bot, state.available_players, prices)
             ref, ref_ms = _timed(optimizer.compute_marginal_value, *args)
@@ -933,10 +960,21 @@ def main() -> None:
                     help="reference against every candidate, same run")
     ap.add_argument("--faithful", action="store_true",
                     help="with --compare, also check the model copy has not drifted")
+    ap.add_argument("--null", action="store_true",
+                    help="also run the reference AS a candidate — it must score "
+                         "~1.00x, which is what makes a 1.06x claim believable")
     ap.add_argument("--sweep", action="store_true",
                     help="squeeze BOT toward the reserve floor — the acceptance "
                          "criterion, since the scenario set alone passed pool pruning")
     args = ap.parse_args()
+    if args.null:
+        CANDIDATES.update(NULL_CANDIDATE)
+        # A candidate is only ever run by `compare`/`sweep`, so `--null` alone
+        # printed a profile and no null figure — a flag that silently does
+        # nothing, which is the whole failure class this instrument was written
+        # during. Imply the cheaper of the two rather than erroring: `--sweep`
+        # is the acceptance run and stays opt-in.
+        args.compare = args.compare or not args.sweep
 
     rows: list[dict] = []
     for label, state in states(args.quick, args.scenario):

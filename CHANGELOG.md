@@ -61,8 +61,21 @@ rediscover the same non-problem.
   | reuse + `warmStart=True` | 1.19x | 1.14x | 1511 → 1117ms |
   | **min-cost single solve** | **1.55-1.60x** | **1.45x** | **1511 → 772ms** |
 
-  and min-cost is **0.79x on `endgame-sole-bidder`**, a real regression, because
-  the reference already short-circuits there in three solves.
+  and min-cost is **~0.8x on `endgame-sole-bidder`** (0.79x and 0.84x on two
+  runs — one figure to two decimals would be false precision), a real regression,
+  because the reference already short-circuits there in three solves.
+
+  **A 1.06x claim needs a null candidate, and this one did not have it at first.**
+  A grill pass asked what the harness's noise floor was, and nothing had
+  established it — so 1.06x and 1.14x rested on nothing, and could have been
+  measurement order (the reference always runs first for each subject) or
+  run-to-run variance. Measured: 6 repetitions per subject give a 1.01-1.02x
+  spread and a stdev of 6-8ms on ~1100ms, and the reference entered AS a
+  candidate scores **1.00x** (0.99x on a 4-subject run — a band, not a number).
+  So the small numbers are signal. `--null` is now a flag rather than a one-off
+  script, because the next claim under ~1.1x needs the same check — and it
+  implies `--compare`, because a candidate is only ever run by a comparison and
+  `--null` on its own printed a profile with no null figure in it.
 
   **Not shipped.** 1.6x on the slow cases does not buy a second MILP formulation,
   a confirm loop and two float-epsilon subtleties on the hottest path in the app.

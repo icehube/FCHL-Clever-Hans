@@ -185,6 +185,15 @@ def test_reference_resolves(doc: str, path: str, line: int, symbol: str | None):
             f"A template has no symbol to anchor to, and without one this "
             f"reference is checked for existence and nothing else"
         )
+        # `_squash("   ")` and `_squash("``")` are both "", and `"" in line` is
+        # true for every line — so a blank anchor made the check below vacuous
+        # while `assert symbol` above waved it through, "   " being truthy. That
+        # is this rule's own failure mode, so it gets its own assertion.
+        assert _squash(symbol), (
+            f"{doc}: {path}:{line} anchors on ({symbol!r}), which is nothing once "
+            f"whitespace and backticks are stripped — an empty anchor matches "
+            f"every line in the file, so it would pass against any of them"
+        )
         hits = _anchor_lines(source, symbol)
         assert line in hits, (
             f"{doc}: {path}:{line} anchors on ({symbol}), which is on "
@@ -266,3 +275,10 @@ def test_the_anchor_rule_can_actually_fail():
 
     with pytest.raises(AssertionError, match="needs an anchor"):
         test_reference_resolves("self-test", path, line, None)
+
+    # A parenthetical that squashes to nothing is the rule's own blind spot:
+    # `(   )` and `` (``) `` both parse as a symbol, both pass `assert symbol`
+    # because a space is truthy, and both then match every line in the file.
+    for blank in ("   ", "``", " ` ` "):
+        with pytest.raises(AssertionError, match="is nothing once"):
+            test_reference_resolves("self-test", path, line, blank)

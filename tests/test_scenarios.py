@@ -1,5 +1,6 @@
 """Tests for scenarios.py."""
 
+import json
 import os
 import re
 import subprocess
@@ -334,7 +335,22 @@ def test_a_scenario_loads_the_same_under_any_hash_seed():
             f"the digest child failed under PYTHONHASHSEED={seed}:\n"
             f"{child.stderr[-2000:]}"
         )
-        digests[seed] = child.stdout.strip()
+        out = child.stdout.strip()
+        # Three identical blanks compare equal, so an unprintable digest turns
+        # the assertion below into `len({""}) == 1` — a green test measuring
+        # nothing. Verified: dropping the child's `print` leaves returncode 0 and
+        # passes without these two.
+        assert out.startswith("{"), (
+            f"the child under PYTHONHASHSEED={seed} exited 0 but printed "
+            f"{out!r} — that makes the comparison below vacuous"
+        )
+        payload = json.loads(out)
+        assert set(payload) == {"rosters", "pool"} and all(payload.values()), (
+            f"the digest under PYTHONHASHSEED={seed} is {payload} — both halves "
+            f"must be present and non-empty, since the roster half is the only "
+            f"one that separates seeds 0 and 1"
+        )
+        digests[seed] = out
 
     assert len(set(digests.values())) == 1, (
         f"{LAST_GOALIE} loads differently depending on PYTHONHASHSEED, so it "

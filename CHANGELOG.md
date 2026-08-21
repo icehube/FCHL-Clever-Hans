@@ -33,12 +33,28 @@ rediscover the same non-problem.
   starts from a working instrument rather than from scratch.
 
   **Two of the entry's own numbers were wrong.** The wall time reproduces
-  (956-1511ms per cold marginal) but the split does not: it is **89.8% inside
-  CBC**, not the 98-99% claimed, and the remaining ~10% is a flat ~9.2ms per
-  solve of model build and extraction — paid ten times for ten models that differ
-  in exactly one number. The solve count is bimodal rather than "~10": a
-  floor-priced player short-circuits after two solves and a must-have after
-  three, so a mean over a mixed set hides the case that costs the second.
+  (956-1511ms per cold marginal) but the split does not: the aggregate is
+  **89.5-89.8% inside CBC** over two full runs, not the 98-99% claimed, and the
+  remaining ~10% is a flat ~9.2ms per solve of model build and extraction — paid
+  ten times for ten models that differ in exactly one number.
+
+  **And that aggregate hides the fact that decided the outcome.** Per subject the
+  CBC share runs **65.3% to 92.1%**, because the ~9.2ms is charged per *solve*
+  and so its share tracks how expensive each solve is: a fresh 705-player pool is
+  92%, and `endgame-sole-bidder`, whose three solves are over a nearly-full
+  roster, is 65%. That is C2's regression on that state seen from the other side —
+  a candidate that removes solves cannot help where a third of the cost is not in
+  the solves. "The solve is the whole cost" is true of the states that cost a
+  second and false of the rest, and the first pass at this quoted the aggregate as
+  if it were uniform.
+
+  The solve count is not "~10" either, and calling it *bimodal* (an earlier draft
+  of this entry did, while naming three values) was also wrong. Over the 28
+  scenario subjects it lands on **2, 3, 9 or 10** — ×4 / ×8 / ×8 / ×8. Two is a
+  floor-priced player short-circuiting on `with_at_min <= without`; three is a
+  must-have, where excluding him is Infeasible; nine and ten are the full search,
+  differing by where `physical_max_bid` puts the bracket. A mean over a mixed set
+  hides the case that costs the second.
 
   **The best candidate is one the entry did not name.** Reading the build, the ~8
   probe solves differ only in `forced_cost`, which feeds the budget RHS and
@@ -50,10 +66,10 @@ rediscover the same non-problem.
   needs no tolerance at all: `projected_points` is an `int` and `lineup_points`
   returns an `int`, so it is exactly `>= B + 1`.
 
-  Measured, all three candidates reproduce the reference **byte-for-byte on 168
-  subjects** — 28 across the fresh pool and six scenarios, then 140 with BOT
-  squeezed to $1.90 / $1.50 / $1.00 / $0.70 / $0.60M per open spot, which is the
-  regime that caught pool pruning. The payoff:
+  Measured, all three candidates reproduce the reference's marginal
+  **byte-for-byte on 168 subjects** — 28 across the fresh pool and six scenarios,
+  then 140 with BOT squeezed to $1.90 / $1.50 / $1.00 / $0.70 / $0.60M per open
+  spot, which is the regime that caught pool pruning. The payoff:
 
   | candidate | big-pool states | overall | worst subject |
   |---|---|---|---|
@@ -64,6 +80,19 @@ rediscover the same non-problem.
   and min-cost is **~0.8x on `endgame-sole-bidder`** (0.79x and 0.84x on two
   runs — one figure to two decimals would be false precision), a real regression,
   because the reference already short-circuits there in three solves.
+
+  **The marginal is the only thing compared, and the plan asked for more than
+  that on reasoning that turned out not to apply.** The plan's acceptance
+  criterion was agreement on what reaches the screen — `value_cap`, `max_bid`,
+  `expected_stop`, `stop_status` and the BID/CAUTION/DROP verdict — on the
+  pool-pruning precedent that agreeing on one number proves nothing. But
+  `compute_bid_recommendation` takes `marginal_value` as an argument and
+  `main.bid_check` passes it in from `_marginal_value`, so a candidate's only
+  channel to any of those five fields is that one float: equal float in, equal
+  recommendation out, at every price. Building the comparison would have been a
+  check that cannot fail, which this project treats as worse than none, so it is
+  documented in `compare` instead — including what the argument rests on, since a
+  second dependency on the roster the marginal came from would make it real work.
 
   **A 1.06x claim needs a null candidate, and this one did not have it at first.**
   A grill pass asked what the harness's noise floor was, and nothing had

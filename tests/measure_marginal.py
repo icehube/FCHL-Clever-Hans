@@ -14,17 +14,32 @@ so the first bid-check on a player after each pick is cold and every later
 keystroke on the same player is ~9ms.
 
 **What this measured, 2026-08-21.** The wall time reproduces (956-1511ms) but the
-split does not: the backlog entry says 98-99% of it is inside CBC and it is
-**89.8%**, the remainder being a flat ~9.2ms per solve of model build and
-extraction, paid ten times for ten models that differ in one number. The solve
-count is bimodal rather than "~10": a floor-priced player short-circuits after
-two and a must-have after three.
+split does not: the backlog entry says 98-99% of it is inside CBC and the
+aggregate is **89.5-89.8%** over two full runs, the remainder being a flat ~9.2ms
+per solve of model build and extraction, paid ten times for ten models that
+differ in one number.
+
+That aggregate is worth distrusting, though — read the per-subject column, which
+runs **65.3% to 92.1%**. The ~9.2ms is per *solve*, so the share tracks how
+expensive each solve is: a fresh 705-player pool is 92% CBC, and
+`endgame-sole-bidder`, whose three solves are over a nearly-full roster, is 65%.
+That is the same fact as C2's regression on that state seen from the other side —
+a candidate that removes solves cannot help where a third of the cost is not in
+the solves. "The solve is the whole cost" is true of the states that cost a
+second and false of the ones that do not.
+
+The solve count is not "~10" either, and not one distribution: over the 28
+scenario subjects it lands on **2, 3, 9 or 10** (x4 / x8 / x8 / x8). Two is a
+floor-priced player, short-circuiting on `with_at_min <= without`; three is a
+must-have, where excluding him is Infeasible; nine and ten are the full search,
+differing by where `physical_max_bid` puts the bracket.
 
 **And the answer to the question is: about 1.6x is available, on the cases that
 cost a second, and it was not judged worth the surface.** All three candidates
-below reproduce the reference byte-for-byte on 168 subjects (28 scenario + 140
-swept), and the fastest — C2, one min-cost solve in place of the probe search —
-is 1.55-1.60x on the big-pool states, 1.45x overall, and **~0.8x** on
+below reproduce the reference's marginal byte-for-byte on 168 subjects (28
+scenario + 140 swept), which is the whole recommendation for the reason `compare`
+documents. The fastest is C2, one min-cost solve in place of the probe search:
+1.55-1.60x on the big-pool states, 1.45x overall, and **~0.8x** on
 `endgame-sole-bidder`, where the reference already short-circuits in three
 solves. (Two runs of that one gave 0.79x and 0.84x. Quoting either to two
 figures would be false precision: the noise floor is 1-2% on the ~1100ms
@@ -796,6 +811,20 @@ def compare(label: str, state: AuctionState, faithful: bool) -> list[dict]:
 
     One run matters: a laptop's CBC timings move by tens of percent between
     invocations, so a before/after taken from two runs is not a comparison.
+
+    **Agreement is checked on the marginal alone, and that is the whole check —
+    not a shortcut.** The plan for this work asked for agreement on what reaches
+    the screen (`value_cap`, `max_bid`, `expected_stop`, `stop_status` and the
+    BID/CAUTION/DROP verdict), on the pool-pruning precedent that agreeing on one
+    number proves nothing. But `compute_bid_recommendation` takes
+    `marginal_value` as an *argument* (`optimizer.py`) and `main.bid_check` passes
+    it in from `_marginal_value`, so a candidate's only channel to any of those
+    five fields is this one float. Equal float in, equal recommendation out, at
+    every price — so comparing them here would be a check that cannot fail, which
+    is the thing this project treats as worse than no check. Recorded rather than
+    built. Note what that argument rests on: if `compute_bid_recommendation` ever
+    grows a second dependency on the roster the marginal came from, this stops
+    being true and the downstream comparison becomes real work.
     """
     prices, _ = priced(state)
     bot = state.teams[MY_TEAM]
@@ -967,6 +996,13 @@ def main() -> None:
                     help="squeeze BOT toward the reserve floor — the acceptance "
                          "criterion, since the scenario set alone passed pool pruning")
     args = ap.parse_args()
+    # `sweep` has no faithfulness column — it varies the budget, not the model —
+    # so `--sweep --faithful` used to accept the flag and drop it. Same inert-flag
+    # failure as `--null` below: refuse it rather than measure something the
+    # operator did not ask for.
+    if args.sweep and args.faithful:
+        ap.error("--faithful is a --compare check; --sweep varies the budget "
+                 "instead and has no copy column. Run them separately.")
     if args.null:
         CANDIDATES.update(NULL_CANDIDATE)
         # A candidate is only ever run by `compare`/`sweep`, so `--null` alone
@@ -986,7 +1022,7 @@ def main() -> None:
         else:
             rows += profile(label, state)
     if args.compare or args.sweep:
-        report_compare(rows, args.faithful and not args.sweep)
+        report_compare(rows, args.faithful)
     else:
         report(rows, args.verbose)
 

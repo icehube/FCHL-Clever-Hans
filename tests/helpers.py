@@ -236,19 +236,21 @@ def trade_choices(html: str, aria_label: str) -> dict[str, str]:
     }
 
 
-def squeeze(code: str, headroom: float) -> None:
-    """Set `code`'s penalties so exactly `headroom` of cap space remains.
+def set_headroom(team: Any, headroom: float) -> None:
+    """Set `team`'s penalties so exactly `headroom` of cap space remains.
+
+    Takes a team OBJECT, so it works on a state that is not `main`'s — which is
+    what `tests/measure_marginal.py` needs, since that instrument deliberately
+    never imports `main`. `squeeze` below is the by-code form for tests driving
+    the app.
 
     Negative headroom puts the team that far OVER the cap, which is legal state
     the league permits (owner decision 2026-08-06) and several tests depend on.
 
-    Imports `main` at call time, not module import time: `tests/conftest.py`
-    redirects `main.STATE_DIR` and the browser harness runs the app in-process,
-    so the module object must be resolved live rather than captured early.
+    Note `scenarios._squeeze` looks like a fourth copy of this and is not: it
+    inverts for `physical_max_bid`, which adds the min-salary reserve back when
+    spots are open, so the two land on different numbers by design.
     """
-    import main
-
-    team = main.auction_state.teams[code]
     # Zero first so `total_salary` reads the roster alone — reusing a total that
     # still carries the previous penalties would compound them on a second call,
     # and several tests squeeze two teams in a row.
@@ -256,3 +258,15 @@ def squeeze(code: str, headroom: float) -> None:
     team._invalidate_cache()
     team.penalties = round(SALARY_CAP - team.total_salary - headroom, 1)
     team._invalidate_cache()
+
+
+def squeeze(code: str, headroom: float) -> None:
+    """`set_headroom` on `main.auction_state`'s copy of `code`.
+
+    Imports `main` at call time, not module import time: `tests/conftest.py`
+    redirects `main.STATE_DIR` and the browser harness runs the app in-process,
+    so the module object must be resolved live rather than captured early.
+    """
+    import main
+
+    set_headroom(main.auction_state.teams[code], headroom)

@@ -45,9 +45,14 @@ turned out to be the interesting part.
   three iterate `available_players`, which is a dict, insertion-ordered from the
   CSV; `min`/`max` return the FIRST extreme and `sorted` is stable, so removing
   their tie-break picks a different player and picks the same different player
-  on every machine. Two of them (`_reserved_top` and the crease sort in
-  `_scenario_endgame_last_goalie`) do not even change the loaded state — their
-  ties never reach a decision. The one real exposure is elsewhere in that same
+  on every machine. **Three of the six** do not even change the loaded state at
+  all — `_reserved_top`, the character-for-character copy of it in
+  `_scenario_endgame_ceiling_binds`, and the crease sort in
+  `_scenario_endgame_last_goalie` — because their ties never reach a decision.
+  (An earlier draft of this entry, and `e226a38`'s commit message, said two of
+  them; the table in the test's own docstring has always shown three, which is
+  the shape of mistake this project keeps catching — a doc sentence contradicting
+  code committed beside it.) The one real exposure is elsewhere in that same
   scenario: `ranked` sorts `goalies & set(state.available_players)`, and a
   **set**'s iteration order is a function of the seed, so without the trailing
   `n` the scenario loads four different ways under four seeds. So the test that
@@ -80,8 +85,9 @@ turned out to be the interesting part.
   it in `file:line` form would make this guard flag the changelog forever — and
   the guard would be right to. Same reasoning as the rule itself: a reference
   that does not resolve is worse than no reference. Found the honest way, by
-  writing this entry with the numbers in and watching four cases redden.) The deferred entry knew about exactly one drift,
-  of 17 lines, and set "if it bites again" as its trigger; the trigger had
+  writing this entry with the numbers in and watching four cases redden.) The
+  deferred entry knew about exactly one drift, of 17 lines, and set "if it bites
+  again" as its trigger; the trigger had
   already fired four more times unnoticed, which is the general lesson: a
   latent-cost deferral needs the cost **measured at defer time**, because
   nothing will measure it later. A template reference now carries a literal

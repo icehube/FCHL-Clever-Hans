@@ -20,6 +20,87 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-08-21]
+
+### Investigated
+
+- **How much cheaper can a cold `/bid-check` be? About 1.6x, and it was not worth
+  taking.** The backlog entry had done the hard negative work already — pool
+  pruning is byte-identical on every pinned scenario and silently wrong once
+  budget-per-spot nears the reserve floor — and closed by naming three surviving
+  candidates with the note that **none was measured**. They are now, by
+  `tests/measure_marginal.py`, which stays as the harness so the next attempt
+  starts from a working instrument rather than from scratch.
+
+  **Two of the entry's own numbers were wrong.** The wall time reproduces
+  (956-1511ms per cold marginal) but the split does not: it is **89.8% inside
+  CBC**, not the 98-99% claimed, and the remaining ~10% is a flat ~9.2ms per
+  solve of model build and extraction — paid ten times for ten models that differ
+  in exactly one number. The solve count is bimodal rather than "~10": a
+  floor-priced player short-circuits after two solves and a must-have after
+  three, so a mean over a mixed set hides the case that costs the second.
+
+  **The best candidate is one the entry did not name.** Reading the build, the ~8
+  probe solves differ only in `forced_cost`, which feeds the budget RHS and
+  nothing else — so the search is a sequence over one right-hand side, and that
+  has a single-solve dual: minimise roster cost subject to beating the
+  without-him total, then `P* = remaining_budget - min_cost`. Sound because the
+  starter variables are free and slot-capped, so `starter_pts >= t` says "some
+  lineup reaches t" and `lineup_points` is the max over lineups. The strict `>`
+  needs no tolerance at all: `projected_points` is an `int` and `lineup_points`
+  returns an `int`, so it is exactly `>= B + 1`.
+
+  Measured, all three candidates reproduce the reference **byte-for-byte on 168
+  subjects** — 28 across the fresh pool and six scenarios, then 140 with BOT
+  squeezed to $1.90 / $1.50 / $1.00 / $0.70 / $0.60M per open spot, which is the
+  regime that caught pool pruning. The payoff:
+
+  | candidate | big-pool states | overall | worst subject |
+  |---|---|---|---|
+  | model reuse only | 1.07x | 1.06x | — |
+  | reuse + `warmStart=True` | 1.19x | 1.14x | 1511 → 1117ms |
+  | **min-cost single solve** | **1.55-1.60x** | **1.45x** | **1511 → 772ms** |
+
+  and min-cost is **0.79x on `endgame-sole-bidder`**, a real regression, because
+  the reference already short-circuits there in three solves.
+
+  **Not shipped.** 1.6x on the slow cases does not buy a second MILP formulation,
+  a confirm loop and two float-epsilon subtleties on the hottest path in the app.
+  Both subtleties took a wrong draft to find and **both were invisible on the
+  scenario set**: smoothing with `round(v, 6)` reads a genuinely-2.9 answer as
+  3.0, because market prices are themselves off-grid (`0.5000000106310717`) and a
+  $6.1M roster costs `6.100000041203467`; dropping the epsilon entirely then
+  reads an exact 1.9 as 1.8, because `1.9 / 0.1` is `18.999999999999996`. The two
+  error scales are ~4e-8 and ~1e-16 and the epsilon has to sit between them. A
+  wrong marginal is a confident number on screen — the `keepFiles=True` failure
+  class — and the entry's trigger (a draft-day stall on the first bid actually
+  felt) has not fired. The entry stays open, with the cost now measured instead
+  of open.
+
+  One thing cleared along the way: **`warmStart=True` is safe under the scans'
+  8-way concurrency**, which the `keepFiles=True` disaster makes it natural to
+  assume it is not. PuLP writes the start file through the same
+  `create_tmp_files` call as the `.lp` and `.sol`, so it carries the per-solve
+  `uuid4().hex` prefix; `keepFiles` is the one flag that collapses every solve
+  onto a shared name. Worth only 1.14x on its own, but no longer an unknown.
+
+  Also verified rather than assumed: comparing the marginal float is sufficient,
+  because it is the **only** solver-derived input to
+  `compute_bid_recommendation` — everything after it is pure arithmetic, so
+  identical marginals give identical `value_cap`, `max_bid`, `expected_stop`,
+  `stop_status` and verdict. A second comparison over those five would have read
+  as extra rigour while proving nothing new.
+
+### Changed
+
+- **`tests/helpers.squeeze` split in two.** The by-code form reaches into
+  `main.auction_state`, which is useless to an instrument that deliberately never
+  imports `main`, so the inversion moved to `set_headroom(team, headroom)` and
+  `squeeze` became the wrapper. No behaviour change. The docstring records why
+  `scenarios._squeeze` is not a fourth copy of the same trick: it inverts for
+  `physical_max_bid`, which adds the min-salary reserve back when spots are open,
+  so the two deliberately land on different numbers.
+
 ## [2026-08-20]
 
 Adversarial review of the backlog-clearing batch below (`b01f303..6d5b4f0`),

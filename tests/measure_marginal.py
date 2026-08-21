@@ -8,10 +8,28 @@ answer" — questions the suite cannot ask, because the answer is a property of 
 whole state rather than of any one assertion.
 
 The question exists because a cold `/bid-check` measured **935-1030ms** on
-2026-08-19, 98-99% of it inside CBC, and the cost is paid roughly **once per
-nomination** rather than once per draft: `main._marginal_cache` is keyed by
-player and cleared at every epoch, so the first bid-check on a player after each
-pick is cold and every later keystroke on the same player is ~9ms.
+2026-08-19, and the cost is paid roughly **once per nomination** rather than once
+per draft: `main._marginal_cache` is keyed by player and cleared at every epoch,
+so the first bid-check on a player after each pick is cold and every later
+keystroke on the same player is ~9ms.
+
+**What this measured, 2026-08-21.** The wall time reproduces (956-1511ms) but the
+split does not: the backlog entry says 98-99% of it is inside CBC and it is
+**89.8%**, the remainder being a flat ~9.2ms per solve of model build and
+extraction, paid ten times for ten models that differ in one number. The solve
+count is bimodal rather than "~10": a floor-priced player short-circuits after
+two and a must-have after three.
+
+**And the answer to the question is: about 1.6x is available, on the cases that
+cost a second, and it was not judged worth the surface.** All three candidates
+below reproduce the reference byte-for-byte on 168 subjects (28 scenario + 140
+swept), and the fastest — C2, one min-cost solve in place of the probe search —
+is 1.55-1.60x on the big-pool states, 1.45x overall, and **0.79x** on
+`endgame-sole-bidder`, where the reference already short-circuits in three
+solves. Shipping it would put a second MILP formulation, a confirm loop and two
+float-epsilon subtleties on the hottest path in the app, each of which took a
+wrong draft to get right; see `CHANGELOG.md`. The harness stays so the next
+attempt starts here rather than from scratch.
 
 **What a previous pass got wrong, recorded so it is not repeated.** Pool pruning
 — keeping the top 50 by points per position, 705 candidates down to 150 — gives
@@ -32,14 +50,21 @@ here needs `main`, the redirect goes in first, exactly as `measure_ceiling.py`
 and `measure_layout.py` do.
 
 Usage:
-    .venv/bin/python -m tests.measure_marginal              # profile (phase 1)
+    .venv/bin/python -m tests.measure_marginal                    # profile
+    .venv/bin/python -m tests.measure_marginal --compare --faithful
+    .venv/bin/python -m tests.measure_marginal --sweep            # the criterion
+    .venv/bin/python -m tests.measure_marginal --quick --compare   # fast smoke
     .venv/bin/python -m tests.measure_marginal --scenario endgame-last-goalie
-    .venv/bin/python -m tests.measure_marginal --quick      # fresh state only
+
+`--faithful` is worth the extra column whenever `build` has been touched: it
+drives the model COPY through the production search and compares, so a copy that
+has drifted is caught before any timing from it is believed.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from dataclasses import dataclass, field
@@ -49,10 +74,19 @@ import pulp
 import market
 import optimizer
 import scenarios
-from config import MIN_SALARY, MY_TEAM
+from config import (
+    BACKUP_BONUS,
+    BACKUP_TARGETS,
+    BENCH_WEIGHT,
+    MIN_SALARY,
+    MY_TEAM,
+    SALARY_INCREMENT,
+    STARTING_LINEUP,
+)
 from data_loader import build_initial_state
 from price_model import load_model_params, predict_all_prices
-from state import AuctionState, Player, TeamState
+from state import AuctionState, Player, TeamState, lineup_points
+from tests.helpers import set_headroom
 
 assert "main" not in sys.modules, (
     "measure_marginal imported main, which hardcodes STATE_DIR to the operator's "
@@ -293,6 +327,599 @@ def report(rows: list[dict], verbose: bool) -> None:
     print(f"worst single subject: {worst['wall_ms']:.0f}ms — "
           f"{worst['role']} in {worst['state']} "
           f"({worst['solves']} solves, {worst['cbc_pct']:.1f}% CBC)")
+# ---------------------------------------------------------------------------
+# Phase 2: the candidates
+#
+# Both build the SAME model `solve_optimal_roster` builds. That copy is the
+# hazard — a copy that has drifted makes every comparison below meaningless —
+# so `--faithful` solves it head-to-head against the real thing on every
+# subject and reports any disagreement before any timing is believed.
+# ---------------------------------------------------------------------------
+
+BUDGET_CONSTRAINT = "budget"
+
+
+@dataclass
+class Model:
+    """The parts of a built roster model a candidate needs to reach into."""
+
+    prob: pulp.LpProblem
+    x: dict[str, pulp.LpVariable]
+    s_fixed: dict[int, pulp.LpVariable]
+    s_cand: dict[str, pulp.LpVariable]
+    candidates: dict[str, Player]
+    fixed_members: list[Player]
+    spots: int
+    budget: float
+    forced_cost: float
+
+
+def build(
+    team: TeamState,
+    available: dict[str, Player],
+    prices: dict[str, float],
+    excluded: set[str] | None = None,
+    forced: dict[str, float] | None = None,
+    *,
+    objective: str = "max_points",
+    points_floor: int | None = None,
+) -> tuple[optimizer.MILPSolution | None, Model | None]:
+    """A faithful copy of `solve_optimal_roster`'s build, with two knobs.
+
+    `objective="min_cost"` swaps the maximise-points objective for
+    minimise-roster-cost and drops the budget constraint, which is what C2 needs;
+    `points_floor` adds `starter_pts >= floor`. Everything else is line-for-line
+    the production build, including the needs reduction and both early returns.
+
+    Returns (early_solution, None) when the production code would return without
+    solving, else (None, model).
+    """
+    excluded = excluded or set()
+    forced = forced or {}
+
+    candidates = {
+        name: p for name, p in available.items()
+        if p.projected_points > 0 and name not in excluded and name not in forced
+    }
+    forced_cost = sum(forced.values())
+    budget = team.remaining_budget - forced_cost
+    spots = team.total_spots_remaining - len(forced)
+
+    needs = dict(team.roster_needs)
+    for name in forced:
+        if name in available:
+            pos = available[name].position
+            if needs.get(pos, 0) > 0:
+                needs[pos] -= 1
+
+    forced_objs = [available[n] for n in forced if n in available]
+
+    if spots == 0 and budget >= 0:
+        return optimizer.MILPSolution(
+            total_points=lineup_points(list(team.roster_players) + forced_objs),
+            roster=[], total_cost=forced_cost,
+            by_position={"F": [], "D": [], "G": []}, status="Optimal",
+        ), None
+
+    if spots < 0 or budget < 0 or budget < spots * MIN_SALARY:
+        return optimizer.MILPSolution(
+            total_points=lineup_points(team.roster_players),
+            roster=[], total_cost=0.0,
+            by_position={"F": [], "D": [], "G": []}, status="Infeasible",
+        ), None
+
+    total_needs = sum(needs.values())
+    if total_needs > spots:
+        excess = total_needs - spots
+        for pos in sorted(needs, key=lambda p: -needs[p]):
+            if excess <= 0:
+                break
+            reduction = min(needs[pos], excess)
+            needs[pos] -= reduction
+            excess -= reduction
+
+    sense = pulp.LpMinimize if objective == "min_cost" else pulp.LpMaximize
+    prob = pulp.LpProblem("roster_optimizer", sense)
+
+    x = {n: pulp.LpVariable(f"x_{i}", cat="Binary")
+         for i, n in enumerate(candidates)}
+    fixed_members = list(team.roster_players) + forced_objs
+    s_fixed = {j: pulp.LpVariable(f"sf_{j}", cat="Binary")
+               for j in range(len(fixed_members))}
+    s_cand = {}
+    for i, n in enumerate(candidates):
+        s_cand[n] = pulp.LpVariable(f"sc_{i}", cat="Binary")
+        prob += s_cand[n] <= x[n]
+
+    def starters_at(pos):
+        return (
+            pulp.lpSum(s_fixed[j] for j, p in enumerate(fixed_members)
+                       if p.position == pos)
+            + pulp.lpSum(s_cand[n] for n in candidates
+                         if candidates[n].position == pos)
+        )
+
+    for pos, slots in STARTING_LINEUP.items():
+        prob += starters_at(pos) <= slots
+
+    starter_pts = (
+        pulp.lpSum(p.projected_points * s_fixed[j]
+                   for j, p in enumerate(fixed_members))
+        + pulp.lpSum(candidates[n].projected_points * s_cand[n]
+                     for n in candidates)
+    )
+    cost = pulp.lpSum(prices.get(n, MIN_SALARY) * x[n] for n in candidates)
+
+    if objective == "min_cost":
+        # No backup-credit terms: they exist only to shape the objective, and
+        # this objective is cost. Dropping them removes 3 variables and 3
+        # constraints rather than leaving them to be optimised over for nothing.
+        prob += cost
+        # No budget constraint either — that is the quantity being solved FOR.
+        # Safe because `with_at_min` Optimal already proves a roster beating the
+        # target exists at cost <= remaining_budget - MIN_SALARY, so the minimum
+        # cannot exceed it.
+    else:
+        bk = {}
+        for pos, target in BACKUP_TARGETS.items():
+            bk[pos] = pulp.LpVariable(f"bk_{pos}", lowBound=0, upBound=target)
+            rostered_pos = (
+                sum(1 for p in fixed_members if p.position == pos)
+                + pulp.lpSum(x[n] for n in candidates
+                             if candidates[n].position == pos)
+            )
+            prob += bk[pos] <= rostered_pos - starters_at(pos)
+        bench_pts = pulp.lpSum(
+            candidates[n].projected_points * (x[n] - s_cand[n])
+            for n in candidates
+        )
+        prob += starter_pts + BENCH_WEIGHT * bench_pts \
+            + BACKUP_BONUS * pulp.lpSum(bk.values())
+        # Named so C1 can move its RHS instead of rebuilding the model.
+        prob += (cost <= budget, BUDGET_CONSTRAINT)
+
+    if points_floor is not None:
+        prob += starter_pts >= points_floor
+
+    prob += pulp.lpSum(x[n] for n in candidates) == spots
+    for pos, need in needs.items():
+        if need > 0:
+            prob += pulp.lpSum(
+                x[n] for n in candidates if candidates[n].position == pos
+            ) >= need
+
+    return None, Model(prob, x, s_fixed, s_cand, candidates, fixed_members,
+                       spots, budget, forced_cost)
+
+
+def extract(model: Model, team: TeamState, prices: dict[str, float],
+            forced: dict[str, float], available: dict[str, Player]):
+    """`solve_optimal_roster`'s extraction, so the copy is comparable end to end."""
+    status = pulp.LpStatus[model.prob.status]
+    if status != "Optimal":
+        return optimizer.MILPSolution(
+            total_points=lineup_points(team.roster_players), roster=[],
+            total_cost=0.0, by_position={"F": [], "D": [], "G": []}, status=status,
+        )
+    selected = [model.candidates[n] for n in model.candidates
+                if model.x[n].varValue and model.x[n].varValue > 0.5]
+    by_position: dict[str, list[Player]] = {"F": [], "D": [], "G": []}
+    for p in selected:
+        by_position[p.position].append(p)
+    for name in forced:
+        if name in available:
+            by_position[available[name].position].append(available[name])
+    return optimizer.MILPSolution(
+        total_points=lineup_points(model.fixed_members + selected),
+        roster=selected,
+        total_cost=sum(prices.get(p.name, MIN_SALARY) for p in selected)
+        + model.forced_cost,
+        by_position=by_position,
+        status="Optimal",
+    )
+
+
+def solve_via_copy(team, available, prices, excluded_players=None,
+                   forced_players=None):
+    """The copy, driven exactly like `solve_optimal_roster` — the faithfulness probe."""
+    early, model = build(team, available, prices, excluded_players, forced_players)
+    if early is not None:
+        return early
+    model.prob.solve(pulp.PULP_CBC_CMD(msg=0))
+    return extract(model, team, prices, forced_players or {}, available)
+
+
+def _floor_to_grid(value: float) -> float:
+    """Largest $0.1M step at or below `value`, WITHOUT smoothing.
+
+    The reference returns `lo`, the largest PROBED step that still improved, so a
+    derived answer has to floor rather than round — naming a price the budget
+    cannot pay is the one direction that matters.
+
+    **There are two error scales here and the epsilon has to separate them**,
+    which took two wrong drafts to see. The first smoothed with
+    `round(value, 6)`; measured on `endgame-ceiling-binds`, market prices are
+    themselves off-grid (`0.5000000106310717`), so a genuinely-$6.1M roster costs
+    `6.100000041203467` and `remaining_budget - min_cost` comes out
+    `2.9999999587965327`. Smoothing calls that 3.0. The reference calls it 2.9,
+    because at a forced 3.0 the budget is `6.100000000000001` and the roster
+    misses it by 4e-8 — the reference's 2.9 is itself a float artefact, but
+    reproducing it is the job.
+
+    The second draft dropped the epsilon entirely, and that broke the OTHER
+    scale: `1.9 / 0.1` is `18.999999999999996`, so a bare floor turns an exact
+    $1.9M into $1.8M. Every `endgame-last-goalie` subject in the budget sweep
+    came back an increment low, all three candidates alike, because they share
+    this function.
+
+    So: representation error of a grid multiple is ~1e-16 relative, solver
+    tolerance is ~4e-8, and 1e-9 on the QUOTIENT sits between them — it lifts
+    `18.999999999999996` to 19 and leaves `29.999999587965327` at 29. Do not
+    widen it to "be safe": at 1e-7 the first case regresses.
+    """
+    return math.floor(value / SALARY_INCREMENT + 1e-9) * SALARY_INCREMENT
+
+
+def marginal_c1(player, team, available, prices, warm=True):
+    """C1: build the search model ONCE, then move the budget RHS per probe.
+
+    The eight probe solves differ in one number — `forced_cost` feeds
+    `budget = remaining_budget - forced_cost` and nothing else — so rebuilding
+    the model for each is ~9.2ms x 8 of pure waste, and CBC gets no chance to
+    warm-start from the previous answer.
+
+    `warmStart=True` is safe here: PuLP writes the start file through the same
+    `create_tmp_files` call as the .lp and .sol (`pulp/apis/coin_api.py:156`), so
+    it carries the per-solve `uuid4().hex` prefix and two concurrent solves cannot
+    collide. That is the opposite of `keepFiles=True`, which puts every solve on
+    one filename and returns silently wrong answers.
+    """
+    if team.total_spots_remaining <= 0:
+        return 0.0
+
+    cmd = pulp.PULP_CBC_CMD(msg=0, warmStart=warm)
+    at_min_early, at_min = build(team, available, prices,
+                                 forced={player.name: MIN_SALARY})
+    if at_min_early is not None:
+        with_at_min = at_min_early
+    else:
+        at_min.prob.solve(cmd)
+        with_at_min = extract(at_min, team, prices, {player.name: MIN_SALARY},
+                              available)
+    if with_at_min.status != "Optimal":
+        return MIN_SALARY
+
+    wo_early, wo = build(team, available, prices, excluded={player.name})
+    if wo_early is not None:
+        without = wo_early
+    else:
+        wo.prob.solve(cmd)
+        without = extract(wo, team, prices, {}, available)
+    if without.status != "Optimal":
+        return round(max(team.physical_max_bid, MIN_SALARY), 1)
+    if with_at_min.total_points <= without.total_points:
+        return MIN_SALARY
+
+    if at_min is None:
+        # He fills the last spot himself, so `build` returned early and there is
+        # no model to search: every probe would take the same `spots == 0`
+        # branch, which is Optimal iff `price <= remaining_budget` and whose
+        # points do not depend on price at all. The reference reaches the answer
+        # through `with_at_hi`; this reads it off directly. Returning MIN_SALARY
+        # here — which is what the first draft did — priced every player in
+        # `endgame-last-goalie` at the floor instead of the physical max.
+        return round(min(round(team.physical_max_bid, 1),
+                         _floor_to_grid(team.remaining_budget)), 1)
+
+    # One model for every remaining probe. `at_min` is already built with this
+    # player forced, so only its budget moves.
+    model = at_min
+
+    def probe(price: float) -> optimizer.MILPSolution:
+        model.prob.constraints[BUDGET_CONSTRAINT].changeRHS(
+            team.remaining_budget - price
+        )
+        model.prob.solve(cmd)
+        return extract(model, team, prices, {player.name: price}, available)
+
+    lo, hi = MIN_SALARY, team.physical_max_bid
+    at_hi = probe(round(hi, 1))
+    if at_hi.status == "Optimal" and at_hi.total_points > without.total_points:
+        return round(hi, 1)
+
+    while hi - lo > SALARY_INCREMENT:
+        mid = round(lo + (hi - lo) / 2, 1)
+        if mid <= lo:
+            mid = round(lo + SALARY_INCREMENT, 1)
+        if mid >= hi:
+            break
+        at_mid = probe(mid)
+        if at_mid.status == "Optimal" and at_mid.total_points > without.total_points:
+            lo = mid
+        else:
+            hi = mid
+    return round(lo, 1)
+
+
+def marginal_c2(player, team, available, prices):
+    """C2: one min-cost solve instead of the ~8-probe search.
+
+    The search asks for the largest `P` with `V(remaining_budget - P) > B`, where
+    `B` is `without.total_points` and `V` is non-decreasing in budget. So it is
+    asking which budget is the least that still beats `B` — and that is a single
+    minimisation: cheapest roster containing this player that reaches `B + 1`,
+    then `P* = remaining_budget - min_cost`.
+
+    `B + 1` rather than `B + epsilon` because `projected_points` is an `int` and
+    `lineup_points` returns an `int` (`state.py:23`), so the strict `>` the
+    reference uses is exactly `>= B + 1`. No tolerance to tune, which is one
+    fewer thing to get wrong.
+
+    Sound because `s` is free and slot-capped, so `starter_pts >= t` says "some
+    lineup reaches t", and `lineup_points` IS the max over lineups.
+    """
+    if team.total_spots_remaining <= 0:
+        return 0.0
+
+    cmd = pulp.PULP_CBC_CMD(msg=0)
+    at_min_early, at_min = build(team, available, prices,
+                                 forced={player.name: MIN_SALARY})
+    if at_min_early is not None:
+        with_at_min = at_min_early
+    else:
+        at_min.prob.solve(cmd)
+        with_at_min = extract(at_min, team, prices, {player.name: MIN_SALARY},
+                              available)
+    if with_at_min.status != "Optimal":
+        return MIN_SALARY
+
+    wo_early, wo = build(team, available, prices, excluded={player.name})
+    if wo_early is not None:
+        without = wo_early
+    else:
+        wo.prob.solve(cmd)
+        without = extract(wo, team, prices, {}, available)
+    if without.status != "Optimal":
+        return round(max(team.physical_max_bid, MIN_SALARY), 1)
+    if with_at_min.total_points <= without.total_points:
+        return MIN_SALARY
+
+    target = without.total_points + 1
+
+    if team.total_spots_remaining - 1 == 0:
+        # He fills the roster alone, so there is nothing left to buy and the
+        # whole remaining budget is available to him. The reference reaches the
+        # same answer through `with_at_hi`, whose points do not depend on price.
+        min_cost = 0.0
+    else:
+        early, cheap = build(team, available, prices,
+                            forced={player.name: MIN_SALARY},
+                            objective="min_cost", points_floor=target)
+        if early is not None:
+            return MIN_SALARY
+        cheap.prob.solve(cmd)
+        if pulp.LpStatus[cheap.prob.status] != "Optimal":
+            # Cannot happen if `with_at_min` was Optimal and beat `without` —
+            # that is a feasible point for this problem. Reported rather than
+            # swallowed, because it would mean the copy has drifted.
+            return float("nan")
+        min_cost = pulp.value(cheap.prob.objective)
+
+    exact = team.remaining_budget - min_cost
+    # Start ONE INCREMENT ABOVE the bound, then walk down. `min_cost` can come
+    # back a shade high on CBC's tolerance, which floors the bound one step below
+    # the true answer — and a walk-down cannot recover from starting low. Measured
+    # in the budget sweep: `endgame-sole-bidder @0.70` returned 2.2 against a
+    # reference 2.3 until the start moved up. Costs one extra confirm in the
+    # common case and is what makes the result an upper bound rather than a guess.
+    price = round(min(_floor_to_grid(exact) + SALARY_INCREMENT,
+                      round(team.physical_max_bid, 1)), 1)
+
+    # `min_cost` is a LOWER bound on any improving roster's cost, so `exact` is an
+    # UPPER bound on the answer — but CBC's tolerance and off-grid market prices
+    # put it within an increment either way, so the grid step above is a
+    # candidate, not the answer. Confirm it with the reference's own test and walk
+    # down until one passes. That is what makes this reproduce the reference by
+    # CONSTRUCTION rather than by float luck: the first draft returned the
+    # unconfirmed step and was one increment high on `endgame-ceiling-binds`.
+    #
+    # The confirms reuse `at_min`'s model, so each costs a solve and no rebuild.
+    # Terminates because MIN_SALARY is already known to improve — that was
+    # checked above.
+    if at_min is not None:
+        while price > MIN_SALARY:
+            at_min.prob.constraints[BUDGET_CONSTRAINT].changeRHS(
+                team.remaining_budget - price
+            )
+            at_min.prob.solve(cmd)
+            at_price = extract(at_min, team, prices, {player.name: price}, available)
+            if (at_price.status == "Optimal"
+                    and at_price.total_points > without.total_points):
+                break
+            price = round(price - SALARY_INCREMENT, 1)
+            C2_WALKDOWN.append(1)
+    return max(round(price, 1), MIN_SALARY)
+
+
+# How many increments each C2 call had to walk down from its min-cost bound.
+# Counted rather than assumed, and the count is why the comment above it is
+# phrased as it is: measured over the 140-subject budget sweep, C2 walked down
+# **100 increments**, so the bound is NOT usually exact once budget-per-spot
+# approaches the reserve floor — about 0.7 extra confirms per call. On the
+# 28-subject scenario set it walked down 0. That difference is most of why C2's
+# speedup is 2.2x on the scenarios and 1.45x on the sweep.
+C2_WALKDOWN: list[int] = []
+
+# ---------------------------------------------------------------------------
+# Phase 2/3: compare
+# ---------------------------------------------------------------------------
+
+
+CANDIDATES = {
+    "C1 warm": lambda *a: marginal_c1(*a, warm=True),
+    "C1 cold": lambda *a: marginal_c1(*a, warm=False),
+    "C2 mincost": marginal_c2,
+}
+
+
+def _timed(fn, *args) -> tuple[float, float]:
+    t0 = time.perf_counter()
+    value = fn(*args)
+    return value, (time.perf_counter() - t0) * 1000
+
+
+def compare(label: str, state: AuctionState, faithful: bool) -> list[dict]:
+    """Reference against every candidate on the same subjects, in one run.
+
+    One run matters: a laptop's CBC timings move by tens of percent between
+    invocations, so a before/after taken from two runs is not a comparison.
+    """
+    prices, _ = priced(state)
+    bot = state.teams[MY_TEAM]
+    rows = []
+    for role, player in subjects(state, prices):
+        args = (player, bot, state.available_players, prices)
+        ref, ref_ms = _timed(optimizer.compute_marginal_value, *args)
+        row = {"state": label, "role": role, "player": player.name,
+               "ref": ref, "ref_ms": ref_ms, "cands": {}}
+
+        if faithful:
+            # The copy driven through the production search. Any disagreement
+            # here invalidates every candidate below it, so it is reported
+            # first and separately.
+            real = optimizer.solve_optimal_roster
+            optimizer.solve_optimal_roster = solve_via_copy
+            try:
+                row["copy"], row["copy_ms"] = _timed(
+                    optimizer.compute_marginal_value, *args)
+            finally:
+                optimizer.solve_optimal_roster = real
+
+        for name, fn in CANDIDATES.items():
+            row["cands"][name] = _timed(fn, *args)
+        rows.append(row)
+    return rows
+
+
+def report_compare(rows: list[dict], faithful: bool) -> None:
+    names = list(CANDIDATES)
+    print()
+    head = f"{'state':24} {'role':9} {'ref':>6} {'ms':>7}"
+    if faithful:
+        head += f" {'copy':>6}"
+    for n in names:
+        head += f" | {n:>10} {'ms':>7}"
+    print(head)
+    print("-" * len(head))
+
+    bad: list[str] = []
+    for r in rows:
+        line = f"{r['state'][:24]:24} {r['role']:9} {r['ref']:6.1f} {r['ref_ms']:7.0f}"
+        if faithful:
+            ok = "" if r["copy"] == r["ref"] else " !!"
+            line += f" {r['copy']:6.1f}{ok}"
+            if r["copy"] != r["ref"]:
+                bad.append(f"COPY DRIFT {r['state']}/{r['role']}: "
+                           f"copy {r['copy']} vs reference {r['ref']}")
+        for n in names:
+            v, ms = r["cands"][n]
+            mark = "" if v == r["ref"] else "!"
+            line += f" | {v:9.1f}{mark} {ms:7.0f}"
+            if v != r["ref"]:
+                bad.append(f"{n} DISAGREES {r['state']}/{r['role']}: "
+                           f"{v} vs reference {r['ref']}")
+        print(line)
+
+    print()
+    ref_total = sum(r["ref_ms"] for r in rows)
+    print(f"reference total: {ref_total:.0f}ms across {len(rows)} subjects")
+    for n in names:
+        tot = sum(r["cands"][n][1] for r in rows)
+        wrong = sum(1 for r in rows if r["cands"][n][0] != r["ref"])
+        verdict = "AGREES on all" if not wrong else f"DISAGREES on {wrong}"
+        print(f"  {n:12} {tot:7.0f}ms  ({ref_total / tot:5.2f}x)  {verdict}")
+    print(f"  C2 walked down {sum(C2_WALKDOWN)} increment(s) across "
+          f"{len(rows)} subjects ({sum(C2_WALKDOWN) / max(len(rows), 1):.2f} per "
+          f"call) — each one is an extra confirm solve")
+
+    # Per state, because the aggregate hides the decision. A candidate that is
+    # 1.6x on the states that cost a second and 0.8x on the ones that already
+    # short-circuit is a different proposition from one that is 1.45x evenly, and
+    # the first pass at this had to be recomputed by hand from the rows to see it.
+    by_state: dict[str, list[float]] = {}
+    for r in rows:
+        key = r["state"].rsplit("@", 1)[0].strip()
+        acc = by_state.setdefault(key, [0.0] + [0.0] * len(names) + [0.0])
+        acc[0] += r["ref_ms"]
+        for i, n in enumerate(names):
+            acc[1 + i] += r["cands"][n][1]
+        acc[-1] += 1
+    print()
+    print(f"per state (the aggregate above hides which cases actually cost a second):")
+    print(f"  {'state':26} {'n':>3} {'ref ms':>8} "
+          + " ".join(f"{n:>11}" for n in names))
+    for key in sorted(by_state, key=lambda k: -by_state[k][0]):
+        acc = by_state[key]
+        speeds = " ".join(
+            f"{acc[0] / acc[1 + i]:10.2f}x" if acc[1 + i] else f"{'-':>11}"
+            for i in range(len(names))
+        )
+        print(f"  {key[:26]:26} {int(acc[-1]):3d} {acc[0]:8.0f} {speeds}")
+
+    if bad:
+        print(f"\n{len(bad)} disagreement(s) — a candidate that disagrees anywhere "
+              f"is dead, per the pool-pruning precedent:")
+        for b in bad:
+            print(f"  {b}")
+    else:
+        print("\nEvery candidate byte-identical to the reference on every subject "
+              "here. NOT yet a pass: run --sweep, which is the regime that caught "
+              "pool pruning.")
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: the budget sweep — the acceptance criterion
+# ---------------------------------------------------------------------------
+
+
+# Budget per OPEN SPOT, in $M. The first is roughly where every shipped scenario
+# already sits, and the rest walk down toward the reserve floor (MIN_SALARY),
+# which is the regime that caught pool pruning: byte-identical on every scenario,
+# then 1069 against a true 1076 at 1.00, and Infeasible against 999 and 961 at
+# 0.70 and 0.60. Reachable through play, not just by construction — buyout
+# penalties, /trade-between and /adjust-salary all warn rather than refuse.
+SWEEP_PER_SPOT = (1.90, 1.50, 1.00, 0.70, 0.60)
+
+
+def sweep(label: str, state: AuctionState) -> list[dict]:
+    """Re-run the comparison with BOT squeezed toward the reserve floor.
+
+    Squeezes via `helpers.set_headroom`, which takes a team object — the by-code
+    `helpers.squeeze` reaches into `main.auction_state`, and this module must not
+    import `main`.
+    """
+    bot = state.teams[MY_TEAM]
+    spots = bot.total_spots_remaining
+    if spots <= 0:
+        print(f"    {label}: BOT has no open spots, nothing to sweep")
+        return []
+
+    rows = []
+    for per_spot in SWEEP_PER_SPOT:
+        set_headroom(bot, round(per_spot * spots, 1))
+        # Prices move with the squeeze: a poorer BOT does not change opponents'
+        # ceilings, but rebuilding is what the app would do, so measure that.
+        prices, _ = priced(state)
+        for role, player in subjects(state, prices):
+            args = (player, bot, state.available_players, prices)
+            ref, ref_ms = _timed(optimizer.compute_marginal_value, *args)
+            row = {"state": f"{label} @{per_spot:.2f}", "role": role,
+                   "player": player.name, "ref": ref, "ref_ms": ref_ms,
+                   "cands": {}}
+            for name, fn in CANDIDATES.items():
+                row["cands"][name] = _timed(fn, *args)
+            rows.append(row)
+    return rows
 
 
 def main() -> None:
@@ -302,13 +929,28 @@ def main() -> None:
                     help="fresh state only — the cheap smoke run")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="print every solve, not just the per-subject total")
+    ap.add_argument("--compare", action="store_true",
+                    help="reference against every candidate, same run")
+    ap.add_argument("--faithful", action="store_true",
+                    help="with --compare, also check the model copy has not drifted")
+    ap.add_argument("--sweep", action="store_true",
+                    help="squeeze BOT toward the reserve floor — the acceptance "
+                         "criterion, since the scenario set alone passed pool pruning")
     args = ap.parse_args()
 
     rows: list[dict] = []
     for label, state in states(args.quick, args.scenario):
         print(f"  measuring {label} ...", flush=True)
-        rows += profile(label, state)
-    report(rows, args.verbose)
+        if args.sweep:
+            rows += sweep(label, state)
+        elif args.compare:
+            rows += compare(label, state, args.faithful)
+        else:
+            rows += profile(label, state)
+    if args.compare or args.sweep:
+        report_compare(rows, args.faithful and not args.sweep)
+    else:
+        report(rows, args.verbose)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,9 @@
 """Tests for scenarios.py."""
 
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +29,29 @@ LAST_GOALIE = "endgame-last-goalie"
 SOLE_BIDDER = "endgame-sole-bidder"
 LATE_DRAFT = "drained-late-draft"
 FULL_ROSTER = "full-roster-still-bidding"
+
+# Run in a fresh interpreter by `test_a_scenario_loads_the_same_under_any_hash_seed`,
+# which is the only way to vary PYTHONHASHSEED — it is read at startup, so
+# setting it in-process does nothing. Digested in two halves because only one of
+# them discriminates; see that test's docstring.
+_HASH_SEED_DIGEST = """
+import hashlib, json, logging, sys
+logging.disable(logging.WARNING)  # the duplicate-name notice is not the subject
+import scenarios
+
+state = scenarios.load(sys.argv[1])
+rosters = {
+    code: sorted(
+        (p.name, round(p.salary, 4), p.is_bench, p.is_keeper)
+        for p in team.all_players
+    )
+    for code, team in sorted(state.teams.items())
+}
+print(json.dumps({
+    "rosters": hashlib.sha1(json.dumps(rosters, sort_keys=True).encode()).hexdigest(),
+    "pool": hashlib.sha1(json.dumps(list(state.available_players)).encode()).hexdigest(),
+}))
+"""
 
 
 def _priced(state):
@@ -241,6 +267,81 @@ class TestEndgameCeilingBinds:
                    [(p.name, p.salary) for p in b.all_players], f"{code} differs"
             assert a.is_done == b.is_done, f"{code} is_done differs"
         assert first.available_players.keys() == second.available_players.keys()
+
+
+def test_a_scenario_loads_the_same_under_any_hash_seed():
+    """The cross-process half of the claim the class above ends on.
+
+    Module level rather than inside either scenario's class: the subject is
+    `scenarios.py`'s determinism, and `endgame-last-goalie` is only the vehicle —
+    the one scenario measured to be exposed. Placed directly below
+    `test_loading_it_twice_gives_the_same_state`, whose docstring says that no
+    test in this file can see across processes. This is that test.
+
+    `scenarios.py` makes six ordering decisions with a name tie-break, and
+    only ONE of them is exposed to `PYTHONHASHSEED`. Measured 2026-08-20 by
+    digesting all six scenarios under seeds 0/1/12345/999 with each tie-break
+    deleted in turn:
+
+    | tie-break removed | seed-dependent? | changes the scenario? |
+    |---|---|---|
+    | `_fill`'s `min` | no | yes, deterministically |
+    | `_drain`'s `max` | no | yes, deterministically |
+    | `_reserved_top`'s `sorted` | no | no |
+    | `_scenario_endgame_ceiling_binds`' inline copy | no | no |
+    | `_scenario_endgame_last_goalie`'s crease `sorted` | no | no |
+    | **the same function's `ranked` `sorted`** | **YES** | yes |
+
+    So the finding that asked for this test named the wrong functions.
+    `_fill`, `_drain` and `_reserved_top` all iterate `available_players`, a
+    dict, insertion-ordered from the CSV — and `min`/`max` return the FIRST
+    extreme while `sorted` is stable, so removing their tie-break picks a
+    different player but picks the same one every time, on every machine.
+    Their tie-breaks pin INTENT, not behaviour: worth keeping, not worth a
+    test.
+
+    `ranked` is the one real exposure, because it sorts `goalies &
+    set(state.available_players)` — a **set**, whose iteration order is a
+    function of the seed. Losing its `n` makes `endgame-last-goalie` load four
+    different ways under four seeds, which is why that is the scenario used
+    here.
+
+    Two build choices, both measured rather than assumed:
+
+    * **The digest must include the ROSTERS.** At seeds 0 and 1 the mutant
+      moves the rosters but leaves `available_players` key order identical, so
+      a pool-keys-only digest — the obvious cheap choice — passes against the
+      very mutation this test exists for.
+    * **Three seeds, not the two the finding proposed.** 0/1 is enough for
+      today's mutant via the roster half, but 12345 separates both halves, so
+      the test survives someone narrowing the digest later.
+
+    To watch it fail: delete the trailing `n` from `ranked`'s sort key in
+    `scenarios.py`. Cost is ~45ms per child and one scenario only — this file
+    already runs 6s and six of these would be the expensive way to learn
+    nothing.
+    """
+    digests = {}
+    for seed in ("0", "1", "12345"):
+        child = subprocess.run(
+            [sys.executable, "-c", _HASH_SEED_DIGEST, LAST_GOALIE],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        )
+        assert child.returncode == 0, (
+            f"the digest child failed under PYTHONHASHSEED={seed}:\n"
+            f"{child.stderr[-2000:]}"
+        )
+        digests[seed] = child.stdout.strip()
+
+    assert len(set(digests.values())) == 1, (
+        f"{LAST_GOALIE} loads differently depending on PYTHONHASHSEED, so it "
+        f"could load differently on the draft-day machine than it does here. "
+        f"A set-derived ordering has lost its name tie-break — look at "
+        f"`ranked` in `_scenario_endgame_last_goalie`. Digests: {digests}"
+    )
 
 
 class TestEndgameLastGoalie:

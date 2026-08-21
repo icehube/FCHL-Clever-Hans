@@ -29,9 +29,42 @@ wrong is that **two of the batch's own claims were untrue**, one of them in the
 file that overrides everything else.
 
 Then one more pass, on a theme the day kept turning up: a **guard that reads as
-coverage and is not**. That is the first entry below.
+coverage and is not**. That is the first two entries below — and the second one
+started by measuring whether the test it was asked for could fail at all, which
+turned out to be the interesting part.
 
 ### Fixed
+
+- **Scenario determinism was only ever checked within one process, and the
+  finding that said so named the wrong three functions.** `scenarios.py` makes
+  six ordering decisions with a `name` tie-break; the deferred entry claimed the
+  ones in `_fill`, `_drain` and `_reserved_top` "matter **across** processes,
+  where hash and set order vary". Measured 2026-08-20 before writing anything —
+  all six scenarios digested under `PYTHONHASHSEED` 0/1/12345/999, with each
+  tie-break deleted in turn — **none of those three is seed-dependent.** All
+  three iterate `available_players`, which is a dict, insertion-ordered from the
+  CSV; `min`/`max` return the FIRST extreme and `sorted` is stable, so removing
+  their tie-break picks a different player and picks the same different player
+  on every machine. Two of them (`_reserved_top` and the crease sort in
+  `_scenario_endgame_last_goalie`) do not even change the loaded state — their
+  ties never reach a decision. The one real exposure is elsewhere in that same
+  scenario: `ranked` sorts `goalies & set(state.available_players)`, and a
+  **set**'s iteration order is a function of the seed, so without the trailing
+  `n` the scenario loads four different ways under four seeds. So the test that
+  is now in place is aimed at what is actually exposed rather than at what the
+  entry guessed — `test_a_scenario_loads_the_same_under_any_hash_seed`, one
+  scenario, three child interpreters, ~45ms each, at module level rather than in
+  either scenario's class because the subject is determinism and the scenario is
+  only the vehicle. **The measurement also changed how the test is built, twice.**
+  The entry proposed comparing a digest at seeds 0 and 1; measured, the mutant at
+  those two seeds moves the team rosters but leaves `available_players` key order
+  **identical**, so the obvious cheap digest — the pool's keys — would have passed
+  against the very mutation the test exists for. It digests the rosters, and runs
+  a third seed so it survives someone narrowing that later. Verified by deleting
+  the trailing `n`: exactly one test in the file reddens, and it is this one.
+  Filed on the way past: `_scenario_endgame_ceiling_binds` holds a
+  character-for-character inline copy of `_reserved_top`, found because both sites
+  had to be mutated separately.
 
 - **Every template reference in these two files was checked for existence and
   nothing else, and six of the nine had drifted.** `test_reference_resolves`

@@ -81,6 +81,15 @@ rediscover the same non-problem.
   runs — one figure to two decimals would be false precision), a real regression,
   because the reference already short-circuits there in three solves.
 
+  **The candidate numbers rest on the model copy costing what `optimizer`'s
+  costs, and that was collected and thrown away.** `--faithful` drives the copy
+  through the *production* search, so its total is directly comparable — but
+  `copy_ms` was measured and never printed, leaving the copy validated for
+  correctness and unvalidated for cost. If the copy's build were materially
+  dearer, every speedup above would be understated by that difference and the
+  1.06x would be unreadable. Measured 2026-08-21: **1.00x** (3384ms against 3400),
+  and it is a reported column now.
+
   **The marginal is the only thing compared, and the plan asked for more than
   that on reasoning that turned out not to apply.** The plan's acceptance
   criterion was agreement on what reaches the screen — `value_cap`, `max_bid`,

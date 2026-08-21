@@ -638,6 +638,13 @@ def marginal_c1(player, team, available, prices, warm=True):
     model = at_min
 
     def probe(price: float) -> optimizer.MILPSolution:
+        # Only the RHS moves — that is the whole trick, and `changeRHS` replaces
+        # it rather than adjusting, so the MIN_SALARY this model was built with
+        # is gone. `model.forced_cost` still holds it though, so the returned
+        # `total_cost` is short by `price - MIN_SALARY`. Harmless because the
+        # search reads `status` and `total_points` only; noted because a future
+        # reader reaching for `total_cost` off a probe would get a wrong number
+        # with no sign of it.
         model.prob.constraints[BUDGET_CONSTRAINT].changeRHS(
             team.remaining_budget - price
         )
@@ -885,6 +892,16 @@ def report_compare(rows: list[dict], faithful: bool) -> None:
     print()
     ref_total = sum(r["ref_ms"] for r in rows)
     print(f"reference total: {ref_total:.0f}ms across {len(rows)} subjects")
+    if faithful:
+        # The copy driven through the PRODUCTION search, so this is the copy's
+        # own build cost against `optimizer`'s on identical work. It was measured
+        # and discarded until 2026-08-21, which mattered: if the copy's build were
+        # materially dearer, every candidate speedup below would be understated by
+        # that difference and the 1.06x figures would be unreadable.
+        copy_total = sum(r["copy_ms"] for r in rows)
+        print(f"  copy         {copy_total:7.0f}ms  ({ref_total / copy_total:5.2f}x)"
+              f"  same search, model built here — a large gap understates every "
+              f"candidate below")
     for n in names:
         tot = sum(r["cands"][n][1] for r in rows)
         wrong = sum(1 for r in rows if r["cands"][n][0] != r["ref"])

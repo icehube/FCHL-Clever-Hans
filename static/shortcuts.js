@@ -188,9 +188,12 @@ document.addEventListener('click', function(e) {
    you are looking, a filter is a search you are in the middle of. */
 var playerFilters = {pos: 'all', rfa: 'all'};
 
+var POS_LABELS = {F: 'forwards', D: 'defencemen', G: 'goalies'};
+
 function applyPlayerFilters() {
     var tbody = document.querySelector('#bid-limits tbody');
     if (!tbody) return;
+    var visible = 0;
     tbody.querySelectorAll('tr').forEach(function(row) {
         // `is-rfa` is already on the row and already load-bearing for CSS (the
         // yellow left border, style.css). Reading it beats adding a data-rfa
@@ -200,12 +203,34 @@ function applyPlayerFilters() {
         var okRfa = playerFilters.rfa === 'all'
             || (playerFilters.rfa === 'rfa' ? isRfa : !isRfa);
         row.style.display = (okPos && okRfa) ? '' : 'none';
+        if (okPos && okRfa) visible++;
     });
     syncFilterButtons('data-pos', playerFilters.pos);
     syncFilterButtons('data-rfa', playerFilters.rfa);
+    showPoolEmptyState(visible);
     // Last, and not optional: the # column is rendered 1..N by Jinja, so a
     // filtered table shows the original numbering with gaps until this runs.
     renumberRows(tbody);
+}
+
+/* Say so when a filter combination matches nothing.
+
+   Reachable in a real draft — G + RFA, once the last restricted goalie sells —
+   and until 2026-08-21 it rendered the headers and nothing else, which reads as
+   a broken panel rather than an empty result. Nothing knew the table was empty:
+   applyPlayerFilters() wrote display and counted nothing.
+
+   Names the combination rather than saying "no matches". The filter buttons
+   already show WHICH filters are on, so repeating that adds nothing; what the
+   operator needs is the table confirming it agrees. */
+function showPoolEmptyState(visible) {
+    var row = document.getElementById('pool-no-matches');
+    if (!row) return;
+    row.style.display = visible ? 'none' : '';
+    if (visible) return;
+    var pos = playerFilters.pos === 'all' ? 'players' : POS_LABELS[playerFilters.pos];
+    var status = playerFilters.rfa === 'all' ? '' : ' are ' + playerFilters.rfa.toUpperCase();
+    row.cells[0].textContent = 'No ' + pos + status + ' left in the pool.';
 }
 
 function syncFilterButtons(attr, active) {

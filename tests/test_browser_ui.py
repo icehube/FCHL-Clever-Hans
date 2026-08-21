@@ -54,6 +54,24 @@ def page(browser, live_server):
 # ---------------------------------------------------------------- helpers
 
 
+def _fewest_rfas_at_a_position() -> tuple[str, list[str]]:
+    """(position, every RFA name at it) for whichever position has the fewest.
+
+    Derived from the loaded pool by ROLE, never by name: `players.csv` is
+    replaced before every draft, and `tests/test_no_literal_player_names.py`
+    enforces it. Fewest because each name costs a real /assign in the browser.
+    """
+    pool = main.auction_state.available_players.values()
+    by_pos: dict[str, list[str]] = {}
+    for p in pool:
+        if p.is_rfa:
+            by_pos.setdefault(p.position, []).append(p.name)
+    if not by_pos:
+        return "F", []
+    pos = min(by_pos, key=lambda k: (len(by_pos[k]), k))
+    return pos, by_pos[pos]
+
+
 def _open(page, live_server):
     page.goto(live_server, wait_until="domcontentloaded")
     page.wait_for_selector("#bid-panel")
@@ -1359,6 +1377,76 @@ class TestAvailablePlayerFilters:
         assert nums == [str(i + 1) for i in range(len(nums))], (
             f"the # column reads {nums[:6]}… — renumberRows did not run after "
             f"the filter was re-applied"
+        )
+
+    def test_an_empty_combination_says_so(self, page, live_server):
+        """A filter that matches nothing rendered headers and nothing else.
+
+        Reachable in a real draft, and this test reaches it the same way: sell
+        every restricted player at one position and then ask for that position's
+        RFAs. Chooses whichever position has the fewest — D has 2 on a fresh pool
+        against G's 4 — because each one costs a real /assign round trip. The
+        pool is re-read for the count rather than assumed, since `players.csv` is
+        replaced before every draft.
+        """
+        pos, names = _fewest_rfas_at_a_position()
+        assert names, "no RFA at any position; this test would prove nothing"
+
+        _open(page, live_server)
+        for name in names:
+            _start_bid(page, name, price="0.5", bidders="BOT")
+            with page.expect_response(re.compile(r"/assign")):
+                page.click("#bid-panel form[hx-vals] button[type='submit']")
+            page.wait_for_timeout(400)
+
+        page.click(f'[data-pos="{pos}"]')
+        page.click('[data-rfa="rfa"]')
+        assert self._rows(page)["visible"] == 0, (
+            "the combination still matches rows — the picks did not land, so the "
+            "empty state was never reached"
+        )
+        note = page.evaluate("""() => {
+            const r = document.getElementById('pool-no-matches');
+            if (!r) return null;
+            return {shown: r.style.display !== 'none', text: r.cells[0].textContent.trim()};
+        }""")
+        assert note, "no #pool-no-matches row in the table at all"
+        assert note["shown"], "the table is empty and says nothing"
+        assert note["text"], "the empty-state row is shown but carries no message"
+        assert "RFA" in note["text"], (
+            f"the message does not name the combination: {note['text']!r}"
+        )
+
+        # And it goes away again. A stuck empty-state row under a full table is
+        # worse than the original bug, because it contradicts what is on screen.
+        page.click('[data-rfa="all"]')
+        after = page.evaluate(
+            "() => document.getElementById('pool-no-matches').style.display")
+        assert after == "none", "the empty-state row survived a filter that matches"
+
+    def test_the_empty_state_row_is_never_numbered_or_sorted(self, page, live_server):
+        """It lives in <tfoot> so nothing that walks the body can treat it as data.
+
+        In <tbody> it would be a row with one colspan cell: renumberRows would
+        overwrite the message with "1", and sortTable would read `cells[col]` off
+        it and shuffle it in among the players.
+        """
+        _open(page, live_server)
+        where = page.evaluate(
+            "() => document.getElementById('pool-no-matches').parentElement.tagName")
+        assert where == "TFOOT", f"the empty-state row is in <{where.lower()}>"
+
+        # Sorting must not move it or read through it.
+        page.click('#bid-limits th[data-sort-col="4"]')
+        page.wait_for_timeout(200)
+        still = page.evaluate(
+            "() => document.getElementById('pool-no-matches').parentElement.tagName")
+        assert still == "TFOOT", "sorting moved the empty-state row into the body"
+        nums = page.evaluate("""() => [...document.querySelectorAll('#bid-limits tbody tr')]
+            .filter(r => r.style.display !== 'none')
+            .map(r => r.cells[0].textContent.trim())""")
+        assert nums == [str(i + 1) for i in range(len(nums))], (
+            f"the # column reads {nums[:6]}… after a sort"
         )
 
 

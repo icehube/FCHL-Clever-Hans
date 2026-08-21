@@ -90,6 +90,35 @@ rediscover the same non-problem.
 
 ### Changed
 
+- **A filter combination with no matches now says so.** Available Players
+  rendered its headers and an empty body, which reads as a broken panel rather
+  than an empty result — and nothing in the code knew: `applyPlayerFilters`
+  wrote `display` on every row and counted nothing. Reachable in a real draft,
+  which is how the test reaches it: **G + RFA once the last restricted goalie
+  sells** (measured on a fresh pool — 4 restricted goalies, 2 restricted
+  defencemen, 16 restricted forwards).
+
+  Not a Jinja `{% else %}`: the filtering is entirely client-side and
+  `bid_limits` is never empty server-side. The row is filled and toggled by JS,
+  and it **names the combination** ("No defencemen are RFA left in the pool.")
+  rather than saying "no matches" — the filter buttons already show which
+  filters are on, so what the operator needs is the table confirming it agrees.
+
+  It lives in **`<tfoot>`**, not as a `<tr>` in `<tbody>`, because everything
+  that walks the body treats a row as a player: `sortTable` would read
+  `cells[col]` off a single colspan cell and shuffle the message in among the
+  players, and `renumberRows` would overwrite it with "1". A row that is not data
+  does not belong in the body, and tfoot means none of the three needs an
+  exception for it — moving it back into `<tbody>` kills **three** tests,
+  including the pre-existing partition test that counts rows.
+
+  A `renumberRows` selector narrowed to `tr[data-position]` was written as a
+  second line of defence and then **reverted**: with the row in `<tfoot>` the
+  mutant survived every test, because `tbody.querySelectorAll('tr')` cannot see
+  it. Same rule as the grid fix's `min-width: 0` — one mechanism, not two, and
+  the placement is the mechanism. Six tests in
+  `TestAvailablePlayerFilters`, five mutants killed.
+
 - **The roster panel now says what an italic blue row means.** The panel's most
   valuable output — "these are the players to buy" — was conveyed entirely by
   `text-info opacity-50 italic` plus a missing Actions cell, with no legend, no

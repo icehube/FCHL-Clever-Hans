@@ -69,6 +69,22 @@
             </tr>
             {% endfor %}
             </tbody>
+            {# The empty state for the position/RFA filters, which are entirely
+               client-side — `bid_limits` is never empty server-side, so this is
+               NOT a Jinja `{% else %}`. Filled and toggled by
+               applyPlayerFilters() in shortcuts.js.
+
+               In <tfoot> rather than as a <tr> in <tbody>, because everything
+               that walks the body treats a row as a player: sortTable() would
+               read `cells[col]` on a single colspan cell and shuffle the message
+               in among the rows, and renumberRows() would overwrite it with "1".
+               A row that is not data does not belong in the body, and tfoot means
+               none of the three needs an exception for it. #}
+            <tfoot>
+                <tr id="pool-no-matches" style="display: none">
+                    <td colspan="8" class="text-center text-sm opacity-70 italic font-normal normal-case py-4"></td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </section>

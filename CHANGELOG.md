@@ -88,6 +88,17 @@ rediscover the same non-problem.
   bulleting. `#data-warning` is untouched and stays a separate banner with its own
   lifecycle.
 
+### Changed
+
+- `scenarios.py` no longer carries an inline copy of `_reserved_top`.
+  `_scenario_endgame_ceiling_binds` had
+  `set(sorted(price, key=lambda n: (-price[n], n))[:25])` written out, character
+  for character what `_reserved_top(price)` returns — and `_reserved_top`'s
+  docstring already cites that scenario by name for the 25-rather-than-40
+  reasoning, so the two were documenting each other while duplicating each other.
+  Verified by digesting all six scenarios' keepers, minors, acquired, penalties,
+  done flags and pool before and after: **byte-identical**, all six.
+
 ### Investigated
 
 - **How much cheaper can a cold `/bid-check` be? About 1.6x, and it was not worth

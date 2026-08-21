@@ -248,9 +248,10 @@ def _scenario_endgame_ceiling_binds(state: AuctionState) -> None:
         state.teams[code].is_done = True
 
     # Hold back the top of the pool so the stars are still unsold once nobody can
-    # afford them. 25 rather than 40: see the distribution note above — 40 takes
-    # everything over $3.0M and leaves nothing worth draining a budget on.
-    reserved = set(sorted(price, key=lambda n: (-price[n], n))[:25])
+    # afford them. 25 rather than 40 for the reason `_reserved_top`'s docstring
+    # records — it cites this scenario by name, which is what made the inline copy
+    # this replaced worth deleting rather than leaving as a local detail.
+    reserved = _reserved_top(price)
 
     # Different targets on purpose: the ceiling is the SECOND-highest opponent
     # max, so two teams at the same number would hide which one sets it.

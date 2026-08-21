@@ -22,6 +22,72 @@ rediscover the same non-problem.
 
 ## [2026-08-21]
 
+### Fixed
+
+- **A failed `.corrupt` rename could still destroy the good backup, and could
+  make the app go quiet about having lost the draft.** `lifespan` renames an
+  unreadable `auction_state.json` to `.corrupt` precisely so `_save_state`'s
+  `path → .backup` rotation cannot carry it over the last good copy. The filed
+  entry knew that rename could fail and be logged-and-ignored; reading the branch
+  there were **three** defects, and the two nobody had filed were worse than the
+  one that was.
+
+  **(a)** `_save_state` rotated unconditionally, so one save after a failed
+  rename put the unreadable file on top of the backup — the exact disaster
+  `tests/test_crash_recovery.py`'s docstring opens with, reachable by a different
+  route. There is now a `_untrusted_current_file` flag: set when the rename
+  fails, it skips the rotation, and it clears after the first successful save
+  because from then on the current file is one we wrote. **One-shot on purpose** —
+  a permanent skip would freeze `.backup` at the recovered state and stop it
+  following the draft, which is why there is a test for the guard *lifting* as
+  well as for it holding.
+
+  **(b)** The loud "this is a NEW auction" banner was gated on
+  `os.path.exists(saved_path + ".corrupt")` — an artifact of the app's own rename
+  standing in for the question it actually meant, "was there a draft here". When
+  the rename failed there was no `.corrupt`, so a boot that had just lost 150
+  picks came up looking like a normal fresh start. That is the *silence* the
+  2026-08-07 work exists to end, reintroduced one branch down and undetected for
+  two weeks. Both branches now read a `had_saved_file` local captured **before**
+  the rename, and the message only names `.corrupt` when the rename actually
+  produced one — pointing an operator at a salvage file that was never written is
+  its own failure.
+
+  **(c)** The same gate ran the other way too: nothing ever deletes `.corrupt`
+  (`/reset` included), so one left over from an earlier incident made that banner
+  claim a draft could not be read when there had never been one. The app's
+  loudest notice asserting something false.
+
+  A failed rename now also warns on screen in its own right — the backup is safe
+  in software, but a directory that will not accept a rename probably will not
+  accept a save either, and that is worth knowing before another twenty picks go
+  in against it. Six new tests in
+  `TestAFailedSetAsideDoesNotCostTheBackup` / `TestAStaleCorruptFileDoesNotInventAnAlarm`,
+  driven by a fixture that fails `os.replace` **only** for a `.corrupt`
+  destination: a read-only `STATE_DIR` is the realistic cause but the wrong
+  instrument, because it breaks the `.tmp` write too and the test could then never
+  observe whether the rotation would have eaten the backup — which is the entire
+  question. All seven mutants killed, each by the test that claims it.
+
+  **A seventh test was written and deleted.** "A good state file beside a stale
+  `.corrupt` is quiet" read as coverage and could not fail: a state file that
+  loads never enters the `auction_state is None` block, so the branch is
+  unreachable and the assertion held against the pre-fix code too. Found by
+  mutation, not by reading.
+
+- **The startup banner is a list, because this change made a third message
+  reachable.** `main.py:271 (_warn_at_startup)` concatenated into one string, and
+  its own backlog entry said the fix was worth doing *"when a third warning source
+  is added, not before"*. (a) above adds one, and three are now simultaneously
+  true: the current file will not parse, setting it aside fails, and the backup
+  parses but a backfill raises. Run together in one strip the second and third
+  read as continuations of the first rather than as separate things that went
+  wrong. `_startup_warnings` is a `list[str]`; `base.html` renders one message as
+  a sentence and two or more as a `<ul>` — a single bulleted item reads as a list
+  with entries missing, which is why the branch exists rather than always
+  bulleting. `#data-warning` is untouched and stays a separate banner with its own
+  lifecycle.
+
 ### Investigated
 
 - **How much cheaper can a cold `/bid-check` be? About 1.6x, and it was not worth
@@ -578,7 +644,7 @@ nothing failed.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1238 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1299 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -683,7 +749,7 @@ nothing failed.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1194 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1252 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

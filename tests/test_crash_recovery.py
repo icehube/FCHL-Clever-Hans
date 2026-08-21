@@ -50,7 +50,8 @@ def state_dir(tmp_path):
     main._marginal_cache.clear()
     main._counterfactual_cache.clear()
     main.buyout_indicators.clear()
-    main._startup_warning = None
+    main._startup_warnings.clear()
+    main._untrusted_current_file = False
 
 
 def _draft(client, player: str, team: str, salary: float):
@@ -84,6 +85,17 @@ def _acquired(code: str) -> set[str]:
     """
     import main
     return {p.name for p in main.auction_state.teams[code].acquired_players}
+
+
+def _startup_banner(html: str) -> str:
+    """Just the startup banner, so a `<li>` count cannot pick up the navbar.
+
+    `helpers.section_of` wants a `<section>` and this banner is a `<div>` outside
+    `#app` (deliberately — see base.html). Slices to the dismiss button, which is
+    the last thing inside it.
+    """
+    start = html.index('id="startup-warning"')
+    return html[start:html.index("\u2715</button>", start)]
 
 
 def _an_available_player() -> str:
@@ -289,6 +301,42 @@ class TestDegradedStartupIsVisible:
             page = c.get("/").text
         assert 'id="startup-warning"' not in page
 
+    def test_one_warning_is_a_sentence_and_two_are_a_list(self, state_dir):
+        """Two things went wrong is two claims, not one long strip of prose.
+
+        Concatenation put them in one `<span>` with a space between, where the
+        second read as a continuation of the first. A single message stays
+        unbulleted for the mirror reason: a list of one reads as a list with
+        items missing.
+        """
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("{ truncated")
+
+        with TestClient(main.app) as c:
+            one = _startup_banner(c.get("/").text)
+        assert "<li>" not in one, "a lone message should not be bulleted"
+
+        # Now make a SECOND source fire on the same boot: the backup parses, and
+        # a backfill over it raises. Both are true, and both are worth saying.
+        def boom(state):
+            raise TypeError("'<' not supported between 'NoneType' and 'float'")
+
+        real = main._backfill_model_inputs
+        main._backfill_model_inputs = boom
+        try:
+            with TestClient(main.app) as c:
+                two = _startup_banner(c.get("/").text)
+        finally:
+            main._backfill_model_inputs = real
+
+        assert two.count("<li>") == 2, (
+            f"expected the two warnings as two items, got {two.count('<li>')}"
+        )
+        assert "backup copy" in two and "PRICES MAY BE WRONG" in two, \
+            "one of the two warnings was dropped rather than listed"
+
     def test_reset_clears_it(self, state_dir):
         """A deliberate fresh start answers the warning; leaving it up lies."""
         import main
@@ -339,6 +387,150 @@ class TestBackupSurvivesTheRestart:
             data = json.load(f)
         assert player in json.dumps(data["teams"][team]), \
             "the backup no longer holds the recovered draft"
+
+
+@pytest.fixture
+def rename_aside_fails(monkeypatch):
+    """Make ONLY the `.corrupt` rename fail, leaving every other write working.
+
+    A read-only `STATE_DIR` is the realistic cause, but it is the wrong
+    instrument: it also breaks the `.tmp` write in `_save_state`, so the save
+    raises and the test can never observe whether the rotation would have eaten
+    the backup — which is the entire question. Patching the one call isolates it,
+    and the failure is real either way (a permissions change, an NFS hiccup, a
+    Windows lock).
+    """
+    import main
+
+    real = os.replace
+
+    def selective(src, dst, *a, **kw):
+        if str(dst).endswith(".corrupt"):
+            raise OSError(13, "Permission denied")
+        return real(src, dst, *a, **kw)
+
+    monkeypatch.setattr(main.os, "replace", selective)
+
+
+class TestAFailedSetAsideDoesNotCostTheBackup:
+    """The rename is the defence; losing it must not perform the destruction.
+
+    `lifespan` renames an unreadable state file to `.corrupt` so that
+    `_save_state`'s rotation cannot carry it over the last good backup. If that
+    rename fails the old code logged a warning and carried on — and the next save
+    did exactly what the rename exists to prevent. Two more things went wrong in
+    the same branch, both because the code asked the filesystem for `.corrupt`
+    (an artifact of its own rename) when the question it meant was "was there a
+    draft here".
+    """
+
+    def test_the_backup_survives_a_further_save(self, state_dir, rename_aside_fails):
+        """The filed defect: one save used to put the corrupt file on the backup."""
+        import main
+
+        player, team = _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("{ truncated")
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            _draft(c, _an_available_player(), "SRL", 9.0)
+
+        assert not (state_dir / "auction_state.json.corrupt").exists(), \
+            "the fixture is not exercising the failure it exists to cause"
+        with open(state_dir / "auction_state.json.backup") as f:
+            data = json.load(f)
+        assert player in json.dumps(data["teams"][team]), \
+            "a failed set-aside rotated the unreadable file over the good backup"
+
+    def test_the_next_save_lands_and_the_guard_then_lifts(
+        self, state_dir, rename_aside_fails
+    ):
+        """Protecting the backup must not cost the save it is protecting it from.
+
+        The guard has to be one-shot: skipping the rotation forever would mean
+        `.backup` freezes at the recovered state and stops following the draft.
+        """
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("{ truncated")
+
+        with TestClient(main.app) as c:
+            assert c.get("/").status_code == 200
+            first = _an_available_player()
+            _draft(c, first, "SRL", 9.0)
+            assert main._untrusted_current_file is False, \
+                "the guard did not lift after a save it wrote itself"
+            second = _an_available_player()
+            _draft(c, second, "MAC", 8.0)
+
+        # The current file holds both picks, and the backup now holds the first —
+        # i.e. rotation resumed rather than staying off.
+        current = json.loads((state_dir / "auction_state.json").read_text())
+        backup = json.loads((state_dir / "auction_state.json.backup").read_text())
+        assert second in json.dumps(current), "the second pick was not saved"
+        assert first in json.dumps(backup), "rotation never resumed"
+
+    def test_it_says_saving_may_be_broken(self, state_dir, rename_aside_fails):
+        """A directory that cannot be written to is not a footnote."""
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("{ truncated")
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert "SAVING MAY BE BROKEN" in page
+        assert "backup copy" in page, "the recovery itself is no longer reported"
+
+    def test_a_forced_fresh_start_still_warns_without_a_corrupt_file(
+        self, state_dir, rename_aside_fails
+    ):
+        """The silence defect: the loud banner was gated on the rename working.
+
+        Nothing could be salvaged, so this is the boot that lost the draft — and
+        with the banner keyed on `.corrupt` existing, a failed rename made it
+        come up looking like a normal fresh start.
+        """
+        import main
+
+        _good_state_with_pick(state_dir)
+        (state_dir / "auction_state.json").write_text("not json at all")
+        (state_dir / "auction_state.json.backup").write_text("{")
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert "NEW auction" in page, "a lost draft came up looking normal"
+        # And it must not send the operator to a salvage file that was never
+        # written. The pre-fix message named `.corrupt` unconditionally.
+        assert "auction_state.json.corrupt" not in page, \
+            "names a salvage file the failed rename never created"
+        assert "still at" in page, "does not say where the unreadable file is"
+
+
+class TestAStaleCorruptFileDoesNotInventAnAlarm:
+    """`.corrupt` is never deleted — not by `/reset`, not by anything.
+
+    So it outlives the incident that made it, and a boot that reads it as
+    evidence about THIS boot makes the app's loudest banner assert something
+    false: that a draft could not be read, when there was no draft.
+    """
+
+    def test_no_state_file_and_an_old_corrupt_is_a_clean_start(self, state_dir):
+        import main
+
+        (state_dir / "auction_state.json.corrupt").write_text("{ from last week")
+
+        with TestClient(main.app) as c:
+            page = c.get("/").text
+        assert 'id="startup-warning"' not in page, \
+            "a leftover .corrupt raised an alarm about a draft that never existed"
+
+    # There was a second test here — a GOOD state file beside a stale `.corrupt`,
+    # asserting the same silence. Deleted 2026-08-21 because it could not fail:
+    # a state file that loads never enters the `auction_state is None` block at
+    # all, so the branch this class is about is unreachable and the assertion
+    # held against the pre-fix code too. Mutation-checked, not reasoned.
 
 
 def _a_pre_auction_minor() -> tuple[str, str]:

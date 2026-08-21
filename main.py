@@ -73,9 +73,23 @@ market_info: MarketInfo | None = None
 milp_solution = None
 last_trade_eval = None
 # Set by lifespan when startup degraded (backup used, fresh start despite a
-# saved file, a backfill skipped). In memory rather than on disk because the
-# claim is about THIS boot: a clean restart should not re-raise a fixed alarm.
-_startup_warning: str | None = None
+# saved file, a backfill skipped, an unreadable file that could not be set
+# aside). In memory rather than on disk because the claim is about THIS boot: a
+# clean restart should not re-raise a fixed alarm.
+#
+# A LIST, not an accumulated string. Three of these can be true at once — the
+# current file will not parse, setting it aside fails, and the backup parses but
+# a backfill raises — and concatenation ran them together as one unpunctuated
+# strip. One sentence renders as a sentence; two or more render as a list, which
+# is the only way the second one reads as a separate claim.
+_startup_warnings: list[str] = []
+
+# True when the current state file could not be read AND could not be renamed out
+# of the way, so it is still sitting where _save_state's rotation would find it.
+# Consulted there: rotating it into .backup is precisely the destruction the
+# rename exists to prevent, and a failed rename must not be the thing that
+# performs it.
+_untrusted_current_file: bool = False
 
 # Which team's roster is on screen. Held centrally so that no endpoint has to
 # remember to carry it: the previous design passed a team code through every
@@ -258,19 +272,23 @@ def _warn_at_startup(message: str) -> None:
     """Record something the operator must see about how this boot went.
 
     Startup is not a request, so there is no toast to fire; `_context` hands
-    this to base.html, which renders it as a banner until dismissed or reloaded.
-    Accumulates rather than overwrites — a boot that both skipped a backfill and
-    fell back to the backup has two things worth saying, and the second is not
-    more important than the first.
+    these to base.html, which renders them as a banner until dismissed or
+    reloaded. Accumulates rather than overwrites — a boot that both skipped a
+    backfill and fell back to the backup has two things worth saying, and the
+    second is not more important than the first.
+
+    Appends to a list rather than concatenating into one string. Three messages
+    are reachable (see `_startup_warnings`), and run together in one strip the
+    second and third read as continuations of the first rather than as separate
+    things that went wrong.
     """
-    global _startup_warning
-    _startup_warning = f"{_startup_warning} {message}" if _startup_warning else message
+    _startup_warnings.append(message)
 
 
 def _data_warning() -> str | None:
     """What the loader had to change about players.csv to make it usable.
 
-    Kept OUT of `_startup_warning` and rendered as its own banner, because the
+    Kept OUT of `_startup_warnings` and rendered as its own banner, because the
     two have opposite lifecycles and merging them breaks both. The startup
     warning is about how this BOOT went and `POST /reset` clears it — a
     deliberate fresh start answers it. The renames are about the DATA and are
@@ -302,24 +320,51 @@ def _data_warning() -> str | None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
-    global auction_state, model_params, model_prices, _startup_warning
+    global auction_state, model_params, model_prices, _untrusted_current_file
     os.makedirs(STATE_DIR, exist_ok=True)
     model_params = load_model_params()
-    _startup_warning = None  # this boot's story, not the previous one's
+    _startup_warnings.clear()  # this boot's story, not the previous one's
+    _untrusted_current_file = False
     # Recovery ladder: current -> backup -> fresh. A fresh state is 150 picks
     # thrown away, so it is the last resort rather than the first fallback.
     saved_path = os.path.join(STATE_DIR, "auction_state.json")
     auction_state = _load_saved_state(saved_path)
-    if auction_state is None and os.path.exists(saved_path):
+    # Whether there was a draft on disk to lose, recorded BEFORE the rename that
+    # may move it. Every branch below asks this rather than probing for
+    # `.corrupt`: that file is an artifact of our own rename, so testing for it
+    # answered "did the rename work" while reading as "was there a draft" — two
+    # different questions that came apart in both directions. A rename that
+    # failed left the fresh-start banner silent on a boot that had just lost 150
+    # picks, and a `.corrupt` left over from an earlier incident (nothing ever
+    # deletes one, `/reset` included) made that same banner claim a draft could
+    # not be read when there had been none.
+    had_saved_file = os.path.exists(saved_path)
+    set_aside = False
+    if auction_state is None and had_saved_file:
         # Move the unusable file aside rather than leaving it for _save_state
         # to rotate over the good backup — one restart plus one click would
-        # otherwise destroy both copies. Renaming rather than an in-memory
-        # "don't trust the current file" flag because the outcome is then
-        # visible on disk: you can see what happened without reading the log.
+        # otherwise destroy both copies. Renaming rather than only an in-memory
+        # flag because the outcome is then visible on disk: you can see what
+        # happened without reading the log.
         try:
             os.replace(saved_path, saved_path + ".corrupt")
+            set_aside = True
         except OSError as e:
-            logging.warning("Could not set aside %s: %s", saved_path, e)
+            # The rename is the whole defence, so losing it is not a footnote.
+            # `_save_state` now refuses the rotation while this is set, which
+            # keeps the backup — but saving into this directory is evidently
+            # broken, and that is worth knowing before another 20 picks are
+            # entered against it.
+            _untrusted_current_file = True
+            logging.error("Could not set aside %s: %s: %s — the backup is being "
+                          "protected in software instead", saved_path,
+                          type(e).__name__, e)
+            _warn_at_startup(
+                "Could not read the saved draft, and could not move the "
+                f"unreadable file aside either ({type(e).__name__}). The backup "
+                "is being protected in memory, but SAVING MAY BE BROKEN — check "
+                "that a pick you enter survives a reload before drafting on."
+            )
     if auction_state is None:
         auction_state = _load_saved_state(saved_path + ".backup")
         if auction_state is not None:
@@ -330,14 +375,19 @@ async def lifespan(app: FastAPI):
                 "if it is not."
             )
     if auction_state is None:
-        if os.path.exists(saved_path + ".corrupt"):
+        if had_saved_file:
             # The loud case: a state file existed and nothing could be salvaged.
             # Without this the app comes up looking like a normal fresh start.
             logging.error("No usable saved draft; starting fresh")
+            # Only name the salvage when the rename actually produced one.
+            # Pointing at a `.corrupt` that does not exist sends the operator
+            # looking for their draft in a file that was never written.
+            where = (f" The unreadable file is at {saved_path}.corrupt — "
+                     "nothing has overwritten it." if set_aside else
+                     f" The unreadable file is still at {saved_path}.")
             _warn_at_startup(
                 "Could not read the saved draft or its backup, so this is a "
-                f"NEW auction. The unreadable file is at {saved_path}.corrupt — "
-                "nothing has overwritten it."
+                f"NEW auction.{where}"
             )
         auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
@@ -811,14 +861,22 @@ def _publish_if_current[V](
 
 def _save_state():
     """Save auction state to disk atomically with backup rotation."""
+    global _untrusted_current_file
     path = os.path.join(STATE_DIR, "auction_state.json")
     backup_path = path + ".backup"
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
         f.write(auction_state.to_json())
-    if os.path.exists(path):
+    if os.path.exists(path) and not _untrusted_current_file:
         os.replace(path, backup_path)
     os.replace(tmp_path, path)
+    # Cleared only after a save has landed, and only here: from this point `path`
+    # is a file we just wrote, so the next rotation is rotating a good state and
+    # the backup is safe again. Skipping the rotation is what saves the backup
+    # when startup could not rename an unreadable file out of the way — without
+    # it, one save put the corrupt file on top of the last good copy, which is
+    # exactly the disaster the rename exists to prevent.
+    _untrusted_current_file = False
 
 
 def _legal_salary(value: float) -> float:
@@ -1097,7 +1155,7 @@ def _context(request: Request) -> dict:
         # Both read by base.html only, so they reach the screen on a full page
         # load and not on htmx partial swaps — which is what keeps them on
         # screen: a panel swap replaces panels, never the banners above them.
-        "startup_warning": _startup_warning,
+        "startup_warnings": _startup_warnings,
         "data_warning": _data_warning(),
     }
 
@@ -1660,12 +1718,12 @@ async def solve_standings(request: Request):
 @app.post("/reset", response_class=HTMLResponse)
 async def reset(request: Request):
     """Reset to fresh state from CSV data."""
-    global auction_state, model_prices, _startup_warning
+    global auction_state, model_prices
     # A deliberate fresh start answers whatever the banner was warning about —
     # leaving it up would have it read as a live alarm against a state the
     # operator just chose. Nothing here can re-degrade: build_initial_state
     # raises rather than half-loading.
-    _startup_warning = None
+    _startup_warnings.clear()
     auction_state = build_initial_state()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()

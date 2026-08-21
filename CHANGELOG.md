@@ -100,7 +100,7 @@ rediscover the same non-problem.
 
   Not a Jinja `{% else %}`: the filtering is entirely client-side and
   `bid_limits` is never empty server-side. The row is filled and toggled by JS,
-  and it **names the combination** ("No defencemen are RFA left in the pool.")
+  and it **names the combination** ("No RFA defencemen left in the pool.")
   rather than saying "no matches" — the filter buttons already show which
   filters are on, so what the operator needs is the table confirming it agrees.
 

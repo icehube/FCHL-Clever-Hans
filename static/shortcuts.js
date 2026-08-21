@@ -229,8 +229,10 @@ function showPoolEmptyState(visible) {
     row.style.display = visible ? 'none' : '';
     if (visible) return;
     var pos = playerFilters.pos === 'all' ? 'players' : POS_LABELS[playerFilters.pos];
-    var status = playerFilters.rfa === 'all' ? '' : ' are ' + playerFilters.rfa.toUpperCase();
-    row.cells[0].textContent = 'No ' + pos + status + ' left in the pool.';
+    // Status BEFORE the noun: "No RFA defencemen left", not "No defencemen are
+    // RFA left", which is what putting it after produced.
+    var status = playerFilters.rfa === 'all' ? '' : playerFilters.rfa.toUpperCase() + ' ';
+    row.cells[0].textContent = 'No ' + status + pos + ' left in the pool.';
 }
 
 function syncFilterButtons(attr, active) {

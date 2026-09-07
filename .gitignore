@@ -21,8 +21,10 @@ env/
 .env
 .env.*
 
-# Auction state snapshots (runtime data)
-data/state/
+# Auction state snapshots (runtime data). The glob covers the per-pool dirs
+# `main._default_state_dir()` derives for an alternate FCHL_PLAYERS_CSV,
+# e.g. data/state-players-23-converted/.
+data/state*/
 
 # Dropped-in copy of the pricer repo (source of model_params.json) — not part of this project
 FCHL-auction-pricer/

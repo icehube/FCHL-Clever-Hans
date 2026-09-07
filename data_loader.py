@@ -18,6 +18,13 @@ from state import AuctionState, Player, PlayerOnRoster, TeamState
 # Team codes that are real FCHL teams (not UFA/RFA placeholders)
 _PLACEHOLDER_TEAMS = {"UFA", "RFA"}
 
+# The player pool the app loads. Overridable so an alternate pool -- a converted
+# legacy season, a practice run -- can be loaded without editing the default out
+# from under a live draft. Read through this global rather than baked into a
+# default argument: a default binds at import and could not be monkeypatched.
+PLAYERS_CSV = os.environ.get("FCHL_PLAYERS_CSV", "data/players.csv")
+DEFAULT_PLAYERS_CSV = "data/players.csv"
+
 # Renames the most recent load_players() applied: original name -> [new names].
 # Module-level rather than a third element of the return tuple, because both
 # callers unpack positionally and neither wants it. Reset on every call.
@@ -173,7 +180,7 @@ def _disambiguated_names(rows: list[dict]) -> list[str]:
 
 
 def load_players(
-    path: str = "data/players.csv",
+    path: str | None = None,
     team_odds: dict[str, float] | None = None,
     goalie_wins: dict[str, float] | None = None,
 ) -> tuple[dict[str, list], dict[str, Player]]:
@@ -184,6 +191,8 @@ def load_players(
         team_players: dict mapping team_code -> {"keepers": [...], "minors": [...]}
         biddable: dict mapping player_name -> Player
     """
+    if path is None:
+        path = PLAYERS_CSV
     if team_odds is None:
         team_odds = {}
     if goalie_wins is None:
@@ -274,7 +283,7 @@ def load_players(
 
 def build_initial_state(
     teams_path: str = "data/fchl_teams.json",
-    players_path: str = "data/players.csv",
+    players_path: str | None = None,
     odds_path: str = "data/team_odds.json",
     model_params_path: str = "data/model_params.json",
 ) -> AuctionState:

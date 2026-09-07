@@ -15,6 +15,27 @@ python3 -m venv .venv
 
 Run tests with `.venv/bin/pytest tests/`.
 
+**The pool is selectable, and the saved state follows it.**
+`data_loader.PLAYERS_CSV` defaults to `data/players.csv` and is overridden by
+`FCHL_PLAYERS_CSV`; `main._default_state_dir()` then derives
+`data/state-<stem>` instead of `data/state`. That derivation is safety, not
+convenience: `lifespan` reads the saved state **before** it reads any CSV, so an
+alternate pool sharing `data/state/` would load the real draft's JSON, backfill
+it from the wrong file, and save over it — the same write-through
+`tests/conftest.py` exists to stop pytest doing. `FCHL_STATE_DIR` overrides the
+directory explicitly, both are logged at startup, and `.gitignore` covers
+`data/state*/`. The path is a **module global, not a default argument**: a
+default binds at import and could not be monkeypatched. Never export
+`FCHL_PLAYERS_CSV` while running pytest — `TestDataFingerprint` reads the global
+and fails, correctly.
+
+`data/players-23.csv` (the 2023 snapshot) is in an older schema and must go
+through `convert_legacy_players.py` first; the trap is that it encodes blank
+`STATUS` as `"0"`, which `load_players` drops **silently**, giving an empty pool
+that looks exactly like a finished draft. See
+`.claude/rules/data-formats.md` for the full conversion rules and what the
+missing columns cost the price model.
+
 ## Architecture
 
 ```

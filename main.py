@@ -62,7 +62,23 @@ from trade import (
     execute_trade,
 )
 
-STATE_DIR = "data/state"
+def _default_state_dir() -> str:
+    """Where this pool's saved draft lives.
+
+    Derived from the pool rather than left to a second environment variable the
+    operator has to remember, because forgetting it destroys a draft record:
+    `lifespan` reads the saved state BEFORE it ever reads a CSV, so booting an
+    alternate pool against `data/state/` would load the real draft's JSON,
+    backfill it from the wrong CSV, and then save over it. pytest did exactly
+    that until `conftest.py` started redirecting the directory.
+    """
+    if data_loader.PLAYERS_CSV == data_loader.DEFAULT_PLAYERS_CSV:
+        return "data/state"
+    stem = os.path.splitext(os.path.basename(data_loader.PLAYERS_CSV))[0]
+    return f"data/state-{stem}"
+
+
+STATE_DIR = os.environ.get("FCHL_STATE_DIR") or _default_state_dir()
 
 # -- Global state --
 auction_state: AuctionState | None = None
@@ -107,9 +123,13 @@ _viewed_team: str = MY_TEAM
 # The backfills take the state explicitly rather than reading the global: a
 # candidate loaded off disk has to be validated BEFORE it is installed, or a
 # half-backfilled corrupt state is already the live one by the time it raises.
-def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv") -> None:
+def _backfill_nhl_teams(state: AuctionState, csv_path: str | None = None) -> None:
     """Fill in nhl_team for roster players and log records from old state files."""
     import csv
+
+    # The pool the app is actually running on, not the default -- a state saved
+    # from an alternate pool must be backfilled from that same file.
+    csv_path = csv_path or data_loader.PLAYERS_CSV
     nhl_lookup: dict[str, str] = {}
     with open(csv_path) as f:
         for row in csv.DictReader(f):
@@ -128,7 +148,7 @@ def _backfill_nhl_teams(state: AuctionState, csv_path: str = "data/players.csv")
 
 
 def _backfill_keeper_flags(
-    state: AuctionState, csv_path: str = "data/players.csv"
+    state: AuctionState, csv_path: str | None = None
 ) -> None:
     """Restore `is_keeper` on MINOR-LEAGUE players from old state files.
 
@@ -166,6 +186,9 @@ def _backfill_keeper_flags(
     runs on the path where that was never called.
     """
     import csv
+
+    # Same reason as _backfill_nhl_teams: follow the pool actually loaded.
+    csv_path = csv_path or data_loader.PLAYERS_CSV
     with open(csv_path) as f:
         rows = list(csv.DictReader(f))
     pre_auction = {
@@ -321,6 +344,12 @@ def _data_warning() -> str | None:
 async def lifespan(app: FastAPI):
     """Load data, compute prices, solve initial MILP on startup."""
     global auction_state, model_params, model_prices, _untrusted_current_file
+    # Named on every boot because the two travel together and a mismatch is
+    # silent: an alternate pool with the default state dir means loading one
+    # season's draft and saving it over another's.
+    logging.info(
+        "player pool: %s | state dir: %s", data_loader.PLAYERS_CSV, STATE_DIR
+    )
     os.makedirs(STATE_DIR, exist_ok=True)
     model_params = load_model_params()
     _startup_warnings.clear()  # this boot's story, not the previous one's

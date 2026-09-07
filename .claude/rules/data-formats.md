@@ -93,6 +93,68 @@ This matters for salary cap rules if later sent to minors.
 
 **Minor league rules**: Minors do NOT count toward roster size or bench. Salary on cap depends on GROUP (see table).
 
+## Legacy schema (`players-23.csv`) and the alternate-pool override
+
+`data/players-23.csv` is the 2023-season snapshot committed with the repo. It
+uses an **older, narrower schema** and cannot be loaded directly:
+
+```csv
+Player,Pos,Pts,Team,Status,Salary,Bid
+Connor McDavid,F,145,GVR,START,11.4,0
+Nikita Kucherov,F,110,UFA,0,0,0
+```
+
+Four canonical columns have no legacy source — `GROUP`, `NHL TEAM`, `AGE`,
+`PRIOR FCHL TEAM` — and two conventions differ:
+
+| | legacy | canonical |
+|---|---|---|
+| blank `STATUS` | the string `0` | `""` |
+| team column | also carries `ENT` (entry-draft class) | only a code, `UFA`, or `RFA` |
+
+**The `STATUS` difference is the one that bites, because it fails silently.**
+`load_players` gates the biddable branch on `status == ""` and `UFA`/`RFA` are in
+`_PLACEHOLDER_TEAMS`, so an untranslated row matches *neither* branch and is
+dropped without a word. A column rename alone therefore loads **zero available
+players**, which on screen is indistinguishable from a finished draft.
+
+`convert_legacy_players.py` does the translation and refuses to write a file with
+no biddables. It synthesizes `GROUP` from team + status — `UFA -> 3`,
+`RFA -> RFA2`, `MINOR -> A`, otherwise `3`. `MINOR -> A` is the consequential
+one: it keeps those salaries **off cap** and out of buyout eligibility, matching
+the current file, where 145 of 149 MINOR rows are `A`-`E`. Rows on a team code
+`fchl_teams.json` does not have are held back and printed, rather than being
+swallowed by `build_initial_state` (which ignores unknown codes in silence).
+
+`NHL TEAM` and `SALARY`-as-reputation are **not recoverable**. Every converted
+player gets `DEFAULT_TEAM_PROBABILITY` and `has_lag = 0`, so two of the price
+model's ten features go flat and the top of the price distribution compresses
+($6.12M against $9.55M on the current pool). `AGE` costs nothing — it is not a
+model feature.
+
+### Selecting a pool
+
+`data_loader.PLAYERS_CSV` holds the pool path, defaulting to `data/players.csv`
+and overridable with **`FCHL_PLAYERS_CSV`**. It is a module global rather than a
+default argument, because a default binds at import and could not be
+monkeypatched; `load_players` and `build_initial_state` resolve a `None`
+sentinel against it, so an explicit path argument still wins.
+
+**The state directory follows the pool, and must.** `lifespan` reads the saved
+state *before* it reads any CSV, so an alternate pool sharing `data/state/`
+would load the real draft's JSON and then save over it. `main._default_state_dir`
+derives `data/state-<stem>` for any non-default pool; `FCHL_STATE_DIR` overrides
+it. Both are logged at startup, since a mismatch is otherwise invisible.
+
+```bash
+.venv/bin/python convert_legacy_players.py \
+    data/players-23.csv data/players-23-converted.csv
+FCHL_PLAYERS_CSV=data/players-23-converted.csv .venv/bin/uvicorn main:app --reload
+```
+
+Do **not** export `FCHL_PLAYERS_CSV` while running pytest: `TestDataFingerprint`
+reads the global and will fail, correctly.
+
 ## fchl_teams.json
 
 Team metadata, nomination order, penalties, colors, logos. Key fields: `id`, `is_my_team`, `name`, `penalty`, `colors`, `logo`, `nomination_order`, `snake_draft`.

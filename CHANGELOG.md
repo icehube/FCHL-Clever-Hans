@@ -20,6 +20,78 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-07]
+
+### Added
+
+- **An alternate player pool, selectable by environment variable, with its own
+  saved state.** `data/players-23.csv` is the 2023-season snapshot committed in
+  the very first commit (`98e9908`) and referenced by no code, test or doc since.
+  Loading it needed three things.
+
+  **A converter, because it is a different schema.** The legacy header is
+  `Player,Pos,Pts,Team,Status,Salary,Bid` against the canonical
+  `PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS,PRIOR FCHL TEAM`.
+  A column rename alone is not enough and fails **silently**: the legacy file
+  writes `"0"` where the canonical one leaves `STATUS` blank, while
+  `load_players` gates the biddable branch on `status == ""` and `UFA`/`RFA` sit
+  in `_PLACEHOLDER_TEAMS` — so all 674 free agents match *neither* branch and are
+  dropped without a word. An empty pool is indistinguishable from a finished
+  draft on screen. `convert_legacy_players.py:137 (_require_biddables)` refuses
+  to write that file at all, and `tests/test_legacy_conversion.py` asserts both
+  halves: the converted file loads 668 biddables, and the same rows with `"0"`
+  restored load none.
+
+  **Synthesized contract groups, because the legacy schema has no `GROUP`
+  column.** `UFA -> 3`, `RFA -> RFA2` (only `is_rfa` is read downstream, and the
+  two RFA groups are equivalent for auction purposes), active keepers `-> 3`, and
+  minor-leaguers `-> A`. That last one is the decision that moves money: group A
+  is outside both `MINOR_CAP_GROUPS` and `BUYOUT_ELIGIBLE_GROUPS`, so those
+  salaries stay off cap. It matches the shape of the current file, where 145 of
+  149 MINOR rows are `A`-`E`, and these legacy minors are almost all $0.5-0.7M.
+  Asserted against the two config sets **separately**, since `config.py`
+  documents at length why they must not be merged.
+
+  **31 rows on team code `ENT`** — that season's entry-draft class — are held
+  back and named on stderr. `build_initial_state` already ignored them, because
+  it only builds a `TeamState` for codes in `fchl_teams.json`, but it did so in
+  silence; a real data decision should not be invisible.
+
+  Measured on the converted pool against today's: 668 biddable against 705, 164
+  picks needed against 165, mean model price $0.83M against $0.90M. All 11 teams
+  clear the commissioner reserve rule (`remaining >= spots * MIN_SALARY`); BOT
+  sits at $45.5M for 17 spots. **Max model price is $6.12M against $9.55M**, and
+  that gap is expected rather than a bug: no biddable in the legacy file carries
+  a prior salary (0 of 668 against 324 of 705), so `has_lag` is 0 pool-wide, and
+  there is no `NHL TEAM` column, so every player gets `DEFAULT_TEAM_PROBABILITY`.
+  Two of the price model's ten features go flat. Neither is recoverable from any
+  file in the repo. `AGE` is absent too and costs nothing — it is not a model
+  feature, confirmed against `model_params.json`'s coefficient keys.
+
+- **`FCHL_PLAYERS_CSV` and `FCHL_STATE_DIR`.** `data_loader.PLAYERS_CSV` reads
+  the pool path into a module global rather than a default argument — a default
+  binds at import and could not be monkeypatched — and `load_players` /
+  `build_initial_state` resolve a `None` sentinel against it, so an explicit path
+  argument still wins.
+
+  **The state directory follows the pool by construction**, which is the
+  safety-critical half. `lifespan` reads the saved state *before* it ever reads a
+  CSV, so booting an alternate pool against `data/state/` would load the real
+  draft's JSON, backfill it from the wrong CSV, and then save over it — the same
+  write-through that `tests/conftest.py` was written to stop pytest doing. So
+  `main.py:65 (_default_state_dir)` derives `data/state-<stem>` for any
+  non-default pool, rather than leaving it to a second variable the operator has
+  to remember; `FCHL_STATE_DIR` overrides it explicitly. `main.py:126
+  (_backfill_nhl_teams)` and `main.py:150 (_backfill_keeper_flags)` follow the
+  same global instead of hardcoding `data/players.csv`, and startup logs the pool
+  and the directory together, because a mismatch between them is otherwise
+  silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
+  derived directories.
+
+  `TestDataFingerprint` is unaffected: the default is unchanged. It reads the
+  global, so running pytest with `FCHL_PLAYERS_CSV` exported fails it — correct,
+  and loud.
+
 ## [2026-08-21]
 
 ### Fixed
@@ -76,7 +148,7 @@ rediscover the same non-problem.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:271 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:294 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup
@@ -715,7 +787,7 @@ nothing failed.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1299 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1328 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -820,7 +892,7 @@ nothing failed.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1252 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1281 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

@@ -92,6 +92,23 @@ rediscover the same non-problem.
   global, so running pytest with `FCHL_PLAYERS_CSV` exported fails it — correct,
   and loud.
 
+### Fixed
+
+- **The startup line naming the pool and the state dir printed nothing.** It was
+  logged on the root logger, which uvicorn leaves at WARNING while configuring
+  only its own — so the call read as correct in the source and emitted nothing in
+  a real run. Measured against a live server: four uvicorn startup lines, and
+  none of ours. It now goes through `uvicorn.error`. Caught only because the
+  claim "logged at startup" was checked against a running server rather than
+  against the source, which is the only place that difference is visible.
+
+  Its test attaches a handler to that logger **directly** instead of reading
+  `caplog`, which sees records only by propagation to root. Uvicorn's own config
+  marks the parent `uvicorn` logger `propagate: False`, so once any test starts a
+  real server — `test_browser_ui.py` does — those records stop reaching root. The
+  caplog version passed alone and failed in the full suite, for a reason that had
+  nothing to do with what it checks.
+
 ## [2026-08-21]
 
 ### Fixed
@@ -787,7 +804,7 @@ nothing failed.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1328 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1331 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -892,7 +909,7 @@ nothing failed.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1281 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1284 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

@@ -259,3 +259,42 @@ class TestTheStateDirFollowsThePool:
     def test_the_directory_is_named_for_the_pool(self, monkeypatch):
         monkeypatch.setattr(data_loader, "PLAYERS_CSV", "data/somewhere/pool-x.csv")
         assert main._default_state_dir() == "data/state-pool-x"
+
+    def test_startup_names_the_pool_and_the_directory(self):
+        """On uvicorn's logger, which is the only reason it is visible.
+
+        uvicorn configures its own loggers and leaves root at WARNING, so a
+        plain `logging.info` here prints nothing in a real run while reading as
+        correct in the source -- measured against a live server, which showed
+        four uvicorn lines and none of ours. The logger NAME is therefore the
+        assertion; the message alone passes on either.
+
+        The handler is attached to that logger DIRECTLY rather than read off
+        `caplog`, which reaches records only by propagation to root. Uvicorn's
+        own config gives the parent `uvicorn` logger `propagate: False`, so once
+        any test has started a real server -- `test_browser_ui.py` does -- these
+        records stop reaching root and a caplog version of this test fails for a
+        reason that has nothing to do with what it checks. It did, in the full
+        suite, while passing on its own.
+        """
+        import logging
+
+        from fastapi.testclient import TestClient
+
+        logger = logging.getLogger("uvicorn.error")
+        seen: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = seen.append
+        previous = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        try:
+            with TestClient(main.app):
+                pass
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(previous)
+
+        startup = [r for r in seen if "player pool" in r.getMessage()]
+        assert startup, "startup did not log the pool on uvicorn's logger"
+        assert main.STATE_DIR in startup[-1].getMessage()

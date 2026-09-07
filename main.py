@@ -347,7 +347,10 @@ async def lifespan(app: FastAPI):
     # Named on every boot because the two travel together and a mismatch is
     # silent: an alternate pool with the default state dir means loading one
     # season's draft and saving it over another's.
-    logging.info(
+    # Through uvicorn's logger, not the root one: uvicorn configures only its
+    # own loggers and leaves root at WARNING, so `logging.info` here printed
+    # nothing at all in a real run while looking perfectly correct in the source.
+    logging.getLogger("uvicorn.error").info(
         "player pool: %s | state dir: %s", data_loader.PLAYERS_CSV, STATE_DIR
     )
     os.makedirs(STATE_DIR, exist_ok=True)

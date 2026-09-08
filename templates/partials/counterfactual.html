@@ -18,8 +18,16 @@
            this div instead of an id. Mirrors player_chart.html's close button.
            The inline mount reloads on the next whole-panel swap (hx-trigger
            ="load" in bid_panel.html), which is right: dismissing stale numbers
-           should not suppress fresh ones. #}
-        <button onclick="this.closest('.counterfactual-card').remove()" class="btn btn-xs btn-ghost"
+           should not suppress fresh ones.
+
+           Re-hiding #explanation is what stops a close leaving an empty card
+           behind: the panel's empty state is the section's `hidden` attribute,
+           decided server-side, so removing the card alone left a visible box
+           with nothing in it. `if(s)` because this body is ALSO mounted inside
+           the bid panel, where there is no #explanation ancestor and `closest`
+           returns null. Hides the mount, never removes it — it is the target of
+           every "?" link. #}
+        <button onclick="const c=this.closest('.counterfactual-card'),s=c.closest('#explanation');c.remove();if(s)s.hidden=true" class="btn btn-xs btn-ghost"
                 aria-label="Close the counterfactual" title="Close">&times;</button>
     </div>
 

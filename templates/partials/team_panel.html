@@ -23,7 +23,7 @@
             <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.total_salary) }}M</div>
         </div>
         {% if viewed_team.penalties > 0 %}
-        <div class="tooltip tooltip-bottom" data-tip="Buyout penalty: 50% of bought-out player's salary stays on the cap">
+        <div class="tooltip tooltip-bottom" data-tip="Dead cap — charged against this team with no player attached, so it cannot be traded or bought out away. Usually a buyout (CBA 11.4 leaves 50% of the salary on the cap); league penalties in fchl_teams.json land here too.">
             <div class="text-xs opacity-60">Penalties</div>
             <div class="text-sm font-semibold text-warning">${{ "%.1f"|format(viewed_team.penalties) }}M</div>
         </div>

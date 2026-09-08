@@ -25,20 +25,24 @@
         </button>
     </div>
     {% set any_penalties = teams.values()|selectattr('penalties', 'gt', 0)|list|length > 0 %}
-    {# 12 columns (11 when no team carries a penalty), min-content 868px — still
-       the widest thing in the app, and the
-       element that used to set its whole grid column's floor and push
-       #team-panel off-screen (see .auction-grid in style.css). It scrolls
-       itself now; without this wrapper it paints across the team panel.
+    {# 11 columns (10 when no team carries a penalty) — still the widest thing
+       in the app, and the element that used to set its whole grid column's
+       floor and push #team-panel off-screen (see .auction-grid in style.css).
+       It scrolls itself now; without this wrapper it paints across the team
+       panel.
 
-       Was 955px until 2026-08-13, when the full team name and the "Stopped
-       Drafting" label came out. That bought only 87px, and measuring per column
-       says why: min-content is each column's longest WORD, not its longest
-       string, so a two-word name never cost more than "Johannesburg". Every one
-       of the 12 columns is now floored by its own HEADER — Remaining 102,
-       Spendable 100, Cap Used 92, Max Bid 83, Penalty 81 — summing to exactly
-       the 868. Nothing in the body can narrow this table further; only shorter
-       headers can, and that trades legibility in a dense numeric table. See
+       min-content measured **815px** on a fresh state (no penalty column),
+       2026-09-07, by tests/measure_layout.py. Down from 868px with the
+       Spendable column, which is the number to distrust in the older note: the
+       per-column decomposition recorded in BACKLOG.md put Spendable at 100px,
+       so subtracting predicted ~768 and the browser said 815. Take the figure
+       from the instrument, never from arithmetic over the parts.
+
+       What still holds is the shape of the constraint: min-content is each
+       column's longest WORD, not its longest string, so nothing in the table
+       BODY can narrow it — that is why removing the full team name in
+       2026-08-13 bought only 87px. Only shorter headers can, and that trades
+       legibility in a dense grid of money figures that all look alike. See
        BACKLOG.md before reaching for it. #}
     <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
@@ -51,9 +55,8 @@
                 <th data-sort-col="4" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Cap Used</th>
                 {% if any_penalties %}<th data-sort-col="5" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Penalty</th>{% endif %}
                 <th data-sort-col="{{ 6 if any_penalties else 5 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Remaining</th>
-                <th data-sort-col="{{ 7 if any_penalties else 6 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Spendable</th>
-                <th data-sort-col="{{ 8 if any_penalties else 7 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
-                <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
+                <th data-sort-col="{{ 7 if any_penalties else 6 }}" data-sort-type="currency" onclick="sortTable(this)" class="cursor-pointer">Max Bid</th>
+                <th data-sort-col="{{ 8 if any_penalties else 7 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">Pts</th>
                 {# The two Proj figures are NOT computed the same way until you
                    ask them to be, and the tooltip has to say so — read as one
                    sortable column beside a rank badge they look comparable.
@@ -77,7 +80,7 @@
                    WORSE (mean |err| 94 for this one against 147/176/401), so
                    the only thing better than the heuristic is the solve itself.
                    Hence the button rather than a new formula. See BACKLOG.md. #}
-                <th data-sort-col="{{ 10 if any_penalties else 9 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">
+                <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">
                     <span class="tooltip tooltip-bottom" data-tip="Projected points once the roster is filled. YOURS is the optimizer's actual best roster within your real budget. An opponent's is a quick estimate that can read either side of what they can actually reach — measured up to 14% high — until you press Solve Standings, which replaces every opponent's figure with a real optimizer solve. Any pick returns the column to estimates.">Proj</span>
                     {% include "partials/standings_basis.html" %}
                 </th>
@@ -112,7 +115,6 @@
             <td>${{ "%.1f"|format(t.total_salary) }}M</td>
             {% if any_penalties %}<td class="{% if t.penalties > 0 %}text-warning{% endif %}">${{ "%.1f"|format(t.penalties) }}M</td>{% endif %}
             <td>${{ "%.1f"|format(t.remaining_budget) }}M</td>
-            <td>${{ "%.1f"|format(t.spendable_budget) }}M</td>
             <td>${{ "%.1f"|format(t.physical_max_bid) }}M</td>
             {% set proj = projections.get(code, {}) if projections is defined else {} %}
             <td>{{ proj.get("current", 0) }}</td>

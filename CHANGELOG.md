@@ -20,6 +20,110 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-07b]
+
+Four findings from draft-day testing. Two were questions with answers rather
+than defects, and the answers are the deliverable; two were real.
+
+### Changed
+
+- **The empty Counterfactual panel now disappears instead of showing a bare
+  heading.** There are two mounts and only one carried the `<h2>`: the bid
+  panel's inline card (`#bid-counterfactual`, `hx-trigger="load"`) has none,
+  while `#explanation` is in the left column on every page load with the heading
+  rendered unconditionally. So during an auction the auto-opened card sat beside
+  a second panel showing nothing but the word "Counterfactual" and a "click ?"
+  prompt. A populated card already names the player in its own `<h3>`, so the
+  generic title was a second heading saying less.
+
+  `hidden`, never removed — every "?" link is `hx-target="#explanation"
+  hx-swap="outerHTML"`, and an outerHTML swap into a missing target is a dead
+  swap the panel could not come back from. Same rule as `buyout_scan.html`: only
+  the visibility is conditional, never the element.
+
+  This also fixes a **close-button orphan**. The prompt was behind `{% if not
+  counterfactual %}`, evaluated server-side, so it was absent from a populated
+  response and closing the card left a visible empty box under a heading. The
+  close button now re-hides the section, guarded with `if(s)` because the same
+  body is mounted inside the bid panel where there is no `#explanation`
+  ancestor. Still `closest()`, never `getElementById`.
+
+  **A `[hidden]{display:none!important}` was added to `style.css` for this and
+  then removed, because measuring said it did nothing.** The reasoning that
+  motivated it is sound and wrong: `.card` sets `display: flex`, and an author
+  rule beats the UA stylesheet whatever the order. But the vendored Tailwind
+  preflight ships its own `[hidden]{display:none}` and is injected after the
+  DaisyUI link, so it wins the equal-specificity tie on source order. Measured
+  in Chrome — the section computes to `display: none` with or without the rule.
+  Caught by mutation testing: deleting the rule killed no test, which is the
+  signal that the rule was carrying nothing. The comment shipped with it
+  asserted the opposite as fact and would have been believed.
+
+- **"Marginal" is shown only when it differs from "Worth up to".** They were the
+  same number in every normal state: `value_cap = round(min(marginal,
+  physical_max_bid), 1)` and `compute_marginal_value` is itself bounded by
+  `physical_max_bid` at four of its five exits. So the panel printed one figure
+  under two labels with two tooltips describing different concepts.
+
+  The one reachable divergence is an over-committed team, where
+  `physical_max_bid` floors to $0.0–0.4M while the marginal falls back to
+  `MIN_SALARY` — max gap $0.5M, and the panel already reads "can't bid". That
+  regime had **no test at all**; it does now, both halves. Compared as
+  DISPLAYED (`"%.1f"|format` on both) rather than as stored, since `value_cap`
+  is pre-rounded and `marginal_value` is raw — the same rule as
+  `market.is_capped`. The figure is now formatted too; it printed a raw float.
+
+  Making it conditional **failed the tooltip-containment suite**, which is what
+  that suite is for: `TestTooltipsStayInsideTheirPanel` holds a `required` map of
+  tooltips it must actually observe, so a template that stops rendering one fails
+  loudly instead of quietly measuring less. The cheap response — delete the
+  entry — would have dropped the bubble from coverage on the very day it became
+  the harder one to reach. Instead the class gained an `OVER_COMMITTED` state: a
+  `helpers.squeeze` on BOT rather than a scenario, because no scenario reaches
+  that regime. One width (1024, the tightest 3-col track), and it asserts
+  `physical_max_bid < MIN_SALARY` first so a squeeze that missed cannot be
+  reported as a missing tooltip.
+
+- **The Spendable column is gone from League State.** Display only — the
+  `spendable_budget` property stays, since `TeamState.physical_max_bid` is built
+  on it. The team-panel *tile* stays as well.
+
+  Renumbering `data-sort-col` was the risk, not the deletion: `sortTable`
+  indexes `a.cells[col]` directly, so a stale index does not fail — it silently
+  sorts a **different** column while the arrow appears over the one clicked. A
+  new guard asserts every `data-sort-col` equals its header's own position, in
+  both `any_penalties` states, which is the only thing that could catch it;
+  `test_every_row_has_a_cell_for_every_header` pins counts and stays correct
+  under an offset.
+
+  **The width note was re-measured, not recalculated**, and it is a good thing:
+  the per-column decomposition in `BACKLOG.md` puts Spendable at 100px, so
+  subtracting predicted ~768px, and the browser said **815px** (fresh state, no
+  penalty column, `tests/measure_layout.py`). Both records now say the
+  decomposition explains why headers are the floor and is not an additive model.
+
+- **The Penalty tooltip no longer asserts a buyout.** `team_panel.html` said
+  "Buyout penalty: 50% of bought-out player's salary stays on the cap" — untrue
+  in the two squeezed scenarios, and untrue for JHN and LGN, whose $0.3M comes
+  from `fchl_teams.json`. It now says what the number is (dead cap, no player
+  attached) and names buyouts as the usual source rather than the only one. The
+  League State column needed no change: its header is the bare word "Penalty"
+  with no tooltip, so it claims nothing.
+
+### Investigated
+
+- **Why scenario penalties are $9–11M on every team: by design, not a bug.**
+  `scenarios._squeeze` *assigns* `penalties` as a dead-cap lever so
+  `physical_max_bid` lands on a target, and it replaces rather than adds — it
+  discards JHN's and LGN's real $0.3M. Only `drained-late-draft` and
+  `full-roster-still-bidding` call it, and both squeeze all 11 teams including
+  BOT; the other four scenarios leave penalties untouched. The band is the
+  measured one `scenarios.py` documents: draining to $12.0M needs $9.0–11.0M of
+  dead cap per team. No buyout path runs during scenario construction — three of
+  the four `penalties +=` sites operate on deep copies — and the $M formatting is
+  correct. Confirmed against a fresh state, which reads $0.0M everywhere. The
+  only thing wrong was the tooltip, fixed above.
+
 ## [2026-09-07]
 
 ### Added

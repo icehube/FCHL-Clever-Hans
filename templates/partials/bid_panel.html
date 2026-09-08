@@ -70,11 +70,28 @@
                a real price had falsified the forecast. #}
             <span class="tooltip tooltip-bottom" data-tip="No forecast available for this bid">Should win it: &mdash;</span>
             {% endif %}
-            {# Answers "why doesn't this match the Price column?" — the question
-               the old wording ("ignoring market context") invited without
-               resolving. Marginal is about YOUR roster; Price is about the
+            {# Shown ONLY when the value cap clamped it, because otherwise it is
+               the number two labels to its left, printed again.
+               `value_cap = round(min(marginal, physical_max_bid), 1)` and
+               `compute_marginal_value` is itself bounded by `physical_max_bid`
+               at four of its five exits, so the two agree in every state but
+               one: an over-committed team, where physical_max_bid floors to
+               $0.0-0.4M while the marginal falls back to MIN_SALARY
+               (optimizer.py, the "cannot roster him even at the floor" exit).
+               Max gap $0.5M. Printing it unconditionally meant two labels, two
+               tooltips describing different concepts, and one number.
+
+               Compared as DISPLAYED, not as stored: value_cap is already
+               rounded to 1dp and marginal_value is raw, so a bare `!=` would
+               show the row for a floating-point tail nobody can see. Same rule
+               as market.is_capped.
+
+               When it does show, it answers "why doesn't this match the Price
+               column?" — Marginal is about YOUR roster, Price is about the
                market's, and they are supposed to disagree. #}
-            <span class="tooltip tooltip-bottom" data-tip="What he adds to YOUR optimal roster — not what he is worth in general. It is below his Price whenever you already have that position covered, and above it when he fills a hole nobody else can. A big gap either way is the tool working, not a mispricing.">Marginal: ${{ bid_advice.marginal_value }}M</span>
+            {% if "%.1f"|format(bid_advice.marginal_value) != "%.1f"|format(bid_advice.value_cap) %}
+            <span class="tooltip tooltip-bottom" data-tip="What he adds to YOUR optimal roster — not what he is worth in general. It is above 'Worth up to' here because your budget cannot reach it: the cap is what you can physically bid, this is what he would be worth if you could.">Marginal: ${{ "%.1f"|format(bid_advice.marginal_value) }}M</span>
+            {% endif %}
             {% if bid_advice.uncontested %}
             <span class="tooltip tooltip-bottom" data-tip="No opponents left in the bidding — nobody can push the price higher, so the ceiling no longer constrains you">Ceiling: &mdash;</span>
             {% else %}

@@ -25,6 +25,7 @@ pytest.importorskip("playwright.sync_api", reason="pip install -r requirements-d
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 import main  # noqa: E402
+from config import MIN_SALARY  # noqa: E402
 from tests.helpers import pool_top, squeeze  # noqa: E402
 
 pytestmark = pytest.mark.browser
@@ -897,10 +898,25 @@ class TestTooltipsStayInsideTheirPanel:
     # case where the panel is widest, 1024 the tightest 3-col track (~329px), and
     # 1280 the width the draft is actually run at. A left-anchored bubble in a
     # horizontally scrollable table is most at risk at the narrow end.
+    #
+    # `OVER_COMMITTED` is NOT a scenario — it is a squeeze applied to a fresh
+    # state, and it has its own branch below. Since 2026-09-07 the bid panel
+    # prints "Marginal" only when the value cap clamped it, which is reachable
+    # in exactly one regime: a team so far over the cap that `physical_max_bid`
+    # floors below `MIN_SALARY` while the marginal falls back to it. No scenario
+    # produces that, so without this state the bubble never renders and the
+    # `required` check below fails — which would be that check doing its job,
+    # not a reason to drop the entry.
+    OVER_COMMITTED = "over-committed"
+
     STATES = tuple((w, None) for w in WIDTHS) + (
         (375, "endgame-ceiling-binds"),
         (1024, "endgame-ceiling-binds"),
         (1280, "endgame-ceiling-binds"),
+        # 1024 alone, for the same cost reason as above: it is the tightest
+        # 3-col track (~329px), where a centred `tooltip-bottom` bubble is most
+        # likely to leave the panel it belongs to.
+        (1024, OVER_COMMITTED),
     )
 
     PROBE = """() => {
@@ -966,6 +982,24 @@ class TestTooltipsStayInsideTheirPanel:
             pg = context.new_page()
             if state is None:
                 pg.request.post(f"{live_server}/reset")
+            elif state == self.OVER_COMMITTED:
+                # In-process, which is what `live_server` is for: no scenario
+                # puts a team this far over the cap, and reaching in says it in
+                # one line (`tests/helpers.squeeze`, same recipe as
+                # `TestMarginalOnlyShowsWhenItDiffers`).
+                pg.request.post(f"{live_server}/reset")
+                bot = main.auction_state.teams[main.MY_TEAM]
+                squeeze(
+                    main.MY_TEAM,
+                    round(bot.total_spots_remaining * MIN_SALARY - 0.3, 1),
+                )
+                main._recompute()
+                assert bot.physical_max_bid < MIN_SALARY, (
+                    "the squeeze did not reach the clamped regime, so the "
+                    "Marginal row never renders and the completeness check "
+                    "below would fail for a reason that has nothing to do "
+                    "with tooltips"
+                )
             else:
                 pg.request.post(f"{live_server}/load-scenario", form={"name": state})
             _open(pg, live_server)
@@ -1018,6 +1052,11 @@ class TestTooltipsStayInsideTheirPanel:
         # Caught by mutation, which is the only thing that would have caught it.
         required = {
             "Worth up to (bid panel)": "HARD LIMIT",
+            # Conditional since 2026-09-07 and therefore rendered by exactly one
+            # of the STATES above. Keeping it required is the point: the cheap
+            # response to the failure this caused was to delete the line, which
+            # would have stopped measuring the bubble entirely on the day it
+            # became the harder one to reach.
             "Marginal (bid panel)": "What he adds to YOUR optimal roster",
             "Sigma (price chart)": "How SPREAD OUT",
             # Was "Computed two ways" until 2026-08-17, when the tooltip was
@@ -1114,6 +1153,22 @@ class TestMidBidClutterCanBeDismissed:
         assert page.locator("#bid-counterfactual").count() == 1, (
             "the inline mount is gone, so the bid panel's lazy load has nowhere "
             "to land on the next whole-panel swap"
+        )
+        # ...and it has to go BACK to hidden. The panel's empty state IS the
+        # section's `hidden` attribute, decided server-side, so removing the
+        # card alone left a visible empty box where a heading and a prompt used
+        # to be.
+        #
+        # Asserted as computed visibility rather than as the attribute, because
+        # the attribute alone is not self-evidently enough: `.card` sets
+        # `display: flex` and would beat the UA stylesheet. It happens to be
+        # enough (the vendored Tailwind preflight ships its own `[hidden]` rule
+        # and lands after DaisyUI), but that is a fact about the vendored CSS,
+        # not about this markup — so check what the browser paints.
+        assert page.locator("#explanation").is_hidden(), (
+            "closing the card left #explanation visible and empty — the close "
+            "button did not re-hide the mount, or something in the vendored CSS "
+            "stopped `hidden` from hiding a .card"
         )
 
     def test_bidding_a_pick_dismisses_that_recommendation_only(self, page, live_server):

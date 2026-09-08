@@ -7,13 +7,14 @@ from contextlib import contextmanager
 
 import pytest
 
-from config import MIN_SALARY, MINOR_CAP_GROUPS, SALARY_CAP
+from config import MIN_SALARY, MINOR_CAP_GROUPS, MY_TEAM, SALARY_CAP
 from tests.helpers import (
     a_buyout_candidate,
     a_roster_player,
     assign,
     buyout_options,
     pool_top,
+    set_headroom,
     trade_choices,
     section_of,
     squeeze,
@@ -978,7 +979,7 @@ class TestExplain:
         for url in (f"/explain/{player}", f"/explain/{player}?inline=1"):
             body = client.get(url).text
             assert "counterfactual-card" in body, url
-            assert "this.closest('.counterfactual-card').remove()" in body, url
+            assert "this.closest('.counterfactual-card')" in body, url
             assert "getElementById" not in body, (
                 f"{url} closes by id — mounted twice, so that removes the FIRST "
                 f"counterfactual in the document, not the one clicked"
@@ -1500,6 +1501,60 @@ class TestRenderingWhenTheOptimizerFails:
         )
 
 
+class TestMarginalOnlyShowsWhenItDiffers:
+    """"Worth up to" and "Marginal" were the same number in every normal state.
+
+    `value_cap = round(min(marginal, physical_max_bid), 1)` and
+    `compute_marginal_value` is itself bounded by `physical_max_bid` at four of
+    its five exits, so the panel printed one figure under two labels with two
+    tooltips calling them different concepts. The one regime where they diverge
+    had no test at all before this class.
+    """
+
+    def _advice(self, client):
+        player = pool_top()[0]
+        return client.post(
+            "/bid-check",
+            data={"player": player, "current_price": "0.5", "bidders": f"{MY_TEAM},SRL"},
+        ).text
+
+    def test_it_is_absent_when_it_equals_the_cap(self, client):
+        assert "Worth up to" in (body := self._advice(client))
+        assert "Marginal" not in body, (
+            "Marginal is being printed when it equals 'Worth up to' — the same "
+            "number twice, two labels apart"
+        )
+
+    def test_it_is_shown_when_the_cap_clamped_it(self, client):
+        """An over-committed team: spendable negative, so `physical_max_bid`
+        floors below `MIN_SALARY` while the marginal falls back to it.
+
+        This is the ONLY reachable divergence, and it is what makes the row
+        worth rendering at all — here the two figures genuinely mean different
+        things ("what you can bid" against "what he would be worth").
+        """
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        spots = main.auction_state.teams[MY_TEAM].total_spots_remaining
+        set_headroom(bot, round(spots * MIN_SALARY - 0.3, 1))
+        main._recompute()
+        assert bot.physical_max_bid < MIN_SALARY, (
+            "the fixture did not reach the clamped regime, so the assertion "
+            "below would pass for the wrong reason"
+        )
+
+        body = self._advice(client)
+        assert "Marginal" in body
+        cap = re.search(r"Worth up to: <strong>\$([\d.]+)M", body)
+        marginal = re.search(r"Marginal: \$([\d.]+)M", body)
+        assert cap and marginal, body[:400]
+        assert cap.group(1) != marginal.group(1), (
+            "the row rendered but shows the same figure — the guard is not "
+            "comparing what the panel prints"
+        )
+
+
 class TestLeagueStateIsNarrow:
     """The densest table in the app answers by code and by glyph, not in prose.
 
@@ -1546,6 +1601,46 @@ class TestLeagueStateIsNarrow:
                     f"penalties={penalties} — the two `any_penalties` guards "
                     f"disagree, so a column is silently offset"
                 )
+
+    def test_every_sort_index_matches_its_own_column(self, client):
+        """`data-sort-col` must equal the header's real position in the row.
+
+        `sortTable` indexes `a.cells[col]` directly (`static/shortcuts.js`), so a
+        stale index does not fail — it silently sorts a DIFFERENT column while
+        the arrow appears over the one clicked. Nothing else can catch that:
+        `test_every_row_has_a_cell_for_every_header` above pins header-to-cell
+        COUNTS, which stay correct under a renumbering mistake.
+
+        Both `any_penalties` states, because the indices are written as
+        `{{ n if any_penalties else n-1 }}` and a hand-edit can get one branch
+        right and the other wrong. Written when the Spendable column was removed
+        and every header after it had to shift down one.
+        """
+        import main
+
+        for penalties in (True, False):
+            for t in main.auction_state.teams.values():
+                t.penalties = 0.3 if penalties else 0.0
+                t._invalidate_cache()
+            panel = self._panel(client)
+            head = panel[panel.index("<thead>"):panel.index("</thead>")]
+            cells = re.findall(r"<th\b[^>]*>", head)
+            for position, tag in enumerate(cells):
+                declared = re.search(r'data-sort-col="(\d+)"', tag)
+                if declared is None:
+                    continue  # unsortable columns carry no index
+                assert int(declared.group(1)) == position, (
+                    f"header {position} declares data-sort-col="
+                    f"{declared.group(1)} with penalties={penalties} — "
+                    f"sortTable would sort column {declared.group(1)} instead"
+                )
+
+    def test_it_has_no_spendable_column(self, client):
+        """Removed 2026-09-07 — Remaining is the figure the operator reads, and
+        Spendable is derivable from it. The `spendable_budget` PROPERTY stays;
+        `TeamState.physical_max_bid` is built on it.
+        """
+        assert "Spendable" not in self._panel(client)
 
     def test_it_shows_codes_and_not_full_names(self, client):
         import main

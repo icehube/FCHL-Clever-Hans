@@ -76,6 +76,18 @@ def _a_player(skip: set[str] | None = None):
     )
 
 
+def _explanation_tag(html: str) -> str:
+    """The opening `<section id="explanation">` tag alone.
+
+    Asserted on the TAG rather than on the whole body, because the word
+    "hidden" appears in unrelated markup and `"hidden" in r.text` would pass
+    against a section that carries no such attribute.
+    """
+    m = re.search(r'<section[^>]*id="explanation"[^>]*>', html)
+    assert m, "no #explanation section in the response"
+    return m.group(0)
+
+
 class TestCacheStaysTrue:
     """A cached counterfactual must never differ from a freshly computed one."""
 
@@ -392,8 +404,26 @@ class TestBothMountsRender:
         assert r.status_code == 200
         assert re.sub(r"\s+", "", r.text) == ""
 
-    def test_unknown_player_standalone_keeps_its_prompt(self, client):
+    def test_unknown_player_standalone_hides_the_mount_but_keeps_it(self, client):
+        """The panel's empty state is `hidden`, not a prompt.
+
+        Keeping the SECTION is the load-bearing half: every "?" link is an
+        outerHTML swap into `#explanation`, so a response that dropped it would
+        leave the page with no target and the panel could never come back.
+
+        It used to carry a "Click ?" prompt under a "Counterfactual" heading,
+        which during an auction sat beside the bid panel's own inline card
+        saying nothing.
+        """
         r = client.get("/explain/Nobody")
         assert r.status_code == 200
-        assert 'id="explanation"' in r.text
-        assert "Click" in r.text
+        assert "counterfactual-card" not in r.text
+        assert " hidden" in _explanation_tag(r.text)
+
+    def test_a_populated_panel_is_not_hidden(self, client):
+        """The other half. A template that hid the section unconditionally
+        satisfies the test above while making the panel permanently invisible.
+        """
+        r = client.get(f"/explain/{_a_player().name}")
+        assert "counterfactual-card" in r.text
+        assert " hidden" not in _explanation_tag(r.text)

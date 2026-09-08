@@ -1,10 +1,28 @@
-<section class="card bg-base-200 shadow-md p-4" id="explanation">
-    <h2 class="card-title text-accent text-base mb-2">Counterfactual</h2>
+{# Hidden, never absent, when there is nothing to show.
+
+   Every "?" link in the players table is `hx-target="#explanation"
+   hx-swap="outerHTML"`, so the section has to exist for the swap to land — an
+   outerHTML swap into a missing target is a dead swap and the panel could never
+   come back. Same rule as buyout_scan.html's unconditional wrapper: only the
+   visibility is conditional, never the element.
+
+   The heading went with it. A populated card names the player in its own <h3>,
+   so a generic "Counterfactual" title above that is a second heading saying
+   less; and the bid panel mounts the same body inline during an auction, which
+   left this panel sitting beside the live card showing nothing but a title and
+   a prompt. Hiding the empty panel costs the "click ?" hint, which the "?"
+   buttons already carry themselves.
+
+   `hidden` is enough here and no CSS of ours is needed, which is worth knowing
+   because the opposite is the obvious guess: `.card` sets `display: flex`, and
+   an author rule beats the UA stylesheet whatever the order. Measured in Chrome
+   2026-09-07 — the vendored Tailwind preflight's own `[hidden]{display:none}`
+   is injected after the DaisyUI link, so it wins the equal-specificity tie on
+   source order and the section computes to `display: none`. A
+   `[hidden]{display:none!important}` added to style.css for this changed
+   nothing and was removed; the browser test asserts the OUTCOME, so whichever
+   sheet provides it, a regression still fails. #}
+<section class="card bg-base-200 shadow-md p-4" id="explanation"
+         {% if not (counterfactual is defined and counterfactual) %}hidden{% endif %}>
     {% include "partials/counterfactual.html" %}
-    {# This panel's own empty state. The bid panel mounts the same body and
-       wants no prompt there — it has no "?" to click, and its counterfactual
-       arrives by itself. #}
-    {% if not (counterfactual is defined and counterfactual) %}
-    <p class="text-sm opacity-50">Click "?" on a player to see the counterfactual analysis.</p>
-    {% endif %}
 </section>

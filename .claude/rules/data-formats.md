@@ -152,6 +152,60 @@ the team he plays for now. That is coherent rather than a compromise, because
 prior salary, so `has_lag = 0` pool-wide and that one feature stays flat. `AGE`
 costs nothing; it is not a model feature.
 
+## Streamlit auto-save schema (`25-26 Starting Rosters.json`)
+
+`data/25-26 Starting Rosters.json` is an auto-save from the Streamlit tool this
+app replaced, written 2025-09-05 — days before the draft the league workbook
+records on its `2025` sheet. It is the only genuine **pre-draft** snapshot of a
+season we have that also carries **that season's own projections**, which is why
+it earns a converter of its own rather than being folded into the legacy one.
+
+```json
+{"timestamp": "...", "players_data": [
+  {"PLAYER": "...", "GROUP": "3", "POS": "F", "FCHL TEAM": "UFA",
+   "NHL TEAM": "TBL", "AGE": 32, "STATUS": "NO", "SALARY": 0.0,
+   "Dobber": 124.0, "DtZ": 114.0, "PTS": 119, "Draftable": "YES",
+   "Z-score": 5.29, "BID": 8.3}],
+ "teams_data": {...}, "auction_results": {...}, "bid_history": [],
+ "roster_changelog": []}
+```
+
+Most columns line up with the canonical schema, which is what makes the one that
+does not dangerous. **`STATUS` is `"NO"` where canonical is blank** — the same
+silent-drop trap as the legacy file's `"0"`, in a different disguise, with the
+same symptom: 651 free agents vanish and the app boots on a pool that looks like
+a finished draft. `convert_state_json.py` translates it and shares
+`_require_biddables` with the legacy converter so neither can write that file.
+
+What it drops or blanks, and why:
+
+| field | treatment | reason |
+|---|---|---|
+| `BID` | zeroed | carries the **old tool's Z-score predictions** on 145 players — the model this app exists to replace. Canonical `BID` is 0 in source. |
+| `PRIOR FCHL TEAM` | blank | no column, and not derivable: the workbook's `Intro` is the nominating team, not the holder |
+| `Dobber`, `DtZ` | dropped | `PTS` is already the blend of the two |
+| `Draftable`, `Z-score` | dropped | the old tool's shortlist (145 rows) and its pricing intermediate |
+| `GROUP` | passed through | including the two rows in group **`F`**, which the documented vocabulary lacks. It is in none of `RFA_GROUPS`, `MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`, so it already behaves like the A-E family; remapping it would invent a contract the source does not record. |
+| `NHL TEAM` | validated | 3 rows carry the FCHL placeholder `UFA`, the same contamination `valid_nhl_teams` was written for |
+| `ENT` rows (22) | held back, reported | `build_initial_state` drops an unknown FCHL TEAM in silence |
+
+Unlike the 2023 file, **no NHL-team join is needed** (the column is populated)
+and **no name disambiguation fires** — the old tool had already resolved its own
+collisions, so `Sebastian Aho (F)` and `Sebastian Aho (D)` arrive distinct and
+the `#data-warning` banner stays silent. `tests/test_state_json_conversion.py`
+pins that, so a future collision is a deliberate change rather than a draft-night
+surprise.
+
+`SALARY` is **0.0 on every biddable**, so `has_lag = 0` pool-wide and the price
+model's reputation feature is flat — the same limitation as the 2023 pool, and
+the reason the top of the price distribution compresses. Penalties come from
+`fchl_teams.json` (JHN and LGN at $0.3M today), not from the file's own
+`teams_data`, which recorded 0.0 for all eleven in 2025.
+
+The converted result is a real auction: 649 available players for **137** open
+roster spots against the workbook's 139 actual picks, all 11 teams able to fill
+a roster, 20 RFAs matching the workbook's `2025` sheet exactly.
+
 ### Selecting a pool
 
 `data_loader.PLAYERS_CSV` holds the pool path, defaulting to `data/players.csv`
@@ -167,9 +221,16 @@ derives `data/state-<stem>` for any non-default pool; `FCHL_STATE_DIR` overrides
 it. Both are logged at startup, since a mismatch is otherwise invisible.
 
 ```bash
+# 2023 pool (legacy CSV schema)
 .venv/bin/python convert_legacy_players.py \
     data/players-23.csv data/players-23-converted.csv
 FCHL_PLAYERS_CSV=data/players-23-converted.csv .venv/bin/uvicorn main:app --reload
+
+# 2025 pool (Streamlit auto-save) — the pre-draft state with that season's
+# projections, and the one the workbook has a known outcome for
+.venv/bin/python convert_state_json.py \
+    "data/25-26 Starting Rosters.json" data/players-25.csv
+FCHL_PLAYERS_CSV=data/players-25.csv .venv/bin/uvicorn main:app --port 8001
 ```
 
 Do **not** export `FCHL_PLAYERS_CSV` while running pytest: `TestDataFingerprint`

@@ -3680,6 +3680,44 @@ class TestEverySortableColumnCanActuallySort:
         )
 
 
+class TestTheRfaBadgeAlwaysMarksTheRow:
+    """An RFA with no prior team must still be visibly an RFA.
+
+    The badge in the Available Players table carries `prior_fchl_team`, which
+    is filled for 22 of 2158 rows in `players.csv` and for none at all in the
+    two alternate pools — neither the 2023 legacy schema nor the 2025 Streamlit
+    auto-save has a column for it. Rendered bare it produced an empty orange
+    box on every RFA row, which reads as a broken template rather than as
+    missing data, and made an RFA indistinguishable from a UFA in the one
+    column that distinguishes them.
+
+    Matters beyond cosmetics: a nomination turn is 1 RFA + 1 UFA, so telling
+    them apart at a glance is what the column is for.
+    """
+
+    def _rfa_cell(self, client) -> str:
+        panel = section_of(client.get("/").text, "bid-limits")
+        m = re.findall(r'<span class="badge badge-warning badge-xs">([^<]*)</span>', panel)
+        assert m, "no RFA badge rendered at all — the pool has no RFAs?"
+        return m[0]
+
+    def test_a_prior_team_is_shown_when_there_is_one(self, client):
+        import main
+
+        rfa = next(p for p in main.auction_state.available_players.values() if p.is_rfa)
+        rfa.prior_fchl_team = "ZZZ"
+        assert "ZZZ" in section_of(client.get("/").text, "bid-limits")
+
+    def test_an_rfa_without_one_still_gets_a_badge(self, client):
+        """The alternate-pool case. Break the fallback and this reads ''."""
+        import main
+
+        for p in main.auction_state.available_players.values():
+            if p.is_rfa:
+                p.prior_fchl_team = ""
+        assert self._rfa_cell(client).strip() == "RFA"
+
+
 class TestExactStandingsOnDemand:
     """`GET /solve-standings` replaces the Proj estimates with real MILP optima.
 

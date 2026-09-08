@@ -20,6 +20,84 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-07c]
+
+### Added
+
+- **`convert_state_json.py` — the 2025 pre-draft pool**, from
+  `data/25-26 Starting Rosters.json`, an auto-save of the Streamlit tool this
+  app replaced, written 2025-09-05. It is the only genuine pre-draft snapshot we
+  have that carries **that season's own projections**, which is what makes it
+  worth a second converter: the 2023 pool is a true pre-draft state too, but its
+  `PTS` are three years stale, so its prices cannot be compared to anything that
+  actually happened.
+
+  Converted it gives 649 available players for **137** open roster spots — the
+  league workbook records **139** actual picks that year — with all 11 teams able
+  to fill a roster and a spread from LGN (3 spots, $6.3M, physical max $5.3M) to
+  MAC (18 spots, $41.7M). The 20 RFAs match the workbook's `2025` sheet exactly,
+  which is the strongest available check that the file is what it claims to be.
+
+  **`STATUS` is the trap again, wearing a different hat.** The state file writes
+  `"NO"` where canonical is blank; `load_players` gates the biddable branch on
+  `status == ""` and UFA/RFA are in `_PLACEHOLDER_TEAMS`, so an untranslated row
+  matches neither branch and is dropped in silence — all 651 free agents gone,
+  and an empty pool looks exactly like a finished draft. Identical in kind to the
+  2023 file's `"0"`, which is why the new script imports `_require_biddables`,
+  `valid_nhl_teams`, `league_team_codes` and `CANONICAL_COLUMNS` from
+  `convert_legacy_players` rather than growing a second copy of each.
+
+  Four things it deliberately does not import. `BID` is zeroed — the file carries
+  a *predicted* price on 145 players from the old tool's Z-score model, the model
+  CLAUDE.md names as the reason this app was written, and importing it would
+  preload the pool with bids from the thing being replaced. `PRIOR FCHL TEAM`
+  stays blank, because there is no column and it is not derivable (the workbook's
+  `Intro` is the nominating team, not the holder). `Dobber`/`DtZ`/`Z-score`/
+  `Draftable` are dropped. And `GROUP` passes through **untouched, including two
+  rows in group `F`** — absent from the documented vocabulary but in none of
+  `RFA_GROUPS`, `MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`, so it already
+  behaves like the A-E family; remapping it to a letter we recognize would invent
+  a contract the source does not record.
+
+  Unlike 2023 this needs no NHL-team join (the column is populated) and triggers
+  no name disambiguation — the old tool had already split `Sebastian Aho (F)`
+  from `Sebastian Aho (D)`, so the `#data-warning` banner stays silent. Pinned,
+  so a future collision is a deliberate change rather than a draft-night
+  surprise. Three rows carry the FCHL placeholder `UFA` in the NHL TEAM column
+  and are blanked by the same guard the legacy converter needed.
+
+  All six converter mutants (status translation, NHL validation, BID import,
+  unknown-team hold-back, GROUP remap, PRIOR fill) are killed by their own
+  targeted test rather than only by the artifact-drift guard, which is the
+  distinction that makes the drift guard not a false comfort.
+
+### Fixed
+
+- **An RFA with no prior team now still gets a badge.** The Available Players
+  table rendered `prior_fchl_team` bare inside a `badge-warning`, and that field
+  is filled for 22 of 2158 rows in `players.csv` and for **none at all** in
+  either alternate pool — neither the 2023 legacy schema nor the 2025 auto-save
+  has a column for it. So both rehearsal pools painted an empty orange box on
+  every RFA row, which reads as a broken template rather than as absent data, and
+  left an RFA indistinguishable from a UFA in the one column that distinguishes
+  them. That is not only cosmetic: a nomination turn is 1 RFA + 1 UFA. Falls back
+  to the literal `RFA`, keeping the job that must not degrade.
+
+### Investigated
+
+- **A screenshot of the workbook's `2025` sheet could not be used to rebuild the
+  2025 pool, and the reason is worth keeping.** The sheet is a record of a
+  *completed* auction — every one of its 139 rows has a winner and a price — so
+  its 20 RFAs are all under contract today (Rantanen on GVR, Matthews on HSM),
+  and applying it would have marked rostered keepers as free agents while wiping
+  the 22 real RFAs, each of which carries a `PRIOR FCHL TEAM` for ROFR. The
+  decisive point is narrower than "it is last year's data": the sheet lists the
+  players who **were drafted**, not the pool they were drafted **from**. Making
+  only those available would leave 139 players for 137+ open spots, so the MILP's
+  `== spots` constraint returns Infeasible league-wide and the tool has nothing
+  to say. A pool needs a surplus — the converted file gives 4.7:1, and
+  `test_there_are_more_players_than_spots_to_fill` now pins that as an invariant.
+
 ## [2026-09-07b]
 
 Four findings from draft-day testing. Two were questions with answers rather

@@ -61,7 +61,18 @@
                     ${{ p.model_price }}M
                     {% endif %}
                 </td>
-                <td>{% if p.is_rfa %}<span class="badge badge-warning badge-xs">{{ p.prior_fchl_team }}</span>{% endif %}</td>
+                {# The badge does two jobs and only one of them needs data: it
+                   marks the player as an RFA (the column header, and half the
+                   1 RFA + 1 UFA nomination rule), and it names the team with
+                   ROFR. `PRIOR FCHL TEAM` is filled for 22 of 2158 rows in
+                   players.csv and for NONE of the rows in either alternate
+                   pool, because neither the 2023 legacy schema nor the 2025
+                   Streamlit auto-save has a column for it — so on those the
+                   badge rendered as an empty orange box on every RFA, which
+                   reads as a rendering fault rather than as absent data.
+                   Falling back to the literal keeps the row distinguishable
+                   from a UFA, which is the job that must not degrade. #}
+                <td>{% if p.is_rfa %}<span class="badge badge-warning badge-xs">{{ p.prior_fchl_team or "RFA" }}</span>{% endif %}</td>
                 <td class="flex gap-1">
                     <button type="button" class="btn btn-xs btn-ghost btn-circle btn-add-bid" data-player="{{ p.name }}" title="Add to bid">+</button>
                     <a hx-get="/explain/{{ p.name|urlencode }}" hx-target="#explanation" hx-swap="outerHTML" class="btn btn-xs btn-ghost btn-circle">?</a>

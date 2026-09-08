@@ -32,3 +32,6 @@ FCHL-auction-pricer/
 # OS
 .DS_Store
 Thumbs.db
+
+# LibreOffice lock files (created while a data workbook is open)
+.~lock.*#

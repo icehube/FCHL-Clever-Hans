@@ -21,9 +21,15 @@ Run:
 """
 
 import argparse
+import collections
 import csv
 import json
+import os
+import re
 import sys
+import unicodedata
+
+from config import NHL_TEAM_ALIASES
 
 # The schema `data_loader.load_players` reads, in order.
 CANONICAL_COLUMNS = [
@@ -73,13 +79,145 @@ def derive_group(fchl_team: str, status: str) -> str:
     return "3"
 
 
+def normalize_name(name: str) -> str:
+    """A comparison key that survives how the two files spell the same player.
+
+    `players-23.csv` and `players.csv` disagree in several mechanical ways, and
+    two of them are damage in the current pool rather than era drift:
+
+    - **backtick for apostrophe** — the legacy file writes ``O`Reilly`` (U+0060);
+    - **`-` rendered as `0`** — `Oliver Ekman0Larsson`, from a find-and-replace
+      in `players.csv` that hit the hyphen;
+    - **`ari` rendered as `UTH`** — `Eetu LuostUTHnen`, `MUTHo Ferraro`, from the
+      same file's case-insensitive Arizona -> Utah rename catching the substring
+      inside names;
+    - **a trailing parenthetical** — `Tony DeAngelo (NCM)`;
+    - accents, punctuation and hyphen-vs-space.
+
+    Undoing the two corruptions here rather than repairing `players.csv` keeps
+    this a read-only join: the pool file is the operator's, and rewriting names
+    in it is a separate decision with a separate blast radius.
+    """
+    s = unicodedata.normalize("NFKD", name)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = s.replace("`", "'")
+    s = re.sub(r"\s*\([^)]*\)\s*$", "", s)
+    s = re.sub(r"(?<=[A-Za-z])0(?=[A-Za-z])", "-", s)
+    s = re.sub(r"UTH", "ari", s)
+    s = s.casefold().replace("'", "").replace(".", "")
+    return re.sub(r"[-\s]+", " ", s).strip()
+
+
+def valid_nhl_teams(odds_path: str = "data/team_odds.json") -> set[str]:
+    """The NHL club codes a team name is allowed to be.
+
+    `players.csv` puts the FCHL placeholder `UFA` in the NHL TEAM column on 9
+    rows (`Tony DeAngelo (NCM)` among them), so an unfiltered join copies a
+    league placeholder into a field that means an NHL club. It is invisible in
+    the live app — `_get_team_probability` falls through to the default for an
+    unknown code — but it would render as the player's NHL team and, once
+    written into a pool file, look like real data.
+
+    Aliases are included as keys: `players.csv` spells Utah `UTH` while
+    `team_odds.json` uses `UTA`.
+    """
+    with open(odds_path) as f:
+        codes = set(json.load(f)["odds"])
+    return codes | set(NHL_TEAM_ALIASES)
+
+
+def nhl_team_index(path: str, odds_path: str = "data/team_odds.json") -> tuple[dict, dict]:
+    """Two lookups over a canonical CSV: by full name, and by initial+surname.
+
+    Values are sets of `(position, team)` rather than a single team, because the
+    pool genuinely contains distinct players who share a name. Keeping the set
+    is what lets the caller REFUSE rather than pick one.
+    """
+    full: dict[str, set] = collections.defaultdict(set)
+    loose: dict[tuple, set] = collections.defaultdict(set)
+    allowed = valid_nhl_teams(odds_path)
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            team = row.get("NHL TEAM", "").strip()
+            if team not in allowed:
+                continue
+            name, pos = normalize_name(row["PLAYER"]), row["POS"].strip()
+            full[name].add((pos, team))
+            parts = name.split()
+            if len(parts) >= 2:
+                loose[(parts[0][:1], parts[-1])].add((pos, team))
+    return full, loose
+
+
+def _teams_for(candidates: set, position: str) -> set:
+    """Narrow by position first — that is what separates two same-named players."""
+    same = {team for pos, team in candidates if pos == position}
+    return same or {team for _, team in candidates}
+
+
+def lookup_nhl_team(name: str, position: str, full: dict, loose: dict) -> str | None:
+    """The player's NHL team, or None when it cannot be established uniquely.
+
+    Three passes, each tried only if the previous left the answer ambiguous:
+    exact normalized name; the legacy file's own habit of appending the position
+    letter to break a tie (`Sebastian AhoD`); then first-initial + surname, which
+    covers a nickname spelled out (`Mitchell` for `Mitch`).
+
+    **A tie is never broken by picking one.** Two real players share a name in
+    this pool — the collisions `data_loader._disambiguated_names` exists for —
+    and a coin flip there would put a wrong team on a real player silently,
+    which is worse than the blank it replaces.
+    """
+    key = normalize_name(name)
+    teams = _teams_for(full.get(key, set()), position)
+    if len(teams) == 1:
+        return teams.pop()
+
+    suffix = position.casefold()
+    if key.endswith(suffix) and len(key) > len(suffix):
+        teams = _teams_for(full.get(key[: -len(suffix)].strip(), set()), position)
+        if len(teams) == 1:
+            return teams.pop()
+
+    parts = key.split()
+    if len(parts) >= 2:
+        teams = _teams_for(loose.get((parts[0][:1], parts[-1]), set()), position)
+        if len(teams) == 1:
+            return teams.pop()
+    return None
+
+
+def fill_nhl_teams(
+    rows: list[dict], source: str, odds_path: str = "data/team_odds.json"
+) -> list[str]:
+    """Fill NHL TEAM in place; return the names that could not be resolved.
+
+    The legacy schema has no NHL team, and without one every player gets
+    `DEFAULT_TEAM_PROBABILITY` — one of the price model's ten features flat
+    across the whole pool. The only source in the repo is the current
+    `players.csv`, so these are **present-day** teams: a player who has since
+    been traded gets the club he plays for now, not the one he played for in the
+    legacy season. That is the coherent pairing rather than a compromise, since
+    `team_odds.json` carries present-day Cup odds too.
+    """
+    full, loose = nhl_team_index(source, odds_path)
+    unresolved = []
+    for row in rows:
+        team = lookup_nhl_team(row["PLAYER"], row["POS"], full, loose)
+        if team:
+            row["NHL TEAM"] = team
+        else:
+            unresolved.append(row["PLAYER"])
+    return unresolved
+
+
 def convert_row(row: dict) -> dict:
     """Map one legacy row onto the canonical schema.
 
-    NHL TEAM, AGE and PRIOR FCHL TEAM have no legacy source and are left blank.
-    AGE is not a price-model feature, so it costs nothing. A blank NHL TEAM
-    means `DEFAULT_TEAM_PROBABILITY` for every player -- that is the 32-team
-    mean, so the feature goes uninformative rather than biased.
+    AGE and PRIOR FCHL TEAM have no legacy source and are left blank; AGE is not
+    a price-model feature, so it costs nothing. NHL TEAM is blank HERE and filled
+    afterwards by `fill_nhl_teams`, which needs the whole file to resolve a name
+    against -- a row cannot tell on its own whether its name is ambiguous.
     """
     status = row["Status"].strip()
     if status == LEGACY_BLANK_STATUS:
@@ -134,6 +272,26 @@ def convert(
     return converted, skipped
 
 
+def convert_all(
+    rows: list[dict],
+    known_teams: set[str],
+    nhl_source: str | None = None,
+    odds_path: str = "data/team_odds.json",
+) -> tuple[list[dict], dict[str, list[str]], list[str]]:
+    """The whole pipeline: convert, hold back unknown teams, join NHL teams.
+
+    One entry point so `main()` and the tests cannot diverge. They did: the test
+    fixture called `convert` alone, so it produced rows with a blank NHL TEAM
+    while the script wrote rows with it filled, and the guard comparing the
+    committed file against a fresh conversion failed on its own fixture.
+    """
+    converted, skipped = convert(rows, known_teams)
+    unresolved: list[str] = []
+    if nhl_source and os.path.exists(nhl_source):
+        unresolved = fill_nhl_teams(converted, nhl_source, odds_path)
+    return converted, skipped, unresolved
+
+
 def _require_biddables(rows: list[dict]) -> int:
     """Fail loudly if the conversion produced no free agents.
 
@@ -161,6 +319,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--teams", default="data/fchl_teams.json", help="league metadata JSON"
     )
+    parser.add_argument(
+        "--nhl-teams",
+        default="data/players.csv",
+        help="canonical CSV to source NHL TEAM from (blank to skip the join)",
+    )
     args = parser.parse_args(argv)
 
     with open(args.source) as f:
@@ -173,8 +336,28 @@ def main(argv: list[str] | None = None) -> int:
             )
         rows = list(reader)
 
-    converted, skipped = convert(rows, league_team_codes(args.teams))
+    converted, skipped, unresolved = convert_all(
+        rows, league_team_codes(args.teams), args.nhl_teams
+    )
     biddable = _require_biddables(converted)
+
+    if args.nhl_teams and os.path.exists(args.nhl_teams):
+        filled = len(converted) - len(unresolved)
+        print(
+            f"NHL TEAM: filled {filled}/{len(converted)} from {args.nhl_teams}",
+            file=sys.stderr,
+        )
+        # Named, not just counted: each is either two real players sharing a name
+        # -- where refusing is the correct answer -- or a spelling the normalizer
+        # does not cover, which is a fixable gap. A bare count hides which.
+        for name in unresolved:
+            print(f"    unresolved, left blank: {name}", file=sys.stderr)
+    elif args.nhl_teams:
+        print(
+            f"NHL TEAM: {args.nhl_teams} not found — left blank, so every player "
+            f"will price at DEFAULT_TEAM_PROBABILITY",
+            file=sys.stderr,
+        )
 
     for team, names in sorted(skipped.items()):
         print(

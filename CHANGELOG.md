@@ -37,7 +37,7 @@ rediscover the same non-problem.
   `load_players` gates the biddable branch on `status == ""` and `UFA`/`RFA` sit
   in `_PLACEHOLDER_TEAMS` — so all 674 free agents match *neither* branch and are
   dropped without a word. An empty pool is indistinguishable from a finished
-  draft on screen. `convert_legacy_players.py:137 (_require_biddables)` refuses
+  draft on screen. `convert_legacy_players.py:295 (_require_biddables)` refuses
   to write that file at all, and `tests/test_legacy_conversion.py` asserts both
   halves: the converted file loads 668 biddables, and the same rows with `"0"`
   restored load none.
@@ -91,6 +91,40 @@ rediscover the same non-problem.
   `TestDataFingerprint` is unaffected: the default is unchanged. It reads the
   global, so running pytest with `FCHL_PLAYERS_CSV` exported fails it — correct,
   and loud.
+
+### Added
+
+- **NHL teams joined into the converted legacy pool.** The legacy schema has no
+  `NHL TEAM` column, so every player was pricing at `DEFAULT_TEAM_PROBABILITY` —
+  one of the price model's ten features flat across the whole pool, and a blank
+  column on screen. The only source in the repo is the current `players.csv`
+  (the draft-results xlsx has pick/winner/salary/term and no club), so the
+  converter joins it by normalized name: **869 of 876 rows**, 32 clubs, 25
+  distinct probabilities where there was 1.
+
+  Matching needed three normalizations, and two undo damage in `players.csv`
+  rather than era drift — the legacy file writes a **backtick** for an
+  apostrophe, while the pool file renders `-` as `0` and `ari` as `UTH`. Those
+  are filed as an open finding; the converter works around them for matching and
+  deliberately does not rewrite the operator's pool file.
+
+  Two guards, both mutation-tested. **A name two players share resolves to
+  nothing** — the candidate set is kept rather than collapsed, so the known
+  collisions are refused instead of coin-flipped onto a real player. **Only real
+  NHL club codes are written**: `players.csv` carries the FCHL placeholder `UFA`
+  in its NHL TEAM column on 9 rows, invisible to pricing (an unknown code falls
+  through to the default) but rendered as a club and indistinguishable from data
+  once written to a pool file. That guard is why coverage is 869 and not 873 —
+  four rows whose only source is a `UFA` row now stay blank, correctly.
+
+  These are **present-day** clubs; a player traded since 2023 gets his current
+  team. Coherent rather than a compromise, since `team_odds.json` is present-day
+  too. Max model price moves $6.12M -> $7.03M.
+
+  `convert_all` is now the single entry point for the pipeline. The test fixture
+  called `convert` alone and so produced rows without the join while the script
+  wrote rows with it — the guard comparing the committed file against a fresh
+  conversion failed on its own fixture rather than on the artifact.
 
 ### Fixed
 

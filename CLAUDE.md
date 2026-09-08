@@ -32,9 +32,12 @@ and fails, correctly.
 `data/players-23.csv` (the 2023 snapshot) is in an older schema and must go
 through `convert_legacy_players.py` first; the trap is that it encodes blank
 `STATUS` as `"0"`, which `load_players` drops **silently**, giving an empty pool
-that looks exactly like a finished draft. See
-`.claude/rules/data-formats.md` for the full conversion rules and what the
-missing columns cost the price model.
+that looks exactly like a finished draft. It has no `NHL TEAM` column either, so
+the converter joins one from the current `players.csv` by normalized name —
+refusing to guess when two players share a name, and writing only real NHL club
+codes, because `players.csv` puts the FCHL placeholder `UFA` in that column on 9
+rows. See `.claude/rules/data-formats.md` for the full conversion rules and what
+the still-missing columns cost the price model.
 
 ## Architecture
 

@@ -16,6 +16,29 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
+- [2026-09-07] [nhl-team-join] `data/players.csv` (data, no symbol — line numbers
+  drift on every refresh) — **15 player names are corrupted by two careless
+  find-and-replaces, and 9 rows carry the FCHL placeholder `UFA` in the NHL TEAM
+  column.** The name damage is (a) a case-insensitive `ARI` -> `UTH` rename
+  (Arizona to Utah) that also hit the substring inside names — `Eetu
+  LuostUTHnen`, `MUTHo Ferraro`, `John MUTHno`, `Zach PUTHse`, `Alexandr DUTHn`,
+  `Vili SaUTHjarvi`, `GUTHn Bjorklund` — and (b) `-` -> `0`, giving `Oliver
+  Ekman0Larsson`, `Nicolas Aube0Kubel`, `Alex Barre0Boulet`, `Trey
+  Fix0Wolansky`, `Benoit0Olivier Groulx`, `Carl0Johan Lerby`, `Jon0Randall
+  Avon`, `Marc0Andre Gaudet`. These are the names the draft tool **displays and
+  matches on** — the player name is the app's primary key — so a corrupted one
+  cannot be typed into the Start Auction field as it is spelled anywhere else.
+  The `UFA`-in-NHL-TEAM rows are invisible to pricing (`_get_team_probability`
+  falls through to the default for an unknown code) but render as the player's
+  NHL club. Also present: `Ryan OReilly` and `Ryan O'Reilly` as separate rows on
+  different clubs, which may be one player duplicated. — Deferred because
+  `players.csv` is the operator's live pool and is regenerated from the pricer
+  repo before every draft: the fix belongs upstream, in whatever produced these
+  substitutions, or the same damage returns on the next refresh.
+  `convert_legacy_players.normalize_name` works around both patterns for
+  matching only, and deliberately does not rewrite the file.
+
+
 Last triaged 2026-08-13, walking every entry to pick the next piece of work. The
 outcome is worth recording, because most of what is below is parked for a
 **reason that has to expire before the entry is actionable**: the Proj heuristic

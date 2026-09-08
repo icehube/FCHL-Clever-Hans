@@ -126,11 +126,31 @@ the current file, where 145 of 149 MINOR rows are `A`-`E`. Rows on a team code
 `fchl_teams.json` does not have are held back and printed, rather than being
 swallowed by `build_initial_state` (which ignores unknown codes in silence).
 
-`NHL TEAM` and `SALARY`-as-reputation are **not recoverable**. Every converted
-player gets `DEFAULT_TEAM_PROBABILITY` and `has_lag = 0`, so two of the price
-model's ten features go flat and the top of the price distribution compresses
-($6.12M against $9.55M on the current pool). `AGE` costs nothing — it is not a
-model feature.
+**`NHL TEAM` is joined from the current `players.csv`** by normalized name
+(`--nhl-teams`, on by default), covering 869 of 876 rows. Three normalizations
+matter, and two of them undo damage in the pool file rather than era drift: the
+legacy file writes a **backtick** for an apostrophe; `players.csv` renders `-`
+as `0` (`Oliver Ekman0Larsson`) and `ari` as `UTH` (`Eetu LuostUTHnen`), from
+two find-and-replaces — see the open finding in `BACKLOG.md`. Matching also
+strips a trailing parenthetical (`Tony DeAngelo (NCM)`) and falls back to
+first-initial + surname for a spelled-out nickname.
+
+Two guards make the join safe to trust:
+
+- **A name two players share resolves to nothing.** The set of candidate clubs
+  is kept, not collapsed, so a tie is refused rather than broken — a coin flip
+  would put a wrong club on a real player silently.
+- **Only real NHL clubs are written.** `players.csv` carries the FCHL
+  placeholder `UFA` in its NHL TEAM column on 9 rows, which is invisible to
+  pricing but would render as a club and, once in a pool file, look like data.
+
+These are **present-day** clubs: a player traded since the legacy season gets
+the team he plays for now. That is coherent rather than a compromise, because
+`team_odds.json` carries present-day Cup odds too.
+
+`SALARY`-as-reputation is still **not recoverable** — no legacy biddable has a
+prior salary, so `has_lag = 0` pool-wide and that one feature stays flat. `AGE`
+costs nothing; it is not a model feature.
 
 ### Selecting a pool
 

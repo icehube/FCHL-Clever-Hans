@@ -27,8 +27,14 @@ from convert_legacy_players import (
     LEGACY_BLANK_STATUS,
     _require_biddables,
     convert,
+    convert_all,
     convert_row,
+    fill_nhl_teams,
     league_team_codes,
+    lookup_nhl_team,
+    nhl_team_index,
+    normalize_name,
+    valid_nhl_teams,
 )
 
 REPO = Path(__file__).resolve().parent.parent
@@ -43,8 +49,19 @@ def _legacy_rows() -> list[dict]:
 
 @pytest.fixture(scope="module")
 def converted() -> list[dict]:
-    """A fresh conversion, so these test the script and not a stale artifact."""
-    rows, _ = convert(_legacy_rows(), league_team_codes(REPO / "data" / "fchl_teams.json"))
+    """A fresh conversion, so these test the script and not a stale artifact.
+
+    Goes through `convert_all`, the same entry point `main()` uses. Calling
+    `convert` alone here left the fixture without the NHL join while the script
+    wrote it, so the fixture and the committed file disagreed and the guard
+    comparing them failed on the fixture rather than on the artifact.
+    """
+    rows, _, _ = convert_all(
+        _legacy_rows(),
+        league_team_codes(REPO / "data" / "fchl_teams.json"),
+        str(REPO / "data" / "players.csv"),
+        str(REPO / "data" / "team_odds.json"),
+    )
     return rows
 
 
@@ -298,3 +315,96 @@ class TestTheStateDirFollowsThePool:
         startup = [r for r in seen if "player pool" in r.getMessage()]
         assert startup, "startup did not log the pool on uvicorn's logger"
         assert main.STATE_DIR in startup[-1].getMessage()
+
+
+class TestTheNhlTeamJoin:
+    """The legacy schema has no NHL TEAM, so it is joined from the current pool.
+
+    Without it every player prices at `DEFAULT_TEAM_PROBABILITY` and one of the
+    price model's ten features is flat across the whole pool.
+    """
+
+    def test_normalization_undoes_how_the_two_files_spell_a_name(self):
+        """Synthetic names on purpose — these assert the RULES, not the data.
+
+        Each case is a real difference between the files: a backtick for an
+        apostrophe, a hyphen that `players.csv` renders as `0`, an `ari` it
+        renders as `UTH` (its Arizona -> Utah rename catching the substring), a
+        trailing parenthetical, and hyphen-vs-space.
+        """
+        assert normalize_name("Foo`Bar") == normalize_name("Foo'Bar")
+        assert normalize_name("Quux0Zed") == normalize_name("Quux-Zed")
+        assert normalize_name("LuostUTHnen") == normalize_name("Luostarinen")
+        assert normalize_name("Widget (NCM)") == normalize_name("Widget")
+        assert normalize_name("Ekman-Larsson") == normalize_name("Ekman Larsson")
+
+    def test_the_join_fills_almost_every_row(self, converted):
+        filled = [r for r in converted if r["NHL TEAM"]]
+        assert len(filled) / len(converted) > 0.95
+
+    def test_only_real_nhl_clubs_are_written(self, converted):
+        """`players.csv` carries the FCHL placeholder `UFA` in its NHL TEAM
+        column on several rows. Copying that through would put a league
+        placeholder in a field that means an NHL club — invisible to the price
+        model, which falls through to the default for an unknown code, but shown
+        on screen as the player's team and indistinguishable from real data once
+        written to a pool file.
+        """
+        allowed = valid_nhl_teams(str(REPO / "data" / "team_odds.json"))
+        written = {r["NHL TEAM"] for r in converted if r["NHL TEAM"]}
+        assert written <= allowed
+
+    def test_a_name_two_players_share_is_left_blank(self):
+        """Refusing beats guessing: a coin flip puts a wrong club on a real
+        player silently. Derived from the pool rather than named, because
+        `players.csv` is replaced before every draft and today's collisions are
+        not tomorrow's.
+        """
+        source = str(REPO / "data" / "players.csv")
+        full, loose = nhl_team_index(source)
+        shared = [
+            (name, cands)
+            for name, cands in full.items()
+            if len({t for _, t in cands}) > 1
+            and len({t for pos, t in cands if pos == sorted(cands)[0][0]}) > 1
+        ]
+        assert shared, "the pool has no same-name collision to exercise this"
+        name, cands = shared[0]
+        position = sorted(cands)[0][0]
+        assert lookup_nhl_team(name, position, full, loose) is None
+
+    def test_an_unambiguous_name_does_resolve(self):
+        """The other half — so a lookup that returned None for everything, which
+        would satisfy the test above, fails here.
+        """
+        source = str(REPO / "data" / "players.csv")
+        full, loose = nhl_team_index(source)
+        solo = [
+            (n, sorted(c)[0][0])
+            for n, c in full.items()
+            if len({t for _, t in c}) == 1
+        ]
+        assert solo
+        name, position = solo[0]
+        assert lookup_nhl_team(name, position, full, loose) is not None
+
+    def test_a_missing_source_leaves_the_column_blank(self, tmp_path):
+        rows = [{"PLAYER": "Nobody Atall", "POS": "F", "NHL TEAM": ""}]
+        unresolved = fill_nhl_teams(rows, str(REPO / "data" / "players.csv"))
+        assert unresolved == ["Nobody Atall"]
+        assert rows[0]["NHL TEAM"] == ""
+
+    def test_the_join_reaches_the_price_model(self, converted_csv, monkeypatch):
+        """End to end: a filled column has to change what the model sees, or the
+        join is decoration. Before it, every player carried the same figure.
+        """
+        monkeypatch.setattr(data_loader, "PLAYERS_CSV", converted_csv)
+        state = data_loader.build_initial_state()
+        probabilities = {p.team_probability for p in state.available_players.values()}
+        assert len(probabilities) > 5
+        at_default = sum(
+            1
+            for p in state.available_players.values()
+            if p.team_probability == config.DEFAULT_TEAM_PROBABILITY
+        )
+        assert at_default < 0.05 * len(state.available_players)

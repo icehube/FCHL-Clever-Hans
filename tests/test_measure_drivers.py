@@ -9,6 +9,7 @@ rules file, so they need to be reproducible.
 """
 
 import ast
+import copy
 from pathlib import Path
 
 import pytest
@@ -93,26 +94,45 @@ class TestTheTwoInversionMeasuresMeanDifferentThings:
     into a diagnosis, and these tests are what keep the two apart.
     """
 
-    def test_the_isolated_measure_finds_the_forward_defect(self, loaded):
+    def test_the_isolated_measure_fires_on_a_negative_segment(self, loaded):
+        """The measure has to be able to fail, and since the 2026-09-10 refit
+        the live data no longer lets it.
+
+        All three positions are clean now, so "correct instrument" and
+        "`return []`" look identical against `data/model_params.json`. This
+        supplies the defect rather than borrowing it from the data — the
+        July fit's own -0.0504 hinge, restored on a copy — which is the
+        same move CLAUDE.md prescribes wherever the data is what makes a
+        mutant equivalent.
+        """
         pool, params, refs = loaded
-        found = points_inversions(pool, params, refs, "F")
+        broken = copy.deepcopy(params)
+        broken["F"]["coef_pts_hinge_80"] = -0.0504
+        assert points_slopes(broken["F"])[-1][1] < 0, (
+            "the synthetic fit is not actually broken, so the rest of this "
+            "test proves nothing"
+        )
+
+        found = points_inversions(pool, broken, refs, "F")
         assert found, (
-            "no F points-driver inversions — if the pricer notebook was "
-            "refit, this instrument's reason for existing is gone and "
-            "BACKLOG.md's entry should be closed"
+            "a negative >80 segment produced no points-driver inversions — "
+            "the measure has stopped measuring"
         )
         better, worse, gap, factor_better, factor_worse = found[0]
         assert better.projected_points > worse.projected_points
         assert factor_worse > factor_better
         assert gap == pytest.approx(factor_worse - factor_better)
 
-    @pytest.mark.parametrize("position", ["D", "G"])
+    @pytest.mark.parametrize("position", ["F", "D", "G"])
     def test_the_isolated_measure_clears_the_healthy_positions(
         self, loaded, position
     ):
-        """D and G have non-negative slopes everywhere, so the defect measure
-        must report nothing — which is also what says it is not simply
-        matching every pair it is handed."""
+        """Every position has non-negative slopes everywhere since the
+        2026-09-10 refit, so the defect measure must report nothing.
+
+        F joined this list by being FIXED, not by being excused: the fit
+        that put its slope at -0.0194 above 80 pts gave 122 inversions here.
+        The test above is what keeps an empty answer meaningful."""
         pool, params, refs = loaded
         assert points_inversions(pool, params, refs, position) == []
 

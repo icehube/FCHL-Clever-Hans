@@ -1219,8 +1219,18 @@ class TestTheChartExplainsThePrice:
         # Anchored to the rows by label, not to "the first and last dollar
         # figure": the E[$] note below the table prints one too, and reading
         # that as the median is how the first version of this failed.
-        base = float(re.search(r"Typical \w.*?\$([\d.]+)M", block, re.S).group(1))
-        median = float(re.search(r"Model median.*?\$([\d.]+)M", block, re.S).group(1))
+        # The LAST figure in the row, which is the effect cell. A non-greedy
+        # `Model median.*?\$([\d.]+)M` reads the first one instead, and the
+        # clamp note sits between the label and the effect — so the moment a
+        # star forward's unclamped median cleared $11.4M this read $15.85M
+        # and called it the median.
+        def _effect(label: str) -> float:
+            row = re.search(r"<tr>(?:(?!</tr>).)*?" + label + r".*?</tr>", block, re.S)
+            assert row, f"no {label} row in the drivers card"
+            return float(re.findall(r"\$([\d.]+)M", row.group(0))[-1])
+
+        base = _effect(r"Typical \w")
+        median = _effect("Model median")
         assert base == pytest.approx(b.base_price, abs=0.005)
         assert median == pytest.approx(b.prediction.median_price, abs=0.005)
 
@@ -4390,32 +4400,74 @@ class TestExactStandingsOnDemand:
             f"{expected}th of the figures in the same response"
         )
 
-    def test_on_the_endgame_scenario_the_scan_moves_the_badge(self, client):
-        """The case the feature was built for, on the state that produces it.
+    def test_on_the_endgame_scenario_the_estimate_flatters_an_opponent(self, client):
+        """The mechanism the feature exists for, on the pinned state.
 
         `endgame-ceiling-binds` is a pinned scenario whose shape
-        `tests/test_scenarios.py` guards (BOT plus exactly two live opponents),
-        so this is not a `players.csv` fingerprint — but the direction is
-        asserted rather than the literal rank, which would be one.
+        `tests/test_scenarios.py` guards (BOT plus exactly two live opponents).
 
-        Measured 2026-08-17: the badge read #2 while BOT was #1, because the
-        estimate handed a live opponent 146 points it could not reach. That is
-        the same failure the done-team projection fix removed in its own form,
-        and it is what the scan is for.
+        This asserted `after < before` on BOT's rank BADGE until 2026-09-10 —
+        measured 2026-08-17, the badge read #2 while BOT was #1 because the
+        estimate handed a live opponent 146 points it could not reach. The
+        overstatement is still here and still 128 points, but the price refit
+        moved every team's total and it no longer happens to cross BOT, so the
+        rank flip was the incidental half. A gap between two teams' point
+        totals is as much a data fingerprint as a literal rank; what is NOT
+        incidental is that the estimate is above the achievable optimum and the
+        scan corrects it downward. That is what this pins, plus BOT's own
+        figure holding still — which is the half that says the column really is
+        two different rules. `test_the_scan_changes_the_standings` carries the
+        rank claim, on the state where it reproduces.
         """
         import main
 
         client.post("/load-scenario", data={"name": "endgame-ceiling-binds"})
-        before = self._badge(section_of(client.get("/").text, "league-state"),
-                             main.MY_TEAM)
+        opponents = self._live_opponents()
+        assert opponents, "the scenario has no live opponent to solve for"
+
+        page = section_of(client.get("/").text, "league-state")
+        before = {c: self._figure(page, c) for c in opponents + [main.MY_TEAM]}
         client.get("/solve-standings")
         page = section_of(client.get("/").text, "league-state")
-        after = self._badge(page, main.MY_TEAM)
-        assert after is not None and before is not None
-        assert after < before, (
-            f"BOT's badge went #{before} -> #{after} across the scan; on this "
-            f"scenario the estimate flatters a live opponent, so solving it "
-            f"exactly must move BOT UP"
+        after = {c: self._figure(page, c) for c in opponents + [main.MY_TEAM]}
+
+        flattered = {c: before[c] - after[c] for c in opponents
+                     if after[c] < before[c]}
+        assert flattered, (
+            f"no live opponent's figure fell when solved exactly "
+            f"({ {c: (before[c], after[c]) for c in opponents} }) — the estimate "
+            f"is supposed to overstate the achievable optimum, and if it no "
+            f"longer does on this scenario the scan is pinned by nothing here"
+        )
+        assert after[main.MY_TEAM] == before[main.MY_TEAM], (
+            f"BOT's Proj moved {before[main.MY_TEAM]} -> {after[main.MY_TEAM]} "
+            f"across the scan; BOT's figure is `milp_solution.total_points` in "
+            f"both states and the scan must not touch it"
+        )
+
+    def test_the_scan_changes_the_standings(self, client):
+        """Solving exactly must actually move somebody, or the button is decor.
+
+        On a fresh league the estimate is worst — measured 2026-09-10 it runs
+        +95.5 mean / +220 worst against the true optima and overstates for 8 of
+        10 opponents — so this is where the rank claim reproduces. Asserted as
+        "some badge moves", not as a particular team's rank: which teams swap
+        is a `players.csv` fingerprint, that any swap happens at all is the
+        feature.
+        """
+        import main
+
+        codes = list(main.auction_state.teams)
+        page = section_of(client.get("/").text, "league-state")
+        before = {c: self._badge(page, c) for c in codes}
+        client.get("/solve-standings")
+        page = section_of(client.get("/").text, "league-state")
+        after = {c: self._badge(page, c) for c in codes}
+
+        moved = {c: (before[c], after[c]) for c in codes if before[c] != after[c]}
+        assert moved, (
+            "no team's rank badge moved across the scan, so replacing every "
+            "estimate with a real MILP optimum changed nothing on screen"
         )
         assert main.exact_projections, "the scan solved nobody on this scenario"
 

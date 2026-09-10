@@ -82,6 +82,96 @@ def compute_pos_ranks(players: dict) -> dict[str, int]:
     return ranks
 
 
+def build_features(
+    position: str,
+    projected_points: float,
+    team_probability: float,
+    is_rfa: bool,
+    params: dict,
+    last_salary: float | None = None,
+    pos_rank: int = 1,
+    proj_wins: float | None = None,
+) -> dict[str, float]:
+    """The 10-feature vector both stages score — the ONE place it is built.
+
+    Extracted from predict_price so a decomposition reads exactly the numbers
+    the prediction read. A second copy of this dict would be free to drift on
+    the details that matter most: `log_lag` is ln(MIN_SALARY) rather than 0 for
+    a player new to the league, and `pos_rank` 0 (the "unset" default) silently
+    becomes rank 1, the best possible scarcity value.
+    """
+    pts = projected_points
+
+    if position == "G" and proj_wins is None:
+        proj_wins = pts / params["metadata"]["goalie_pts_per_win"]
+
+    return {
+        "projected_points": pts,
+        "projected_points_sq": pts * pts,
+        "pts_hinge_60": max(pts - 60.0, 0.0),
+        "pts_hinge_80": max(pts - 80.0, 0.0),
+        "team_probability": team_probability,
+        "is_rfa": 1.0 if is_rfa else 0.0,
+        "log_rank": math.log(max(pos_rank, 1)),
+        "log_lag": math.log(max(last_salary, MIN_SALARY))
+        if last_salary is not None
+        else math.log(MIN_SALARY),
+        "has_lag": 1.0 if last_salary is not None else 0.0,
+        "proj_wins": proj_wins if position == "G" else 0.0,
+    }
+
+
+def _score(pos_params: dict, feats: dict[str, float]) -> tuple[float, float]:
+    """(stage-1 logit, stage-2 log_mu) — the ONE place coefficients are summed.
+
+    Both stages are the same linear form over the same feature vector, which is
+    what makes `decompose_price` exact: log_mu is additive in the per-feature
+    products, so grouping them and subtracting a reference reconstructs it.
+    """
+    logit = pos_params["floor_intercept"] + sum(
+        pos_params[f"floor_coef_{key}"] * feats[key] for key in _FEATURE_KEYS
+    )
+    log_mu = pos_params["intercept"] + sum(
+        pos_params[f"coef_{key}"] * feats[key] for key in _FEATURE_KEYS
+    )
+    return logit, log_mu
+
+
+def _player_inputs(player) -> dict:
+    """The predict_price kwargs a pool Player implies. One rule, two callers.
+
+    `salary == 0` means "new to the league", NOT "$0M last season" — the two
+    produce completely different has_lag/log_lag, so a second copy of this line
+    on the decomposition path would explain a prediction the app never made.
+    """
+    return {
+        "position": player.position,
+        "projected_points": player.projected_points,
+        "team_probability": player.team_probability,
+        "is_rfa": player.is_rfa,
+        "last_salary": player.salary if player.salary > 0 else None,
+        "pos_rank": player.pos_rank,
+        "proj_wins": player.proj_wins,
+    }
+
+
+def points_slopes(pos_params: dict) -> tuple[tuple[float, float], ...]:
+    """Stage-2 log-price slope per projected point, by segment.
+
+    Returns ((breakpoint, slope), ...) with the hinges ACCUMULATED, so each
+    entry is the total slope from that breakpoint up — which is the form you
+    need to ask whether more points ever costs less. Goalies price on wins
+    (`coef_projected_points` is 0.0 for G), so G returns one flat segment.
+
+    A function rather than three coefficients summed at the call site: the
+    guard test summed them inline and was the weaker for it.
+    """
+    base = pos_params["coef_projected_points"]
+    h60 = pos_params["coef_pts_hinge_60"]
+    h80 = pos_params["coef_pts_hinge_80"]
+    return ((0.0, base), (60.0, base + h60), (80.0, base + h60 + h80))
+
+
 def predict_price(
     position: str,
     projected_points: float,
@@ -106,36 +196,13 @@ def predict_price(
             projected_points / metadata.goalie_pts_per_win
     """
     pos_params = params[position]
-    pts = projected_points
 
-    if position == "G" and proj_wins is None:
-        proj_wins = pts / params["metadata"]["goalie_pts_per_win"]
-
-    feats = {
-        "projected_points": pts,
-        "projected_points_sq": pts * pts,
-        "pts_hinge_60": max(pts - 60.0, 0.0),
-        "pts_hinge_80": max(pts - 80.0, 0.0),
-        "team_probability": team_probability,
-        "is_rfa": 1.0 if is_rfa else 0.0,
-        "log_rank": math.log(max(pos_rank, 1)),
-        "log_lag": math.log(max(last_salary, MIN_SALARY))
-        if last_salary is not None
-        else math.log(MIN_SALARY),
-        "has_lag": 1.0 if last_salary is not None else 0.0,
-        "proj_wins": proj_wins if position == "G" else 0.0,
-    }
-
-    # Stage 1: P(floor) via logistic regression
-    logit = pos_params["floor_intercept"] + sum(
-        pos_params[f"floor_coef_{key}"] * feats[key] for key in _FEATURE_KEYS
+    feats = build_features(
+        position, projected_points, team_probability, is_rfa, params,
+        last_salary=last_salary, pos_rank=pos_rank, proj_wins=proj_wins,
     )
+    logit, log_mu = _score(pos_params, feats)
     p_floor = _sigmoid(logit)
-
-    # Stage 2: log-normal parameters for above-floor distribution
-    log_mu = pos_params["intercept"] + sum(
-        pos_params[f"coef_{key}"] * feats[key] for key in _FEATURE_KEYS
-    )
     # Sigma is a function of the *prediction* (not points); exported values
     # already include the MAD->SD correction — use directly as a normal SD.
     sigma = max(
@@ -186,19 +253,10 @@ def predict_all_prices(
     Player.salary carries last season's FCHL salary (0 = new to league),
     which feeds the lag/reputation feature.
     """
-    predictions = {}
-    for name, player in players.items():
-        predictions[name] = predict_price(
-            position=player.position,
-            projected_points=player.projected_points,
-            team_probability=player.team_probability,
-            is_rfa=player.is_rfa,
-            params=params,
-            last_salary=player.salary if player.salary > 0 else None,
-            pos_rank=player.pos_rank,
-            proj_wins=player.proj_wins,
-        )
-    return predictions
+    return {
+        name: predict_price(params=params, **_player_inputs(player))
+        for name, player in players.items()
+    }
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:

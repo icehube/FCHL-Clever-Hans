@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
+from functools import lru_cache
 
 from config import (
     BUYOUT_ELIGIBLE_GROUPS,
@@ -468,6 +470,101 @@ class TransactionRecord:
     nhl_team: str = ""
 
 
+# ---------------------------------------------------------------------------
+# "Where is this player?" — the one global finder.
+# ---------------------------------------------------------------------------
+#
+# Nothing else in the app answers this. `TeamState.find_player` searches ONE
+# team; `main._nhl_team_of` is the only function that scans every team plus the
+# pool and it throws the answer away, returning the NHL club and discarding
+# where it found him. So a rostered player was findable only by opening the
+# right panel out of eleven, a minor only inside a second table in that panel,
+# and a bought-out player nowhere at all.
+
+SEARCH_MIN_QUERY = 2  # one character matches hundreds; see the tier table below
+SEARCH_LIMIT = 10
+
+
+# Memoized because the folding, not the searching, was the cost. Measured
+# 2026-09-10 over the live 953 names: `_searchable()` is 0.047ms and a plain
+# `.lower()` sweep 0.018ms, but an unmemoized fold sweep is **0.792ms** — 70%
+# of a 1.13ms query, paid again on every keystroke to re-derive the same
+# answer for the same stable strings. Memoized, a query measures **0.33ms**
+# warm — the remainder is 953 cache lookups and the tier sweep, not the
+# normalize. (0.10ms was predicted here before it was measured; it was wrong,
+# and 3x wrong in the direction that would have justified more cleverness.)
+# Bounded rather than unbounded: the keys are pool names plus every prefix the
+# operator types, and `players.csv` is replaced between drafts.
+@lru_cache(maxsize=4096)
+def _fold(text: str) -> str:
+    """Lower-cased and stripped of diacritics, for MATCHING only.
+
+    NFKD splits an accented character into a base letter plus a combining
+    mark, which dropping category "Mn" then removes — so "Tomáš" folds to
+    "tomas" and a name typed off a broadcast graphic still finds him.
+
+    Measured 2026-09-10: the live pool has ZERO non-ASCII names, so this is a
+    no-op on today's data and a test asserting it against the pool could not
+    fail. `players.csv` is replaced before every draft and NHL rosters carry
+    diacritics routinely, so the test SUPPLIES a name that needs folding.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+
+
+@dataclass(frozen=True)
+class PlayerLocation:
+    """Where one player is right now, and what he costs there."""
+
+    name: str
+    # "pool" | "roster" | "bench" | "minors" | "bought-out". An allowlist, and
+    # a template branching on it must treat an unknown value as "say nothing"
+    # rather than borrow another branch's wording.
+    where: str
+    team_code: str | None  # None only for "pool"
+    position: str
+    nhl_team: str
+    group: str  # "" for a bought-out player; the log does not record it
+    projected_points: int  # 0 for a bought-out player, for the same reason
+    # The player's CAP HIT, or None when he has none. None in the pool is not
+    # missing data: `Player.salary` is LAST season's salary — the price model's
+    # lag feature, where 0 means "new to the league" — while
+    # `PlayerOnRoster.salary` is the actual cap hit. They are different
+    # quantities, and rendering the first beside the second would be wrong on
+    # every pool row.
+    salary: float | None
+    # Whether THIS PLAYER's salary is on his team's cap right now. False for a
+    # bought-out player: he is gone and it is the penalty that remains, which
+    # is a different number (50% of `salary`) and is named separately.
+    counts_on_cap: bool
+    last_txn: TransactionRecord | None  # provenance: how he got where he is
+
+
+@dataclass(frozen=True)
+class PlayerSearch:
+    """The answer to one query."""
+
+    query: str
+    hits: tuple[PlayerLocation, ...]
+    # Matches BEFORE the limit was applied, so the caller can say "+N more"
+    # rather than silently truncating.
+    total: int
+
+
+def _placement(player: PlayerOnRoster, in_minors: bool) -> str:
+    """Which of the three roster locations a player is in.
+
+    `in_minors` comes from WHICH LIST he was found in, not from `is_minor`,
+    because the list is what `all_players` and `total_salary` read. The bench
+    has no list of its own — it is a flag — so that half does read `is_bench`.
+    Order matters: `send_to_minors` forces `is_bench = True` on the way down,
+    so a flag-first reading would report every minor as benched.
+    """
+    if in_minors:
+        return "minors"
+    return "bench" if player.is_bench else "roster"
+
+
 @dataclass
 class AuctionState:
     """Complete state of the auction at any point in time."""
@@ -587,6 +684,124 @@ class AuctionState:
             return False
         self.rollback_to(self._snapshots.pop())
         return True
+
+    def _searchable(self) -> dict[str, tuple[str, str | None, object]]:
+        """Every findable name, resolved to exactly ONE location.
+
+        Resolution order mirrors `TeamState.find_player` and `remove_player`:
+        keeper, then acquired, then minors, then the pool, then the log. The
+        three roster lists are *intended* to be disjoint but nothing enforces
+        it — `add_acquired_player` and `add_minor_player` append with no name
+        check — so using their order here is what keeps a search hit and a
+        `find_player` hit from naming different rows.
+
+        Live state beats the log, always, and `setdefault` is what enforces
+        it. `execute_buyout` removes a player from every list and leaves only
+        a nameless float in `team.penalties`, so his `buyout` record is the
+        sole evidence he existed — but the log is append-only HISTORY, and a
+        name appearing in it is not evidence of where he is now. Only the
+        collections are.
+
+        Reversing that order is not caught by anything the app can reach on
+        its own, which is why `test_a_buyout_row_never_outranks_a_live_roster`
+        supplies the state directly. `/undo` does not produce it: it restores
+        a snapshot taken BEFORE the buyout, so the row goes with it. (An
+        earlier draft of this comment cited undo as the reason and was simply
+        wrong — the mutant survived the undo test, which is how it was found.)
+        """
+        index: dict[str, tuple[str, str | None, object]] = {}
+        for code, team in self.teams.items():
+            for in_minors, group in (
+                (False, team.keeper_players),
+                (False, team.acquired_players),
+                (True, team.minor_players),
+            ):
+                for player in group:
+                    if player.name not in index:
+                        index[player.name] = (
+                            _placement(player, in_minors), code, player,
+                        )
+        for name, player in self.available_players.items():
+            index.setdefault(name, ("pool", None, player))
+        for txn in self.transaction_log:
+            if txn.transaction_type == "buyout":
+                index.setdefault(txn.player_name, ("bought-out", txn.team_code, txn))
+        return index
+
+    def locate_players(self, query: str, limit: int = SEARCH_LIMIT) -> PlayerSearch:
+        """Find a player anywhere — pool, roster, bench, minors, or bought out.
+
+        Named `locate_players` and not `find_player` deliberately:
+        `TeamState.find_player` is an exact-match lookup on one team, and
+        mistaking a fuzzy multi-hit search for it is the confusion the name
+        exists to prevent.
+
+        Ranked in three tiers, alphabetical within each, because a bare
+        substring is unusable at this pool size — measured over the live 953
+        names:
+
+            query   full prefix   word prefix   substring
+            "ma"             69           100         136
+            "son"             1             1          82
+            "er"              9            12         226
+
+        A word prefix is what the operator actually types (a surname), so it
+        outranks a substring; a full-name prefix outranks both.
+        """
+        folded_query = _fold(query.strip())
+        if len(folded_query) < SEARCH_MIN_QUERY:
+            return PlayerSearch(query=query, hits=(), total=0)
+
+        index = self._searchable()
+        by_tier: tuple[list[str], list[str], list[str]] = ([], [], [])
+        for name in index:
+            folded = _fold(name)
+            if folded.startswith(folded_query):
+                by_tier[0].append(name)
+            elif any(word.startswith(folded_query) for word in folded.split()):
+                by_tier[1].append(name)
+            elif folded_query in folded:
+                by_tier[2].append(name)
+
+        ranked = [name for tier in by_tier for name in sorted(tier)]
+        # Rank on NAMES and materialize only the survivors: the index is ~950
+        # entries and all but `limit` of them would be thrown away.
+        hits = tuple(self._locate(name, *index[name]) for name in ranked[:limit])
+        return PlayerSearch(query=query, hits=hits, total=len(ranked))
+
+    def _locate(
+        self, name: str, where: str, team_code: str | None, subject: object
+    ) -> PlayerLocation:
+        """One index entry as a PlayerLocation, plus its provenance."""
+        last_txn = next(
+            (t for t in reversed(self.transaction_log) if t.player_name == name),
+            None,
+        )
+        if where == "pool":
+            return PlayerLocation(
+                name=name, where=where, team_code=None,
+                position=subject.position, nhl_team=subject.nhl_team,
+                group=subject.group, projected_points=subject.projected_points,
+                salary=None, counts_on_cap=False, last_txn=last_txn,
+            )
+        if where == "bought-out":
+            # Everything here comes off the TransactionRecord, which is all
+            # that survives him. It denormalises `nhl_team` for exactly this
+            # reason; it does not carry group or points, so those stay empty
+            # rather than being guessed.
+            return PlayerLocation(
+                name=name, where=where, team_code=team_code,
+                position=subject.position, nhl_team=subject.nhl_team,
+                group="", projected_points=0,
+                salary=subject.salary, counts_on_cap=False, last_txn=last_txn,
+            )
+        return PlayerLocation(
+            name=name, where=where, team_code=team_code,
+            position=subject.position, nhl_team=subject.nhl_team,
+            group=subject.group, projected_points=subject.projected_points,
+            salary=subject.salary, counts_on_cap=subject.counts_on_cap,
+            last_txn=last_txn,
+        )
 
     def to_json(self, include_snapshots: bool = True) -> str:
         """Serialize state to JSON string."""

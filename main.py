@@ -1382,6 +1382,140 @@ async def nominate(request: Request):
     return _render(request, "partials/nomination_panel.html", ctx)
 
 
+# The five locations, as the words that go on screen. An allowlist: an
+# unrecognised `where` renders no label rather than borrowing another one's
+# wording, the same rule `bid_panel.html` follows for `stop_status`.
+_SEARCH_LABELS = {
+    "pool": "available",
+    "roster": "roster",
+    "bench": "bench",
+    "minors": "minors",
+    "bought-out": "bought out",
+}
+
+
+def _provenance(txn: TransactionRecord | None) -> str:
+    """How he got where he is, in one phrase — or nothing.
+
+    A `trade` record's `team_code` is `f"{source}→{dest}"` and NOT a team
+    code, which is why every branch here produces TEXT and none produces a
+    link. The arrow form actually reads well as prose, so it is quoted rather
+    than parsed; parsing it would be inventing a direction the log does not
+    promise.
+
+    Nothing for a buyout: the row is already labelled "bought out" and names
+    the penalty, so a second line saying it again is noise.
+    """
+    if txn is None:
+        return ""
+    if txn.transaction_type == "draft":
+        return f"drafted by {txn.team_code} for ${txn.salary:.1f}M"
+    if txn.transaction_type == "trade":
+        return f"traded {txn.team_code}"
+    if txn.transaction_type in ("trade_in", "trade_out"):
+        return f"{txn.transaction_type.replace('_', ' ')} ({txn.team_code})"
+    return ""
+
+
+def _search_rows(query: str) -> dict:
+    """Template-ready rows for the header search.
+
+    Every figure and every branch decision lives here rather than in Jinja —
+    the shape `_driver_rows` established for the price breakdown. The template
+    prints and formats; it decides nothing.
+
+    Pool rows carry model and market price and nothing else, deliberately.
+    A max bid is a binary search over MILP solves, and this endpoint fires on
+    every keystroke; `tests/test_event_loop.py` exists because one solve on
+    that path is a visible stall. The Available Players table and the bid
+    panel are where that number lives.
+    """
+    result = auction_state.locate_players(query)
+    # Copied verbatim from _context: reading `.roster` off an Infeasible
+    # solution would mark players as wanted on the strength of a plan that
+    # does not exist.
+    wanted = (
+        {p.name for p in milp_solution.roster}
+        if milp_solution and milp_solution.status == "Optimal"
+        else set()
+    )
+
+    rows = []
+    for hit in result.hits:
+        model_p = market_p = penalty = None
+        if hit.where == "pool":
+            model_p = round(
+                model_prices[hit.name].expected_price
+                if hit.name in model_prices else MIN_SALARY,
+                1,
+            )
+            market_p = round(market_prices.get(hit.name, MIN_SALARY), 1)
+        elif hit.where == "bought-out" and hit.salary is not None:
+            penalty = hit.salary * BUYOUT_PENALTY_RATE
+
+        rows.append({
+            "name": hit.name,
+            "where": hit.where,
+            "label": _SEARCH_LABELS.get(hit.where, ""),
+            "position": hit.position,
+            "nhl_team": hit.nhl_team,
+            "salary": hit.salary,
+            "counts_on_cap": hit.counts_on_cap,
+            "model_price": model_p,
+            "market_price": market_p,
+            "capped": is_capped(model_p, market_p) if model_p is not None else False,
+            "in_optimal": hit.name in wanted,
+            "penalty": penalty,
+            "provenance": "" if hit.where == "bought-out" else _provenance(hit.last_txn),
+            # DISPLAY and NAVIGATION are two fields, and a buyout is why.
+            # `team_code` names whose cap carries the row — for a bought-out
+            # player that is BOT, and the penalty sits in BOT's panel header,
+            # so the code is worth showing. But he is on no roster, and the
+            # other four rows all promise "click this and see the player", so
+            # linking there lands you somewhere he demonstrably is not. Only
+            # the live locations navigate.
+            "team_code": hit.team_code if hit.team_code in auction_state.teams else None,
+            "link_team": (
+                hit.team_code
+                if hit.where != "bought-out" and hit.team_code in auction_state.teams
+                else None
+            ),
+        })
+
+    return {
+        "search_query": result.query,
+        "search_rows": rows,
+        "search_total": result.total,
+        "search_more": result.total - len(rows),
+    }
+
+
+@app.get("/find-player", response_class=HTMLResponse)
+async def find_player(request: Request, q: str = ""):
+    """Where is this player? — the header search.
+
+    A QUERY parameter for the reason `/buyout-check` documents: a `#` in a
+    path truncates at the fragment and never reaches the server, and
+    `_disambiguated_names`' last-resort tier is ` (#n)`.
+
+    **It deliberately does not build `_context`.** This fires on every
+    keystroke, and `_context` costs ~8.5ms and assembles a 704-row
+    `bid_limits` list regardless of what is rendered, against 0.33ms of
+    actual work. Passing a dict already carrying `"request"` takes `_render`'s
+    existing short-circuit. That narrows ONE endpoint; the BACKLOG entry
+    asking for a per-panel context builder across all of them is untouched.
+
+    `teams` is passed because the row template names the holding club, and it
+    is a dict reference rather than a computation.
+    """
+    return _render(request, "partials/search_results.html", {
+        "request": request,
+        "teams": auction_state.teams,
+        "my_team": MY_TEAM,
+        **_search_rows(q),
+    })
+
+
 @app.get("/explain/{player_name}", response_class=HTMLResponse)
 async def explain(request: Request, player_name: str, inline: bool = False):
     """Why not bid: counterfactual explanation.

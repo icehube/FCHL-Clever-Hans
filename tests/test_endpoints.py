@@ -4503,3 +4503,153 @@ class TestExactStandingsOnDemand:
                     f"the button performed zero solves, so done team {code}'s "
                     f"figure must be exactly where it was"
                 )
+
+
+class TestFindingAPlayerAnywhere:
+    """`GET /find-player` — the header search.
+
+    The engine's five locations and its ranking are pinned in
+    `tests/test_player_search.py`; these are about the RESPONSE — what reaches
+    the screen, where a click goes, and the two things about this endpoint
+    that are easy to regress silently.
+    """
+
+    def _find(self, client, query: str) -> str:
+        return client.get("/find-player", params={"q": query}).text
+
+    def _surname(self, name: str) -> str:
+        return (name.split()[-1] if " " in name else name)[:4]
+
+    def _row(self, html_text: str, name: str) -> str:
+        """The one `.search-row` naming this player."""
+        rows = re.findall(r'<div class="search-row"[^>]*>.*?(?=<div class="search-row"|</div>\s*$)',
+                          html_text, re.S)
+        found = [r for r in rows if html.unescape(name) in html.unescape(r)]
+        assert found, f"no search row for {name} in:\n{html_text[:600]}"
+        return found[0]
+
+    def test_an_available_player_says_so_and_opens_his_chart(self, client):
+        name = pool_top(1)[0]
+        row = self._row(self._find(client, self._surname(name)), name)
+        assert "available" in row
+        assert "/player-chart/" in row, "a pool hit must open the price chart"
+        assert "/team-view/" not in row, "a pool player has no holder to open"
+
+    def test_an_owned_player_opens_his_holder_and_not_the_whole_page(self, client):
+        """`/team-view` rather than a full render is what keeps a live bidding
+        session alive — it swaps `#team-panel` and never touches `#bid-panel`.
+        """
+        code = next(c for c in main_state().teams if c != MY_TEAM)
+        player = a_roster_player(code)
+        row = self._row(self._find(client, self._surname(player.name)), player.name)
+        assert f'hx-get="/team-view/{code}"' in row
+        assert 'hx-target="#team-panel"' in row
+        assert "all_panels" not in row and 'hx-target="#app"' not in row
+
+    def test_a_minor_off_cap_is_marked_and_one_on_cap_is_not(self, client):
+        """Both branches, supplied — the live pool's cap-counting minors are
+        all one group, so a hard-coded answer would look right on it."""
+        from state import PlayerOnRoster
+
+        team = main_state().teams[MY_TEAM]
+        shared = dict(position="F", salary=1.0, projected_points=10, is_minor=True)
+        team.minor_players.append(PlayerOnRoster(name="Zzq Oncap Minor", group="3", **shared))
+        team.minor_players.append(PlayerOnRoster(name="Zzq Offcap Minor", group="5", **shared))
+        team._invalidate_cache()
+
+        page = self._find(client, "Zzq")
+        assert "off cap" in self._row(page, "Zzq Offcap Minor")
+        assert "off cap" not in self._row(page, "Zzq Oncap Minor"), (
+            "a group 3 minor's salary is fully on the cap and must not be "
+            "marked as free"
+        )
+
+    def test_a_bought_out_player_shows_the_penalty_and_links_nowhere(self, client):
+        from config import BUYOUT_PENALTY_RATE
+
+        victim = a_buyout_candidate()
+        expected = victim.salary * BUYOUT_PENALTY_RATE
+        client.post("/buyout", data={"player": victim.name})
+
+        row = self._row(self._find(client, self._surname(victim.name)), victim.name)
+        assert "bought out" in row
+        assert f"${expected:.1f}M penalty" in row, (
+            f"the row does not name the ${expected:.1f}M still on the cap: {row}"
+        )
+        assert "hx-get" not in row, "he is on no roster; there is nothing to open"
+
+    def test_a_drafted_player_shows_what_he_went_for(self, client):
+        """The commonest provenance of all, and the one the trade test does
+        not reach — measured, deleting this branch survived the class."""
+        name = pool_top(1)[0]
+        code = next(c for c in main_state().teams if c != MY_TEAM)
+        assign(client, name, code, 3.7)
+
+        row = self._row(self._find(client, self._surname(name)), name)
+        assert f"drafted by {code} for $3.7M" in row, (
+            f"the row does not say what he went for: {row}"
+        )
+
+    def test_a_trade_between_two_teams_renders_as_text_not_a_link(self, client):
+        """`/trade-between` logs `team_code` as f"{source}→{dest}". It reaches
+        the row as provenance, and an unguarded renderer would point a link at
+        `/team-view/SRL→MAC`."""
+        from state import TransactionRecord
+
+        state = main_state()
+        code = next(c for c in state.teams if c != MY_TEAM)
+        player = a_roster_player(code)
+        state.transaction_log.append(TransactionRecord(
+            player_name=player.name, position=player.position,
+            team_code=f"{code}→{MY_TEAM}", salary=player.salary,
+            model_price=1.0, market_price=1.0, timestamp="now",
+            transaction_type="trade",
+        ))
+        row = self._row(self._find(client, self._surname(player.name)), player.name)
+        assert html.unescape(f"traded {code}→{MY_TEAM}") in html.unescape(row)
+        assert f"/team-view/{code}→{MY_TEAM}" not in html.unescape(row), (
+            "the arrow form was rendered as a link target"
+        )
+
+    def test_it_says_how_many_it_did_not_show(self, client):
+        """Silent truncation on a common surname reads as "not in the league"."""
+        page = self._find(client, "son")
+        assert "more — keep typing" in page
+
+    def test_a_query_that_matches_nothing_says_so(self, client):
+        page = self._find(client, "zzzznotaplayer")
+        assert "No player matching" in page
+
+    def test_a_query_too_short_renders_nothing_at_all(self, client):
+        """The dropdown is this fragment; an empty body is how it stays shut."""
+        assert self._find(client, "m").strip() == ""
+        assert self._find(client, "").strip() == ""
+
+    def test_the_response_carries_no_ids(self, client):
+        """`_dom_id` mints one id per player and `team_panel.html` owns it for
+        the buyout dots. A second copy here is a duplicate id the roster scan
+        swaps twice."""
+        page = self._find(client, pool_top(1)[0][:4])
+        assert 'id="' not in page
+
+    def test_it_does_not_build_the_whole_page_context(self, client, monkeypatch):
+        """The reason this endpoint bypasses `_context`: it fires on every
+        keystroke, and `_context` assembles a 704-row `bid_limits` list plus
+        the per-team projections regardless of what is rendered — ~8.5ms
+        against 0.33ms of actual work. Trivially reintroduced by a later
+        `ctx = _context(request)`, and nothing else would notice."""
+        import main
+
+        def explode(*a, **k):
+            raise AssertionError("/find-player built the full page context")
+
+        monkeypatch.setattr(main, "_context", explode)
+        r = client.get("/find-player", params={"q": pool_top(1)[0][:4]})
+        assert r.status_code == 200
+        assert "search-row" in r.text
+
+
+def main_state():
+    import main
+
+    return main.auction_state

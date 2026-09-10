@@ -1,0 +1,77 @@
+{# The header search's answer: where each matching player is, and what he
+   costs there.
+
+   NO IDS ANYWHERE IN HERE, on any element. `main._dom_id` mints exactly one
+   id per player and `team_panel.html` already owns it for the buyout dots; a
+   second copy in this list would be a duplicate id that the roster scan then
+   swaps twice. The mount (`#player-search-results` in base.html) carries the
+   only id involved, and it is positioning alone — the visible card is this
+   fragment, so an empty response renders nothing at all and the dropdown
+   simply is not there. That is why there is no `hidden` to manage.
+
+   THE WHOLE ROW is the click target, not a link inside it. A nested <a> would
+   be invalid markup, and on a pool row there is no team to link to anyway, so
+   putting the navigation on the row is the only shape that behaves the same
+   in all five states. `link_team` is guarded in `_search_rows` and is None
+   unless the row should navigate, so this template never has to ask. It is a
+   SEPARATE field from `team_code`, which is DISPLAY only: a bought-out
+   player's 50% penalty sits on BOT's cap and is worth naming, but he is on no
+   roster, so linking there would land you on a panel he is demonstrably not
+   in — and the other four rows all promise "click this and see the player".
+
+   Every figure here is a lookup, never a solve. See `_search_rows`. #}
+{% if search_rows %}
+<div class="search-card">
+    {% for r in search_rows %}
+    {# hx-get on the row: a team for an owned player, the price chart for one
+       still in the pool. Both targets live inside #app, which this fragment
+       does not, so the swap lands and the header survives it. /team-view
+       rather than a full panel render is what keeps a live bid alive. #}
+    <div class="search-row"
+         {% if r.link_team %}hx-get="/team-view/{{ r.link_team }}" hx-target="#team-panel" hx-swap="outerHTML"
+         {% elif r.where == "pool" %}hx-get="/player-chart/{{ r.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML"
+         {% endif %}
+         {% if r.link_team or r.where == "pool" %}role="button" tabindex="0"{% endif %}>
+        <div class="search-row-main">
+            <span class="search-name">{{ r.name }}</span>
+            <span class="search-meta">{{ r.position }}{% if r.nhl_team %} · {{ r.nhl_team }}{% endif %}</span>
+        </div>
+        <div class="search-row-where">
+            {% if r.team_code %}
+            <img src="/fchl_logos/{{ teams[r.team_code].logo }}" alt="" class="w-4 h-4">
+            <strong>{{ r.team_code }}</strong> ·
+            {% endif %}
+            <span class="search-label search-label-{{ r.where }}">{{ r.label }}</span>
+            {% if r.where == "pool" %}
+                {# Same two figures and the same strike-through rule as the
+                   Available Players Price column: the model price is struck
+                   when the market ceiling cut it. #}
+                <span class="search-money">
+                    {% if r.capped %}<s>${{ "%.1f"|format(r.model_price) }}M</s>
+                    ${{ "%.1f"|format(r.market_price) }}M
+                    {% else %}${{ "%.1f"|format(r.market_price) }}M{% endif %}
+                </span>
+                {% if r.in_optimal %}<span class="search-flag" title="The optimizer wants him in your roster">★</span>{% endif %}
+            {% elif r.where == "bought-out" %}
+                <span class="search-money">${{ "%.1f"|format(r.penalty) }}M penalty</span>
+            {% elif r.salary is not none %}
+                <span class="search-money">${{ "%.1f"|format(r.salary) }}M</span>
+                {% if r.where == "minors" and not r.counts_on_cap %}
+                <span class="search-meta">off cap</span>
+                {% endif %}
+            {% endif %}
+        </div>
+        {% if r.provenance %}<div class="search-meta">{{ r.provenance }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% if search_more > 0 %}
+    {# Never truncate silently: on a common surname a bare top-10 reads as
+       "he is not in the league". #}
+    <div class="search-more">+{{ search_more }} more — keep typing</div>
+    {% endif %}
+</div>
+{% elif search_query|trim|length >= 2 %}
+<div class="search-card">
+    <div class="search-more">No player matching “{{ search_query|trim }}”</div>
+</div>
+{% endif %}

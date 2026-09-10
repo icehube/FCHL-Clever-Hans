@@ -22,3 +22,5 @@
 {% for code in nomination_order %}
 {{ proj_figure(code, projections.get(code, {}), my_team, oob=true) }}
 {% endfor %}
+{% set basis_oob = true %}
+{% include "partials/standings_basis.html" %}

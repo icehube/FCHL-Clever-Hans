@@ -298,12 +298,15 @@ class TestAScanDiscardsWhatTheStateOutran:
         )
         assert "9999" not in r.text, "a fabricated figure reached the Proj column"
 
-        # And what it published instead is the estimate — the column's resting
-        # state — rather than nothing at all. Compared against a freshly
-        # rendered page rather than against the literal word "estimated": the
-        # basis marker that used to carry it was removed 2026-09-09, and a
-        # response with no figures in it would satisfy the "9999" check above
-        # vacuously.
+        assert re.search(r'id="proj-basis"[^>]*>\s*estimated\s*<', r.text), (
+            "the basis marker does not say the column is back on estimates, so "
+            "the figures on screen look exact and are not"
+        )
+
+        # And the FIGURES agree with the marker. Both assertions, because they
+        # fail apart: a response carrying no figures at all satisfies the "9999"
+        # check above vacuously, and a marker can say "estimated" over a column
+        # still painted with the superseded solve.
         swapped = dict(re.findall(r'id="proj-([A-Z]{3})"[^>]*>\s*(\d+)', r.text))
         page = dict(re.findall(
             r'id="proj-([A-Z]{3})"[^>]*>\s*(\d+)', client.get("/").text
@@ -522,6 +525,20 @@ class TestAScanWithNothingToSolve:
             f"a done team's roster is final, so the scan must not invent figures "
             f"for one: {main.exact_projections}"
         )
+        # And the marker reads a plain "opponents solved", which looks wrong for
+        # a scan that solved nothing and is not: with every opponent done there
+        # is nothing left to guess, because a done team's figure is its FINAL
+        # and BOT's is its own MILP optimum. `standings_basis.html` branches on
+        # the count of ESTIMATES for exactly this state (measured 2026-08-18) —
+        # asserting "estimated" here is the mistake its comment predicts, and
+        # this test made it before making it this way.
+        marker = re.search(r'id="proj-basis"[^>]*>(.*?)</span>', r.text, re.S)
+        assert marker and marker.group(1).strip() == "solved", (
+            f"nothing on screen is an estimate — every opponent is done, so their "
+            f"figures are finals and BOT's is its own optimum — but the marker "
+            f"reads {marker.group(1).strip() if marker else '(absent)'!r}"
+        )
+
         # The response still carries a figure for every team, which is what makes
         # the empty-list guard a no-op rather than a broken column: a done team's
         # figure is its FINAL and BOT's is its own MILP optimum, so there is

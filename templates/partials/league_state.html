@@ -38,12 +38,24 @@
        so subtracting predicted ~768 and the browser said 815. Take the figure
        from the instrument, never from arithmetic over the parts.
 
-       What still holds is the shape of the constraint: min-content is each
-       column's longest WORD, not its longest string, so nothing in the table
-       BODY can narrow it — that is why removing the full team name in
-       2026-08-13 bought only 87px. Only shorter headers can, and that trades
-       legibility in a dense grid of money figures that all look alike. See
-       BACKLOG.md before reaching for it. #}
+       Re-measured 2026-09-10, three variants in ONE run: 768px with the basis
+       marker hidden, 776px with it, 829px with a two-word label in it. Those
+       do not reproduce the 815px above and no attempt is made to reconcile
+       them — the pool changed on 2026-09-07 and a figure taken under other
+       conditions is not comparable. Compare variants inside one run; that is
+       what the instrument is for.
+
+       WHY only headers can narrow this, corrected 2026-09-10. The rule used
+       to be stated as "min-content is each column's longest WORD, not its
+       longest string" — true of the BODY, whose cells wrap, and false of the
+       row that actually binds. DaisyUI sets
+       `.table :where(thead,tfoot){white-space:nowrap}`, so a HEADER cell
+       cannot wrap and its floor is the whole string. That is why removing the
+       full team name in 2026-08-13 bought only 87px, and it is why a second
+       word in the Proj header's basis marker cost 53px when longest-word
+       reasoning predicted about 3. Shorter headers still work, and still trade
+       legibility in a dense grid of money figures that all look alike; a
+       header phrase is NOT free. See BACKLOG.md before reaching for it. #}
     <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
         <thead>
@@ -82,6 +94,7 @@
                    Hence the button rather than a new formula. See BACKLOG.md. #}
                 <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">
                     <span class="tooltip tooltip-bottom" data-tip="Projected points once the roster is filled. YOURS is the optimizer's actual best roster within your real budget. An opponent's is a quick estimate that can read either side of what they can actually reach — measured up to 14% high — until you press Solve Standings, which replaces every opponent's figure with a real optimizer solve. Any pick returns the column to estimates.">Proj</span>
+                    {% include "partials/standings_basis.html" %}
                 </th>
                 <th>Done</th>
             </tr>

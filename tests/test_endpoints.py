@@ -4068,6 +4068,11 @@ class TestExactStandingsOnDemand:
         assert found, f"no proj-{code} span in the response"
         return int(found.group(1))
 
+    def _basis(self, html: str) -> str:
+        found = re.search(r'id="proj-basis"[^>]*>\s*([^<]*?)\s*<', html)
+        assert found, "no proj-basis marker in the response"
+        return found.group(1)
+
     def _live_opponents(self) -> list[str]:
         import main
 
@@ -4102,14 +4107,12 @@ class TestExactStandingsOnDemand:
             f"{missing} are swapped by the scan but render nowhere in League "
             f"State, so those swaps silently do nothing"
         )
-        # Exactly one per team, and nothing else — the basis marker used to be
-        # a twelfth fragment and was removed 2026-09-09. A count as well as the
-        # resolution check, because a fragment that stops being emitted resolves
-        # vacuously.
-        expected = len(main.auction_state.nomination_order)
+        # One per team plus the basis marker. A count as well as the resolution
+        # check, because a fragment that stops being emitted resolves vacuously.
+        expected = len(main.auction_state.nomination_order) + 1
         assert len(fragments) == expected, (
             f"the scan returned {len(fragments)} fragments against "
-            f"{expected} (one per team in League State)"
+            f"{expected} (one per team in League State, plus the basis marker)"
         )
 
     def test_an_opponents_figure_becomes_its_milp_optimum(self, client):
@@ -4165,9 +4168,70 @@ class TestExactStandingsOnDemand:
             f"a pick left {len(main.exact_projections)} exact figures cached, so "
             f"the column now describes the state before the pick"
         )
+        assert self._basis(page) == "estimated", (
+            f"the marker still reads {self._basis(page)!r} after a pick"
+        )
         assert self._figure(page, code) != exact, (
             f"{code} still shows its pre-pick exact figure {exact}"
         )
+
+    def test_the_basis_marker_renders_in_both_states(self, client):
+        """A target that disappears with its contents can only be swapped once.
+
+        The `buyout_scan.html` bug exactly: the Scan button vanished on the way
+        to an opponent's panel and never came back, because the wrapper was
+        conditional rather than only its `hx-swap-oob` attribute.
+        """
+        page = section_of(client.get("/").text, "league-state")
+        assert self._basis(page) == "estimated"
+
+        client.get("/solve-standings")
+        after = section_of(client.get("/").text, "league-state")
+        assert self._basis(after) == "solved", (
+            f"after a clean scan the marker reads {self._basis(after)!r}. No "
+            f"count in this state: it carries information only when the column "
+            f"is mixed, and 'N/N' is worse than nothing when nothing is a guess"
+        )
+
+    def test_the_marker_explains_itself_in_every_state(self, client):
+        """The label is one word because a second costs 53px of the widest
+        table in the app (measured 2026-09-10), so the `title` is where the
+        meaning lives — and it is the half that was missing when this was
+        removed on 2026-09-09 for being unintelligible.
+
+        Both states, because a tooltip on only the alarming one leaves the
+        resting state as the bare adjective it was. The estimated state also
+        has to name the control, since knowing the figures are guesses is no
+        use without knowing what to press.
+        """
+        def title(html: str) -> str:
+            found = re.search(r'id="proj-basis"[^>]*\stitle="([^"]*)"', html)
+            assert found, "the basis marker carries no title at all"
+            return found.group(1)
+
+        page = section_of(client.get("/").text, "league-state")
+        assert self._basis(page) == "estimated", "precondition"
+        estimated = title(page)
+        assert "Solve Standings" in estimated, (
+            f"the estimated state does not name the button that fixes it: "
+            f"{estimated!r}"
+        )
+
+        client.get("/solve-standings")
+        after = section_of(client.get("/").text, "league-state")
+        assert self._basis(after) == "solved", "precondition"
+        solved = title(after)
+        assert solved and solved != estimated, (
+            "the solved state reuses the estimated state's tooltip"
+        )
+        # Both must say the marker is about the OPPONENTS' figures. BOT's own
+        # Proj is a real optimum in every state and the label never covers it —
+        # which is the thing a bare adjective over a mixed column gets wrong.
+        for state, text in (("estimated", estimated), ("solved", solved)):
+            assert "pponent" in text, (
+                f"the {state} tooltip does not say whose figures it describes: "
+                f"{text!r}"
+            )
 
     def test_the_scan_solves_live_opponents_only(self, monkeypatch, client):
         """Done teams and BOT are skipped, and neither is an optimization.
@@ -4225,7 +4289,8 @@ class TestExactStandingsOnDemand:
 
         Absence from `exact_projections` is what makes this safe — the team falls
         through to the estimate. Storing a zero would put a plausible-looking
-        last place on the board.
+        last place on the board, and the marker's count is what tells you one
+        cell is still a guess.
         """
         import main
 
@@ -4242,6 +4307,11 @@ class TestExactStandingsOnDemand:
         assert self._figure(page, code) == estimate, (
             f"{code} moved to {self._figure(page, code)} from its {estimate} "
             f"estimate despite having no solution"
+        )
+        n = len(self._live_opponents())
+        assert self._basis(page) == f"{n - 1}/{n} solved", (
+            f"the marker reads {self._basis(page)!r} while one cell is still an "
+            f"estimate — a count exists precisely so this case is visible"
         )
 
     def _badge(self, html: str, code: str) -> int | None:

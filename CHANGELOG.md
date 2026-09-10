@@ -20,6 +20,57 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-10]
+
+### Changed
+
+- **The Proj basis marker is back, with different words.** Removed on
+  2026-09-09 as one of four requested changes, and restored the next day once
+  it was clear what it did: the owner's words were *"I didn't realize it was
+  functional. I didn't understand what it did."* That is a wording bug, not a
+  feature bug, so the mechanism came back unchanged — `standings_basis.html`,
+  both includes, the `standings_basis` dict in `_context`, the unconditional
+  span with only `hx-swap-oob` conditional, and the branch on the count of
+  ESTIMATES rather than of exact figures (the 2026-08-18 bug, and two tests
+  catch that mutant today: `test_an_unsolvable_opponent_keeps_its_estimate_rather_than_reading_zero`
+  and `test_standings_answers_when_every_opponent_is_done`).
+
+  What changed is the label. It read a bare `exact` / `exact 9/10` /
+  `estimated`. **`exact` appeared nowhere else in the feature** — the button
+  says Solve, the header tooltip says estimate — so the one word that told you
+  the column's state shared no vocabulary with the control that changes it. It
+  now reads `solved` / `9/10 solved` / `estimated`. And it carries its own
+  native `title` in every state, which is the half that was missing: a bare
+  adjective under a header does not say what it is about, and this one is
+  about a *subset* of its column, since BOT's own Proj is a real MILP optimum
+  in every state and the marker never covered it. The estimated state's
+  tooltip names Solve Standings, because knowing the figures are guesses is no
+  use without knowing what to press.
+
+  **The label stays one word, and that is measured rather than taste.**
+  `opponents estimated` was drafted first, on the reasoning that `opponents`
+  and `estimated` are both 9 characters so the panel could not get wider. That
+  reasoning was wrong twice. DaisyUI sets
+  `.table :where(thead,tfoot){white-space:nowrap}`, so a header cell's
+  min-content is its **whole string**, not its longest word — the
+  longest-word rule holds for the body, where cells wrap, and `league_state.html`
+  had stated it for the table as a whole. Measured 2026-09-10 by
+  `tests/measure_layout.py`, three variants in one run: **768px** with the
+  marker hidden, **776px** with it, **829px** with the two-word label. A second
+  word cost **53px** of the widest table in the app — nearly seven times the
+  marker itself — for something the tooltip says better.
+
+### Investigated
+
+- **`league_state.html`'s min-content note was right about the conclusion and
+  wrong about the reason**, corrected in place. "Only shorter headers can
+  narrow this" is true; "because min-content is each column's longest word" is
+  not, and the two come apart exactly when a header holds more than one word.
+  Also recorded there: the 768/776/829 run does not reproduce the 815px figure
+  measured 2026-09-07, and no attempt is made to reconcile them — the pool
+  changed that same day and figures from different runs are not comparable.
+  Compare variants inside one run.
+
 ## [2026-09-09]
 
 ### Added
@@ -1164,7 +1215,7 @@ nothing failed.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1303 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1331 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -1269,7 +1320,7 @@ nothing failed.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1284 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1312 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

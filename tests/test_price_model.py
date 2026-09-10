@@ -145,14 +145,40 @@ class TestPredictPrice:
 
     def test_forward_hinges_flatten_slope_past_80(self, params):
         """Deployed F fit is piecewise-linear with a damped slope after 80 pts."""
-        f = params["F"]
-        slope_to_60 = f["coef_projected_points"]
-        slope_past_80 = (f["coef_projected_points"] + f["coef_pts_hinge_60"]
-                         + f["coef_pts_hinge_80"])
-        assert slope_past_80 < slope_to_60
+        segments = dict(points_slopes(params["F"]))
+        assert segments[80.0] < segments[0.0]
         # And the deployed skater fits are piecewise-linear: pts^2 dropped
-        assert f["coef_projected_points_sq"] == 0.0
+        assert params["F"]["coef_projected_points_sq"] == 0.0
         assert params["D"]["coef_projected_points_sq"] == 0.0
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "KNOWN BAD as of 2026-09-09. F coef_pts_hinge_80 = -0.0504 against a "
+            "60-80 slope of +0.0310 puts the stage-2 points slope at -0.0194 above "
+            "80 pts, so the forward price curve PEAKS at 80 and falls: at rank 10 "
+            "with a $6M lag, 80pts -> $6.60M and 132pts -> $2.44M, below a 40-pt "
+            "forward's $2.51M. NOT a bug in price_model.py — the golden fixture "
+            "reproduces it, so it is in the coefficients the pricer notebook "
+            "exported, and data/model_params.json may not be hand-edited. Needs a "
+            "refit; see BACKLOG.md. strict=True so a corrected export fails here "
+            "as XPASS and forces this marker and that entry to be deleted."
+        ),
+    )
+    def test_the_points_slope_never_goes_negative(self, params):
+        """More projected points must never lower the predicted price.
+
+        The property the test above is too weak to state: it asserts only that
+        the slope is DAMPED past 80, which a negative slope satisfies. That is
+        how a fit which prices a 132-point forward below a 40-point one stayed
+        green for two months.
+        """
+        for position in ("F", "D", "G"):
+            for breakpoint_, slope in points_slopes(params[position]):
+                assert slope >= 0.0, (
+                    f"{position}: the points slope is {slope:+.4f} above "
+                    f"{breakpoint_:.0f} pts, so scoring more costs less"
+                )
 
     def test_all_outputs_within_bounds(self, params):
         for pos in ["F", "D", "G"]:
@@ -180,9 +206,45 @@ class TestPredictPrice:
                 assert pred.sigma >= sigma_floor
 
     def test_higher_points_generally_higher_price(self, params):
+        # 40 vs 90 straddles the peak and passes on a curve that turns over at
+        # 80 — the word "generally" was doing load-bearing work here. The real
+        # comparison is `test_more_points_never_costs_less` below.
         low = predict_price("F", 40, 5.0, False, params, pos_rank=30)
         high = predict_price("F", 90, 5.0, False, params, pos_rank=30)
         assert high.expected_price > low.expected_price
+
+    @pytest.mark.parametrize("position", [
+        pytest.param("F", marks=pytest.mark.xfail(
+            strict=True,
+            reason="KNOWN BAD 2026-09-09: the F curve peaks at 80 pts and falls. "
+                   "See test_the_points_slope_never_goes_negative for the whole "
+                   "reason and BACKLOG.md for the refit.",
+        )),
+        "D",
+        "G",
+    ])
+    def test_more_points_never_costs_less(self, params, position):
+        """The behavioural form of the slope guard, in dollars.
+
+        Holds rank and lag fixed and walks the points axis, which is the
+        comparison an owner actually makes when the panel says a 120-point
+        forward is cheaper than an 85-point one. D and G are real legs, not
+        decoration: both are monotone today and would catch a refit breaking
+        them.
+        """
+        prices = [
+            predict_price(position, pts, 5.0, False, params,
+                          last_salary=6.0, pos_rank=10).expected_price
+            for pts in range(0, 141, 5)
+        ]
+        for (a, pts_a), (b, pts_b) in zip(
+            list(zip(prices, range(0, 141, 5))),
+            list(zip(prices, range(0, 141, 5)))[1:],
+        ):
+            assert b >= a - 1e-9, (
+                f"{position}: {pts_b} pts prices at ${b:.2f}M against "
+                f"${a:.2f}M for {pts_a} pts"
+            )
 
     def test_prediction_dataclass_fields(self, params):
         pred = predict_price("F", 80, 5.0, False, params)

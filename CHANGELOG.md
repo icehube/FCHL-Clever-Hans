@@ -22,7 +22,163 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Fixed
+
+- **The forward price curve peaked at 80 points and fell, so the league's best
+  forwards were priced below mid-tier ones.** Reported as "Kucherov is still
+  priced lower than Panarin, which doesn't make sense" — and he was: on
+  `data/players-25.csv`, Kucherov (119pts, rank 1) came out at $4.86M against
+  Panarin (94pts, rank 2) at $5.50M. On `players.csv` the same inversion put
+  Panarin (120pts) at $5.46M against Marner (85pts) at $8.02M.
+
+  `coef_pts_hinge_80` was −0.0504 against a 60–80 slope of +0.0310, giving an
+  effective stage-2 points slope of **−0.0194** above the knot. At rank 10 with
+  a $6M lag the curve ran 40pts → $2.51M, 80pts → $6.60M (peak), 132pts →
+  $2.44M. Every bid limit and every nomination ranking for the top forwards was
+  derived from a price that was too low, and Layer 2 could not correct it
+  because the market ceiling only ever caps *downward*.
+
+  Fixed in the pricer repo (`FCHL-auction-pricer` 7becd27) and copied in.
+  `constrained_stage2` bounds every points **segment** slope at `>= 0`. The
+  constraint cannot be stated in the exported basis — those coefficients are
+  slope *increments*, so monotonicity there is a constraint on partial sums and
+  no bounded solver takes it — so the fit reparametrises the points columns as
+  `min(p,60)` / `clip(p-60,0,20)` / `max(p-80,0)`, which spans the same column
+  space (the unconstrained fits are identical), bounds each one, and translates
+  back. `projected_points_sq` is now dropped from stage 2 unconditionally
+  rather than only when it fits positive: with it left in, the quadratic simply
+  absorbed the same downward bend (−0.000077 × 119² is enough), which is the
+  first attempt at this fix and why it failed.
+
+  The bound is active **exactly once**, on F's >80 segment, at the −0.019406
+  the old fit produced. D and G are byte-identical, as is every `floor_coef_*`
+  for all three positions — the check that stage 1 was left alone. Only 12 F
+  stage-2 fields move.
+
+  | | before | after |
+  |---|---|---|
+  | F slope <60 / 60–80 / >80 | +0.0179 / +0.0310 / **−0.0194** | +0.0240 / +0.0422 / **+0.0000** |
+  | LOSO R² (above-floor) | 0.848 | 0.843 |
+  | LOSO MAE | $0.577M | **$0.574M** |
+  | isolated F points-inversions in the pool | **122** | **0** |
+  | Kucherov / Panarin (players-25) | $4.86M / $5.50M | **$6.08M / $4.89M** |
+  | Panarin / Marner (players.csv) | $5.46M / $8.02M | **$8.09M / $7.73M** |
+
+  **Note the exported `coef_pts_hinge_80` is still negative (−0.0422), and that
+  is correct** — it is the increment that takes a +0.0422 segment down to flat.
+  It is not a defect to re-fix on the sign.
+
+  **Three things the `BACKLOG.md` entry got wrong**, all of which cost time.
+  (1) It called the hinge "over-fitting a thin tail — 8 of 407 forwards clear
+  it". That counted the *pool*; the training data has **87 of 605** above-floor
+  forwards past the knot, so the tail is not thin and the diagnosis pointed the
+  wrong way. (2) It proposed **dropping** the hinge, which was measured and is
+  worse: LOSO MAE $0.577M → $0.646M. The hinge is right; only its sign was
+  wrong. (3) It deferred on "the fix is not in this repo" — true of
+  `price_model.py`, which applies the coefficients faithfully, and false of the
+  problem: the pricer repo is on the same machine with the full training data,
+  and the owner said so ("you can fix the model"). "Can't" was doing work that
+  "haven't" should have been doing.
+
+  The drop rule was **triplicated** across the fit, the LOSO CV and the
+  feature-set comparison; all three now call one estimator. Cell 20's comment
+  claimed it fit "exactly as deployed", so leaving the copies alone would have
+  started reporting cross-validation for a model nobody ships.
+
+  Both `xfail(strict=True)` markers XPASSed and are gone, as their own reasons
+  instructed. `tests/measure_drivers.py` now reports zero inversions for all
+  three positions, which means a correct instrument and `return []` look
+  identical against the live data — so
+  `test_the_isolated_measure_finds_the_forward_defect` is replaced by
+  `test_the_isolated_measure_fires_on_a_negative_segment`, which restores the
+  July −0.0504 hinge on a copy, and F joins D and G in the clean list. Verified
+  by mutation.
+
+  Follow-on figures re-measured rather than left to rot: `coef_log_rank`
+  roughly halved (−0.391 → −0.196) as signal moved back into Points, so
+  `.claude/rules/pricing-pipeline.md`'s driver-mix paragraph is rewritten —
+  Points is now the largest driver for **89%** of forwards and for **all 40** of
+  the top 40, where the old text said Scarcity "takes over at the top". Clamps
+  went 496 → **490 of 705** below `min_bid`, and **one** player now sits *above*
+  `max_bid` where none did, making the `"max"` clamp note reachable on a real
+  card.
+
+- **The pool filters stopped working whenever a price-drivers card was open,
+  and the card's own rows vanished.** Two reports, one bug: "the FDG and
+  RFA/UFA don't work when the Price Model window is open" and "sometimes when I
+  use the filters and then click the price drivers, the table doesn't show up".
+
+  `#player-chart-container` is *inside* `#bid-limits` and ahead of the pool
+  table, so with a chart open the drivers `<tbody>` is the first match for
+  `#bid-limits tbody` — and `document.querySelector` returns first in tree
+  order. Measured on a live server: filtered to D, 233 of 649 rows visible;
+  opening a card left the pool at 233 and hid **all 7 driver rows**, with the
+  footer reading "No defencemen left in the pool"; clicking F then changed
+  nothing but the footer's wording. The footer is the part that actually
+  misleads — on draft day that sentence reads as a fact about the draft.
+  `applyPlayerFilters` also ends in `renumberRows`, which overwrote each driver
+  group **label** with `1,2,3`.
+
+  "Sometimes" was exact: with both filters on *All* the caller early-returns,
+  and any pick re-renders `#app` and heals it.
+
+  The pool `<tbody>` now carries `id="pool-rows"` and all three selectors
+  address it by name — `applyPlayerFilters` via `getElementById`,
+  `renumberRows` by identity instead of `closest('#bid-limits')`, and the
+  `htmx:afterSwap` guard by presence.
+
+  **A third symptom was written up and turned out not to exist.** The plan
+  claimed sorting with a card open also wiped the driver labels. It does not:
+  `sortTable` hands `renumberRows` the tbody it just sorted, so the sort path
+  never sees the drivers table. A browser test driven through it passed against
+  the *unfixed* build, so the test was deleted rather than shipped as coverage,
+  and the comment in `shortcuts.js` now names the path that actually reaches it.
+
+  Fixing this broke `tests/test_endpoints.py`'s sortable-column scraper, which
+  matched a literal `<tbody>`: the new id silently dropped the pool table from
+  its results, and with it the only column on the page that relies on the
+  `img[alt]` sort fallback — exactly what
+  `test_the_alt_fallback_is_what_rescues_the_logo_columns` exists to notice.
+
+### Changed
+
+- **The price-drivers card no longer prints a row that does nothing.** The
+  other two items from the same review were both the card saying `×1.00` and
+  the reader concluding something false.
+
+  "Does Scarcity not apply to Goalies?" — correct, it does not: `coef_log_rank`
+  is exactly `0.0` for G, because ~20 goalies a season is too coarse a field to
+  fit rank against. All 53 goalies in the pool now drop the row.
+
+  "What is Reputation? I didn't think that was in the model" — it is
+  (`log_lag` + `has_lag`, last season's FCHL salary), but a player new to the
+  league sits on *exactly* the reference's encoding, so the row has nothing to
+  say. On `data/players-25.csv`, the pool this was reported against, **nobody**
+  carries a prior salary, so it read `×1.000` on every card — indistinguishable
+  from "not in the model". It stays live where there is a reputation: 145 of
+  340 forwards on `players.csv`, Panarin ×1.645, McDavid ×1.793.
+
+  Filtered in `main._driver_rows`, not the template, and on an **exactly zero**
+  `log_delta` rather than a factor that rounds to 1.00. A ×1.004 row dropped
+  from a card that prints both a base and a median would leave a gap between
+  them that nothing on screen explains; exact equality on a continuous feature
+  only happens structurally, which is the case worth hiding. `widest` and
+  `headline` are computed after the filter, or a hidden row would set the bar
+  scale and the collapsed summary could advertise a driver the table does not
+  show.
+
+  The goalie row keeps the label **"Points"** (owner's call) — the detail line
+  already reads "N projected wins", which is where the distinction belongs.
+
+  `test_it_names_every_driver` asserted all five groups appear, which stopped
+  being true (the reference is a UFA, so Contract is dead for every UFA in the
+  pool). It is now a set equality against the engine in both directions — and
+  it picks a player with a **mixed** profile deliberately: the top forward has
+  all five drivers live, so against him the equality cannot fail in the hiding
+  direction, and the first version of it stayed green with the filter removed.
+
 ### Added
+
 
 - **A platform-wide player search in the header, because "where is he?" had no
   answer.** Mid-auction a name gets called and there was no way to find out

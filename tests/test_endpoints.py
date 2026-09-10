@@ -1458,7 +1458,7 @@ class TestTheChartExplainsThePrice:
         assert any(g in summary for g in self.GROUPS)
 
     def test_a_floor_player_says_his_price_was_raised_to_the_minimum(self, client):
-        """The clamp is the COMMON case, not an edge: 496 of 705 pool players
+        """The clamp is the COMMON case, not an edge: 490 of 705 pool players
         have an unclamped median below their position's min_bid."""
         import main
         from price_model import decompose_player

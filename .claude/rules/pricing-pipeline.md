@@ -44,8 +44,9 @@ saying something the model is not.
 **Report multipliers, never a per-row dollar step or percent.** The model is
 multiplicative, so a dollar step is `exp(running + delta) - exp(running)` and
 depends on where the row sits in the list. Measured 2026-09-09 across all 120
-orderings of the five groups, McDavid's Points step runs **$0.11M to $2.72M**
-and Scarcity's **$2.06M to $8.50M**. Every one is arithmetically correct, which
+orderings of the five groups (re-measured 2026-09-10 after the refit),
+McDavid's Points step runs **$1.60M to $13.24M** and Scarcity's **$0.58M to
+$10.24M**. Every one is arithmetically correct, which
 is exactly what makes showing one a trap — the figure gets quoted. Only
 `exp(log_delta)` is order-invariant. So the card shows a base price, per-row
 `×factor`, and a final price, and the bar is sized on `|log_delta|`. **Do not
@@ -56,21 +57,34 @@ neither, and for a reason that applies to both.
 
 **Points and Scarcity are collinear by construction.** `pos_rank` is computed
 FROM `projected_points`, so the two rows are two views of one input and have to
-be read together. Measured over the live pool: Scarcity is F's second-largest
-mean effect (0.268 against Points' 0.324) and takes over at the top, where the
-money is, while Points is still the largest driver for 82% of forwards because
-most sit below the 80-pt knot. **Do not restate either half as "the"
-behaviour.**
+be read together — a Points row that moves without Scarcity moving is not a
+thing the model can produce.
+
+**The balance between them changed with the 2026-09-10 refit and the old
+reading is now wrong.** This said Scarcity "takes over at the top, where the
+money is", measured at 0.268 mean effect against Points' 0.324 with Points
+largest for 82% of forwards. Constraining the points slope moved signal back
+into Points and `coef_log_rank` roughly halved (−0.391 → −0.196). Re-measured
+over the fresh 705-player pool: Points **0.445**, Scarcity **0.134**, NHL team
+0.079, Reputation 0.063, Contract 0.007. Points is the largest driver for
+**89%** of forwards and for **all 40** of the top 40 by projected points —
+Scarcity is now the largest for **none of them**. It is still the second
+largest mean effect, and still collinear, so the two rows are still read
+together; what is gone is the "takes over at the top" half.
 
 **It explains the MEDIAN and nothing else.** `expected_price` is not
 decomposable the same way, for three separate reasons: P(floor) is a second
 logistic whose coefficients frequently point the OTHER way (F's
-`floor_coef_log_rank` is +3.006 against `coef_log_rank` −0.391, so a deep rank
+`floor_coef_log_rank` is +3.006 against `coef_log_rank` −0.196, so a deep rank
 makes a player both more likely to be a floor sale *and* cheaper if he is not);
 `sigma` is a nonlinear function of `log_mu`; and the clip bounds are
 per-position (`max_bid` is 11.4 F / 8.5 D / 10.5 G, **not** `config.MAX_SALARY`).
-The clamp is the common case, not an edge — 496 of 705 pool players have an
-unclamped median below their position's `min_bid`, and 0 sit above `max_bid`.
+The clamp is the common case, not an edge — re-measured 2026-09-10, **490 of
+705** pool players have an unclamped median below their position's `min_bid`.
+**One now sits ABOVE `max_bid`**, where none did before the refit: stars price
+higher, so the `"max"` clamp note is reachable on a real card and no longer a
+branch only a test sees. That is what surfaced the endpoint test reading the
+note's first dollar figure as the median.
 
 **The reference is frozen at draft time**, on `AuctionState.price_reference`,
 for exactly the reason `pos_rank` is frozen: the pool shrinks. Measured,
@@ -86,31 +100,59 @@ no player, so the card could not name it on screen. The training means would be
 a better anchor still, but they are not in `model_params.json` and would need a
 notebook export change.
 
-### The forward points slope is negative above 80 (known bad, 2026-09-09)
+### The points slope is constrained non-negative (refit 2026-09-10)
 
-`coef_pts_hinge_80` is −0.0504 against a 60–80 slope of +0.0310, so F's
-effective slope is:
+Every points **segment** slope is bounded `>= 0` in the stage-2 fit, so more
+projected points can never lower a predicted price. F's effective slope:
 
 | points | log $ per point |
 |---|---|
-| < 60 | +0.0179 |
-| 60–80 | +0.0310 |
-| **> 80** | **−0.0194** |
+| < 60 | +0.0240 |
+| 60–80 | +0.0422 |
+| **> 80** | **+0.0000** (bound active) |
 
-**The forward price curve peaks at 80 points and falls.** At rank 10 with a $6M
-lag: 40pts → $2.51M, 80pts → $6.60M, 132pts → $2.44M. D is fine (+0.0399 below
-60, +0.0100 above) and G does not use points at all.
+D is +0.0399 below 60 and +0.0100 above; G does not use points at all
+(`proj_wins`, itself bounded `>= 0`).
 
-Measured by `tests/measure_drivers.py`: **259** isolated forward inversions
-(pairs where more points earns a smaller Points contribution, other drivers
-held out), **zero** for D and G, and **$27.8M** of model price suppressed
-across the 8 forwards past the knot.
+**The exported `coef_pts_hinge_80` is NEGATIVE (−0.0422) and that is correct.**
+The exported basis holds slope *increments*, so the increment that takes a
++0.0422 segment down to flat has to be negative. Do not "fix" it on the sign.
 
-**Not a bug in `price_model.py`** — the golden fixture reproduces it, so it is
-in the fit the notebook exported, and `data/model_params.json` may not be
-hand-edited. Two `xfail(strict=True)` guards in `tests/test_price_model.py`
-hold the property, so a corrected export fails as XPASS and forces the markers
-and the `BACKLOG.md` entry to be deleted together.
+**Why the constraint is stated in a different basis.** Monotonicity in the
+exported basis is a constraint on *partial sums*, which no bounded solver
+accepts. The notebook reparametrises the points columns as
+`min(p,60)` / `clip(p-60,0,20)` / `max(p-80,0)` — the same column space, so the
+*unconstrained* fits are identical — where each coefficient IS a segment slope,
+bounds it there with `scipy.optimize.lsq_linear`, and translates back.
+`projected_points_sq` is dropped from stage 2 unconditionally, because a
+quadratic riding on the piecewise slopes makes the bound unenforceable
+(measured: with pts² left in, it simply absorbed the same downward bend).
+Stage 1 is deliberately unconstrained — see the `floor_coef_log_rank` note
+above, where the two stages pointing opposite ways is the intended behaviour.
+
+**What it replaced.** Until 2026-09-10 `coef_pts_hinge_80` was −0.0504 against
+a 60–80 slope of +0.0310, putting the slope above the knot at **−0.0194**: the
+forward price curve peaked at 80 points and fell, pricing a 132-point forward
+below a 40-point one (at rank 10 with a $6M lag: 40pts → $2.51M, 80pts →
+$6.60M, 132pts → $2.44M). `tests/measure_drivers.py` measured **122** isolated
+forward inversions; it now measures zero for all three positions, which is why
+`test_the_isolated_measure_fires_on_a_negative_segment` supplies the old
+coefficient on a copy rather than relying on the data to carry a defect.
+
+**Two things the `BACKLOG.md` entry got wrong, both worth keeping.** It called
+the hinge "over-fitting a thin tail — 8 of 407 forwards clear it": that counted
+the *pool*, not the training data, where **87 of 605** above-floor forwards sit
+past the knot. And it proposed **dropping** the hinge, which measured worse
+(LOSO MAE $0.577M → $0.646M). The hinge is right; its sign was not. Constrained
+instead, accuracy is unchanged to slightly better: LOSO R² 0.848 → 0.843, MAE
+$0.577M → **$0.574M**.
+
+The fix lives in `~/Projects/FCHL-auction-pricer` (`auction_model.ipynb`, cell
+19's `constrained_stage2`), which is also where the entry was wrong a third
+time — it deferred on "the fix is not in this repo", true of `price_model.py`
+and not of the problem. `data/model_params.json` still may not be hand-edited;
+regenerate it there and copy it in with the matching
+`auction_predictions_current.csv`.
 
 **Layer 2 -- Market price** (`market.py`): Adjusts model prices using real-time auction state. Computes market ceilings from each opponent's exact remaining budget, roster needs, and minimum reserve requirements. We have perfect budget visibility during the draft, so these calculations are precise. Teams marked as "done" are excluded from market calculations.
 
@@ -155,7 +197,7 @@ market_price = min(model_price, market_ceiling)
 
 **Those are two different measurements and the second is the one that means "Layer 2 did something".** `ceiling < MAX_SALARY` says the ceiling moved; `market_price < model_price` says it moved *past a player's model price* and changed what the MILP planned on. `tests/measure_ceiling.py` reports the first (live, per pick), `tests/measure_spend.py` reports the second (from the logged `model_price`/`market_price` on every `draft` record). Cross-checked on the same run 2026-08-17: the reader's first bind and the instrument's `0.5M@` step now print **the same number** (44) rather than differing by one, which is what a shared convention buys -- two independent paths, one over live `market_info` per pick and one over the transaction log, agreeing on the pick where the ceiling started mattering.
 
-The gap between them is the interesting part: in the drain run **the ceiling changed nothing until it hit the $0.5M floor at pick 44.** The intermediate steps -- $7.3M at pick 33, $4.5M at pick 41 -- were below `MAX_SALARY` and above every remaining model price, because a top-down draft has already sold the players those ceilings would have capped. So 133 overstates when the layer started mattering by 11 picks, and every one of the 122 is the floor case. A first pass predicted the price-changing count would be *much* smaller than 133 on the grounds that most of the pool is floor-priced; that reasoning was wrong about the magnitude -- once the ceiling itself reaches the floor it caps essentially everything, so the counts converge. (It also quoted "563 of 705" for the floor count, which reproduces under no definition. Re-measured 2026-08-17: **534 of 705**, where floor means `round(expected_price, 1) == 0.5` -- always carry the definition, since the count runs 0 to 604 without it.)
+The gap between them is the interesting part: in the drain run **the ceiling changed nothing until it hit the $0.5M floor at pick 44.** The intermediate steps -- $7.3M at pick 33, $4.5M at pick 41 -- were below `MAX_SALARY` and above every remaining model price, because a top-down draft has already sold the players those ceilings would have capped. So 133 overstates when the layer started mattering by 11 picks, and every one of the 122 is the floor case. A first pass predicted the price-changing count would be *much* smaller than 133 on the grounds that most of the pool is floor-priced; that reasoning was wrong about the magnitude -- once the ceiling itself reaches the floor it caps essentially everything, so the counts converge. (It also quoted "563 of 705" for the floor count, which reproduces under no definition. Re-measured 2026-08-17: **534 of 705**, where floor means `round(expected_price, 1) == 0.5` (**531** after the 2026-09-10 refit) -- always carry the definition, since the count runs 0 to 604 without it.)
 
 In the drain run the ceiling steps `11.4M@1 -> 7.3M@33 -> 4.5M@41 -> 0.5M@44` and never moves again. So the layer is **not** inert -- it binds readily, and reaches the floor in a quarter of a draft, once the money is gone. The pinned run is the artefact: paying exactly the model price is the one behaviour the model cannot be wrong about, so it leaves 18% of the cap unspent and **three** teams (JHN $19.8M, GVR $14.1M, VPP $12.0M) finish above the line -- one more than the two the second-highest rule needs. A real draft is somewhere between, and which end it lands nearer decides how much Layer 2 contributes to *planning* -- see `BACKLOG.md`. **Do not restate either run as "the" behaviour of the ceiling.**
 

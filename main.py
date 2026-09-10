@@ -2024,7 +2024,7 @@ def _driver_rows(b: PriceBreakdown) -> dict:
     **Factors, never per-row dollar steps.** A dollar step is
     exp(running + delta) - exp(running), so it moves with the row's position
     in the list — measured across all 120 orderings of the five groups,
-    McDavid's Points step runs $0.11M to $2.72M. Only the two ENDS of the
+    McDavid's Points step runs $1.60M to $13.24M. Only the two ENDS of the
     chain are quoted in dollars, and both are order-free.
     """
     ref, feats = b.reference, b.features

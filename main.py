@@ -2053,7 +2053,21 @@ def _driver_rows(b: PriceBreakdown) -> dict:
             " (typical: RFA)" if ref["is_rfa"] else " (typical: UFA)"
         )
 
-    widest = max((abs(d.log_delta) for d in b.drivers), default=0.0)
+    # A driver that moves the price by nothing is hidden, not printed as
+    # x1.00. Two of the five are structurally dead in states the owner is
+    # actually in: `coef_log_rank` is exactly 0.0 for G, so Scarcity cannot
+    # apply to a goalie, and on a pool where nobody carries a prior FCHL
+    # salary every player AND the reference sit on ln(MIN_SALARY) with
+    # has_lag 0, so Reputation reads x1.000 on every card. Both were read off
+    # the card as "the model ignores this" — true of a goalie's rank, false of
+    # reputation, and the row was answering neither question.
+    #
+    # EXACTLY zero, never "rounds to 1.00". A x1.004 row dropped from a card
+    # that prints both a base and a median would leave a gap between them that
+    # nothing on screen explains. Exact equality on a continuous feature only
+    # happens structurally, which is precisely the case worth hiding.
+    live = [d for d in b.drivers if d.log_delta != 0.0]
+    widest = max((abs(d.log_delta) for d in live), default=0.0)
     rows = [
         {
             "group": d.group,
@@ -2063,7 +2077,7 @@ def _driver_rows(b: PriceBreakdown) -> dict:
             # Sized on the LOG delta, which is the order-invariant quantity.
             "bar_px": round(60.0 * abs(d.log_delta) / widest) if widest else 0,
         }
-        for d in b.drivers
+        for d in live
     ]
 
     base_bits = [f"{ref['projected_points']:.0f} pts",

@@ -1188,10 +1188,133 @@ class TestTheChartExplainsThePrice:
         has something to say."""
         return pool_top(1, position="F")[0]
 
-    def test_it_names_every_driver(self, client):
-        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
-        for group in self.GROUPS:
-            assert group in block, f"the breakdown does not mention {group}"
+    def _live_groups(self, name: str) -> set[str]:
+        """The groups the engine says actually move this player's price."""
+        import main
+        from price_model import decompose_player
+
+        player = main.auction_state.available_players[name]
+        b = decompose_player(
+            player, main.model_params,
+            main.auction_state.price_reference[player.position],
+        )
+        return {d.group for d in b.drivers if d.log_delta != 0.0}
+
+    def test_it_names_exactly_the_drivers_that_are_in_play(self, client):
+        """Set equality, both directions, against the engine.
+
+        This asserted "all five groups appear" until 2026-09-10, which stopped
+        being right when inert rows started being hidden: the reference is a
+        UFA, so Contract is dead for every UFA in the pool, and the top forward
+        is one. Naming a driver that does nothing is the reported confusion
+        ("Does Scarcity not apply to Goalies?" — no, and the row said x1.00
+        rather than saying nothing); dropping one that DOES something is worse.
+        Only equality catches both.
+        """
+        import main
+
+        # A MIXED player specifically. The top forward has all five drivers
+        # live, so against him this equality cannot fail in the hiding
+        # direction — measured 2026-09-10, removing the filter left it green.
+        mixed = None
+        for name in main.auction_state.available_players:
+            player = main.auction_state.available_players[name]
+            if player.position not in main.auction_state.price_reference:
+                continue
+            live = self._live_groups(name)
+            if live and len(live) < len(self.GROUPS):
+                mixed = (name, live)
+                break
+        assert mixed, (
+            "no pool player has both a live and an inert driver, so this "
+            "equality is vacuous and must be re-derived"
+        )
+        name, live = mixed
+
+        block = self._block(client.get(f"/player-chart/{name}").text)
+        named = {g for g in self.GROUPS if g in block}
+        assert named == live, (
+            f"{name}: the card names {sorted(named)} but the engine moves "
+            f"{sorted(live)} — hidden rows and inert rows have drifted apart"
+        )
+
+    def test_a_goalie_card_drops_scarcity_and_keeps_points(self, client):
+        """Item 2 of the 2026-09-09 review, and the decision taken on it.
+
+        `coef_log_rank` is exactly 0.0 for G — ~20 goalies a season is too
+        coarse a field to fit rank against — so the row could only ever read
+        x1.00 and is dropped. Points STAYS, and stays called "Points": a
+        goalie's is driven by `proj_wins`, which the detail line says, and the
+        owner's call was to keep one label across all three positions rather
+        than have the row rename itself per card.
+        """
+        name = pool_top(1, position="G")[0]
+        assert "Scarcity" not in self._live_groups(name), (
+            "this goalie's Scarcity is live, so the fixture no longer "
+            "demonstrates the structural case"
+        )
+        block = self._block(client.get(f"/player-chart/{name}").text)
+        assert "Scarcity" not in block, (
+            "a goalie card still carries a Scarcity row, which can only ever "
+            "say x1.00"
+        )
+        assert "Points" in block, "the goalie card lost its Points row"
+        assert "projected wins" in block, (
+            "the Points row does not say what a goalie's points actually are"
+        )
+
+    def test_reputation_appears_only_where_there_is_a_reputation(self, client):
+        """Item 1, in both directions — the half that keeps this from being
+        "hide Reputation".
+
+        `log_lag`/`has_lag` ARE in the model, but a player new to the league
+        sits on exactly the reference's encoding, so the row says nothing. On
+        a pool where NOBODY carries a prior FCHL salary — `players-25.csv`, the
+        one this was reported against — that is every card, which is why it
+        read as "Reputation isn't in the model". It has to come back for a
+        player who has one.
+        """
+        import main
+
+        with_lag, without = None, None
+        for name, player in main.auction_state.available_players.items():
+            if player.position not in main.auction_state.price_reference:
+                continue
+            live = "Reputation" in self._live_groups(name)
+            if live and with_lag is None:
+                with_lag = name
+            elif not live and without is None:
+                without = name
+            if with_lag and without:
+                break
+        assert with_lag and without, (
+            "the pool no longer has both a player with a prior FCHL salary and "
+            "one without, so this cannot test both directions"
+        )
+        assert "Reputation" in self._block(
+            client.get(f"/player-chart/{with_lag}").text)
+        assert "Reputation" not in self._block(
+            client.get(f"/player-chart/{without}").text)
+
+    def test_a_card_with_no_live_driver_still_prints_base_and_median(self):
+        """The all-hidden case: the table must not collapse into an exception.
+
+        No pool player hits it (the worst measured is four of five hidden), so
+        it is constructed — decomposing a player against his OWN features, the
+        same move `test_a_player_against_his_own_features_has_no_drivers` uses.
+        `widest` is 0 there and every bar divides by it.
+        """
+        import main
+        from price_model import build_features, decompose_price
+
+        own = build_features("F", 90, 6.0, True, main.model_params,
+                             last_salary=5.0, pos_rank=4)
+        b = decompose_price("F", 90, 6.0, True, main.model_params, own,
+                            last_salary=5.0, pos_rank=4)
+        rows = main._driver_rows(b)
+        assert rows["rows"] == [], "a self-referenced player has no live driver"
+        assert rows["headline"] == [], "the summary advertises a hidden driver"
+        assert rows["base_price"] > 0 and rows["median_price"] > 0
 
     def test_it_renders_the_numbers_the_engine_computed(self, client):
         """The reconstruction test at the UI layer.
@@ -1314,8 +1437,14 @@ class TestTheChartExplainsThePrice:
             r'<td class="driver-effect">&times;([\d.]+)',
             block, re.S,
         )
-        assert len(rows) == len(self.GROUPS), f"found {len(rows)} bars for {name}"
-        widths = {g: int(w) for g, (w, _) in zip(self.GROUPS, rows)}
+        # Against the LIVE drivers in engine order, not against GROUPS: inert
+        # rows are hidden since 2026-09-10, so zipping the five names onto
+        # three bars silently labelled every width with the wrong group.
+        live = [d.group for d in b.drivers if d.log_delta != 0.0]
+        assert len(rows) == len(live), (
+            f"found {len(rows)} bars for {name} against {len(live)} live drivers"
+        )
+        widths = {g: int(w) for g, (w, _) in zip(live, rows)}
         assert widths[widest_by(b, lambda d: d.log_delta)] == max(widths.values()), (
             f"{name}: the widest bar is not the largest LOG effect — widths "
             f"{widths} look scaled on |factor - 1|"

@@ -314,6 +314,36 @@ summary::-webkit-details-marker { display: none; }
 .chart-legend { display: flex; gap: 12px; font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
 .chart-leg { display: flex; gap: 4px; align-items: center; }
 
+/* Price-driver breakdown, inside the chart card.
+   Native `title=` tooltips in here rather than DaisyUI `data-tip`: the
+   .chart-meta rules above are an entire measured saga about a data-tip bubble
+   rendering off-screen at 1024px inside this same card, and a native tooltip
+   cannot overflow anything. */
+.price-drivers { margin-top: 6px; }
+.price-drivers > summary {
+    font-size: 0.75rem; color: var(--text-muted); cursor: pointer;
+    user-select: none; padding: 2px 0;
+}
+.price-drivers > summary:hover { color: var(--accent); }
+.price-drivers-table { font-size: 0.75rem; }
+.price-drivers-table th,
+.price-drivers-table td { padding: 2px 4px; vertical-align: top; }
+.driver-detail {
+    display: block; font-size: 0.6875rem; color: var(--text-muted);
+}
+.driver-effect {
+    white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums;
+}
+.driver-bar {
+    display: inline-block; height: 6px; border-radius: 2px;
+    vertical-align: middle; min-width: 1px;
+}
+.driver-bar.up { background: var(--green); }
+.driver-bar.down { background: var(--red); }
+.driver-note {
+    font-size: 0.6875rem; color: var(--text-muted); margin-top: 4px;
+}
+
 /* Sortable headers */
 th[data-sort-col] { cursor: pointer; user-select: none; }
 th[data-sort-col]:hover { color: var(--accent); }

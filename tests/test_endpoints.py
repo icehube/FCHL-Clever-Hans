@@ -2,6 +2,7 @@
 
 import html
 import json
+import math
 import re
 from contextlib import contextmanager
 
@@ -1160,6 +1161,213 @@ class TestPlayerChart:
         """
         r = client.get("/player-chart/Nobody")
         assert len(r.text) < 300, f"expected an empty state, got {len(r.text)} bytes"
+
+
+class TestTheChartExplainsThePrice:
+    """The price-driver breakdown: why the model landed where it did.
+
+    Closes the "decompose Model $ into its drivers" backlog entry. The
+    breakdown explains the stage-2 MEDIAN; E[$] mixes in a separate logistic
+    and is stated rather than attributed, which the last test here pins.
+    """
+
+    GROUPS = ("Points", "NHL team", "Reputation", "Scarcity", "Contract")
+
+    def _block(self, html_text: str) -> str:
+        # `[^>]*` on the opening tag deliberately: anchored to the exact
+        # string, adding an attribute made every test in this class fail with
+        # "no breakdown" instead of the one that was actually about it.
+        found = re.search(
+            r'<details class="price-drivers"[^>]*>.*?</details>', html_text, re.S
+        )
+        assert found, "no price-driver breakdown in the chart card"
+        return found.group(0)
+
+    def _a_priced_forward(self) -> str:
+        """The pool's top forward — well clear of the floor, so every driver
+        has something to say."""
+        return pool_top(1, position="F")[0]
+
+    def test_it_names_every_driver(self, client):
+        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
+        for group in self.GROUPS:
+            assert group in block, f"the breakdown does not mention {group}"
+
+    def test_it_renders_the_numbers_the_engine_computed(self, client):
+        """The reconstruction test at the UI layer.
+
+        The unit test proves base x factors == the median exactly. This proves
+        the TEMPLATE renders that arithmetic and not some other field — a
+        formatting or wrong-variable bug the unit test cannot see.
+
+        Compared value-by-value against the engine rather than by multiplying
+        the printed figures: the card prints 2dp, the F baseline is $0.2951M,
+        and re-multiplying six rounded numbers compounds to ~2% — which would
+        force a tolerance so loose it stopped catching anything.
+        """
+        import main
+        from price_model import decompose_player
+
+        name = self._a_priced_forward()
+        player = main.auction_state.available_players[name]
+        b = decompose_player(
+            player, main.model_params,
+            main.auction_state.price_reference[player.position],
+        )
+        block = self._block(client.get(f"/player-chart/{name}").text)
+
+        # Anchored to the rows by label, not to "the first and last dollar
+        # figure": the E[$] note below the table prints one too, and reading
+        # that as the median is how the first version of this failed.
+        base = float(re.search(r"Typical \w.*?\$([\d.]+)M", block, re.S).group(1))
+        median = float(re.search(r"Model median.*?\$([\d.]+)M", block, re.S).group(1))
+        assert base == pytest.approx(b.base_price, abs=0.005)
+        assert median == pytest.approx(b.prediction.median_price, abs=0.005)
+
+        printed = [float(m) for m in re.findall(r"&times;([\d.]{4,})", block)]
+        assert printed == [
+            pytest.approx(d.factor, abs=0.005) for d in b.drivers
+        ], (
+            f"the card printed factors {printed} against the engine's "
+            f"{[round(d.factor, 2) for d in b.drivers]}"
+        )
+
+    def test_it_is_collapsed_by_default(self, client):
+        """The bid-panel copy re-renders on every bidder toggle, which snaps an
+        open <details> shut mid-auction. Collapsed, that is a no-op."""
+        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
+        opening = block.split(">", 1)[0]
+        assert " open" not in opening, "the breakdown starts expanded"
+
+    def test_the_bars_are_scaled_to_the_effects_they_show(self, client):
+        """The bar is the only thing that makes the table scannable, and a
+        constant width would misread as "every driver contributed equally".
+
+        Scaled on |log_delta|, which is order-invariant — never on a dollar
+        step. Checked as an ORDERING against the factors rather than against
+        exact pixel counts, so a change to the 60px scale is not a failure.
+        """
+        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
+        rows = re.findall(
+            r'driver-bar[^"]*" style="width: (\d+)px".*?&times;([\d.]{4,})',
+            block, re.S,
+        )
+        assert len(rows) == len(self.GROUPS), f"found {len(rows)} bars"
+
+        widths = [int(w) for w, _ in rows]
+        effects = [abs(math.log(float(f))) for _, f in rows]
+        assert len(set(widths)) > 1, "every bar is the same width"
+        assert max(widths) == 60, "the largest effect should fill the scale"
+        biggest = effects.index(max(effects))
+        assert widths[biggest] == max(widths), (
+            f"the widest bar is not the largest effect: widths {widths} "
+            f"against effects {[round(e, 2) for e in effects]}"
+        )
+
+    def test_the_bars_are_scaled_in_log_space_not_on_factor_minus_one(self, client):
+        """A halving and a doubling are the same size effect. |factor - 1| says
+        they are not — 0.5 against 1.0 — which is the wrong visual for a
+        multiplicative model, and it flips which bar is widest.
+
+        The player is derived rather than named, and derived by the ROLE of
+        separating the two scalings: on the top forward every factor is above
+        1, where the two orderings agree, so the test above cannot tell them
+        apart. That is the data making a mutant equivalent — 11 players in the
+        current pool break the tie and this finds one.
+        """
+        import main
+        from price_model import decompose_player
+
+        def widest_by(b, key):
+            return max(b.drivers, key=lambda d: abs(key(d))).group
+
+        separating = None
+        for name, player in main.auction_state.available_players.items():
+            b = decompose_player(
+                player, main.model_params,
+                main.auction_state.price_reference[player.position],
+            )
+            if widest_by(b, lambda d: d.log_delta) != widest_by(
+                b, lambda d: d.factor - 1.0
+            ):
+                separating = (name, b)
+                break
+        assert separating, (
+            "no player in this pool separates log scaling from |factor - 1|, "
+            "so this test cannot fail and must be re-derived"
+        )
+        name, b = separating
+
+        block = self._block(client.get(f"/player-chart/{name}").text)
+        rows = re.findall(
+            r'driver-bar[^"]*" style="width: (\d+)px"[^>]*></span></td>\s*'
+            r'<td class="driver-effect">&times;([\d.]+)',
+            block, re.S,
+        )
+        assert len(rows) == len(self.GROUPS), f"found {len(rows)} bars for {name}"
+        widths = {g: int(w) for g, (w, _) in zip(self.GROUPS, rows)}
+        assert widths[widest_by(b, lambda d: d.log_delta)] == max(widths.values()), (
+            f"{name}: the widest bar is not the largest LOG effect — widths "
+            f"{widths} look scaled on |factor - 1|"
+        )
+
+    def test_the_summary_answers_without_being_opened(self, client):
+        """A collapsed card that says nothing is a card nobody opens."""
+        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
+        summary = re.search(r"<summary>(.*?)</summary>", block, re.S).group(1)
+        assert "&times;" in summary, "the summary carries no driver at all"
+        assert any(g in summary for g in self.GROUPS)
+
+    def test_a_floor_player_says_his_price_was_raised_to_the_minimum(self, client):
+        """The clamp is the COMMON case, not an edge: 496 of 705 pool players
+        have an unclamped median below their position's min_bid."""
+        import main
+        from price_model import decompose_player
+
+        clamped = next(
+            name for name, p in main.auction_state.available_players.items()
+            if decompose_player(
+                p, main.model_params, main.auction_state.price_reference[p.position]
+            ).clamped == "min"
+        )
+        block = self._block(client.get(f"/player-chart/{clamped}").text)
+        assert "minimum bid" in block, (
+            f"{clamped} prices below the floor and the card does not say his "
+            f"figure was raised to it"
+        )
+
+    def test_it_does_not_claim_to_explain_the_expected_price(self, client):
+        """E[$] is not decomposable the way the median is — P(floor) is a
+        separate logistic whose coefficients often point the other way."""
+        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
+        assert "not broken down here" in block
+
+    def test_the_chart_body_still_carries_no_ids_at_all(self, client):
+        """Mount-agnostic, unlike the older assertion next door.
+
+        That one names one specific id string, so a new `<details id=...>`
+        would sail past it while putting a duplicate in the document the
+        moment both mounts hold a chart.
+        """
+        r = client.get(f"/player-chart/{self._a_priced_forward()}")
+        assert 'id="' not in r.text, (
+            "the chart body grew an id; it is mounted twice, so that is a "
+            "duplicate id in the assembled page"
+        )
+
+    def test_the_card_survives_a_state_with_no_reference(self, client):
+        """A legacy snapshot whose backfill was skipped must degrade, not 500."""
+        import main
+
+        saved = main.auction_state.price_reference
+        main.auction_state.price_reference = {}
+        try:
+            r = client.get(f"/player-chart/{self._a_priced_forward()}")
+            assert r.status_code == 200
+            assert "price-drivers" not in r.text, "a breakdown with no reference"
+            assert "price-chart" in r.text, "the chart itself went too"
+        finally:
+            main.auction_state.price_reference = saved
 
 
 class TestBidCheckOnAPlayerItCannotFind:

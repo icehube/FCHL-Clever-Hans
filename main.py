@@ -1853,6 +1853,88 @@ def _lognormal_pdf_path(
     return curve_d, floor_bar
 
 
+def _driver_rows(b: PriceBreakdown) -> dict:
+    """Template-ready rows for the price-driver breakdown.
+
+    Every bit of arithmetic and every bit of prose lives here rather than in
+    Jinja: the bar needs the largest |log_delta| across rows, and "rank 203"
+    needs exp() back out of `log_rank`.
+
+    **Factors, never per-row dollar steps.** A dollar step is
+    exp(running + delta) - exp(running), so it moves with the row's position
+    in the list — measured across all 120 orderings of the five groups,
+    McDavid's Points step runs $0.11M to $2.72M. Only the two ENDS of the
+    chain are quoted in dollars, and both are order-free.
+    """
+    ref, feats = b.reference, b.features
+
+    def _describe(group: str) -> str:
+        """This player's value for the group, against the reference's."""
+        if group == "Points":
+            if b.position == "G":
+                return (f"{feats['proj_wins']:.0f} projected wins "
+                        f"(typical {ref['proj_wins']:.0f})")
+            return (f"{feats['projected_points']:.0f} pts "
+                    f"(typical {ref['projected_points']:.0f})")
+        if group == "NHL team":
+            return (f"{feats['team_probability']:.1f}% Cup odds "
+                    f"(typical {ref['team_probability']:.1f}%)")
+        if group == "Reputation":
+            mine = (f"${math.exp(feats['log_lag']):.1f}M last season"
+                    if feats["has_lag"] else "new to the league")
+            theirs = (f"${math.exp(ref['log_lag']):.1f}M"
+                      if ref["has_lag"] else "none")
+            return f"{mine} (typical: {theirs})"
+        if group == "Scarcity":
+            return (f"rank {math.exp(feats['log_rank']):.0f} "
+                    f"(typical {math.exp(ref['log_rank']):.0f})")
+        return ("RFA" if feats["is_rfa"] else "UFA") + (
+            " (typical: RFA)" if ref["is_rfa"] else " (typical: UFA)"
+        )
+
+    widest = max((abs(d.log_delta) for d in b.drivers), default=0.0)
+    rows = [
+        {
+            "group": d.group,
+            "factor": d.factor,
+            "detail": _describe(d.group),
+            "up": d.log_delta >= 0,
+            # Sized on the LOG delta, which is the order-invariant quantity.
+            "bar_px": round(60.0 * abs(d.log_delta) / widest) if widest else 0,
+        }
+        for d in b.drivers
+    ]
+
+    base_bits = [f"{ref['projected_points']:.0f} pts",
+                 f"rank {math.exp(ref['log_rank']):.0f}"]
+    base_bits.append("an FCHL salary last season" if ref["has_lag"]
+                     else "no FCHL history")
+    base_bits.append(f"{ref['team_probability']:.1f}% Cup odds")
+
+    clamp_note = None
+    if b.clamped == "min":
+        clamp_note = (f"raised from ${b.unclamped_price:.2f}M to the "
+                      f"${b.min_bid:.1f}M minimum bid")
+    elif b.clamped == "max":
+        clamp_note = (f"cut from ${b.unclamped_price:.2f}M to the "
+                      f"${b.max_bid:.1f}M {b.position} maximum")
+
+    return {
+        "base_price": b.base_price,
+        "base_label": f"Typical {b.position}",
+        "base_detail": " · ".join(base_bits),
+        "base_p_floor": b.base_p_floor,
+        "rows": rows,
+        # Top two by effect, for the collapsed <summary> — the card has to
+        # answer the question without being opened.
+        "headline": sorted(rows, key=lambda r: -abs(math.log(r["factor"])))[:2],
+        "median_price": b.prediction.median_price,
+        "clamp_note": clamp_note,
+        "p_floor": b.prediction.p_floor,
+        "expected_price": b.prediction.expected_price,
+    }
+
+
 def _chart_context(player_name: str) -> dict | None:
     """Build the template variables needed by player_chart.html.
 
@@ -1874,6 +1956,15 @@ def _chart_context(player_name: str) -> dict | None:
         scale_max=MAX_SALARY,
         min_salary=MIN_SALARY,
     )
+    # A pool with no player at this position, or a legacy snapshot whose
+    # backfill was skipped, leaves no reference — the card drops the breakdown
+    # and keeps the chart rather than 500ing.
+    reference = auction_state.price_reference.get(p.position)
+    drivers = (
+        _driver_rows(decompose_player(p, model_params, reference))
+        if reference
+        else None
+    )
     return {
         "chart_player": p,
         "chart_data": pred,
@@ -1881,6 +1972,7 @@ def _chart_context(player_name: str) -> dict | None:
         "chart_scale_max": MAX_SALARY,
         "chart_curve_d": curve_d,
         "chart_floor_bar": floor_bar,
+        "chart_drivers": drivers,
     }
 
 

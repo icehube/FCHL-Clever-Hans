@@ -111,6 +111,78 @@
         <span class="chart-leg"><span style="color:var(--green)">&#9679;</span> Expected</span>
         <span class="chart-leg"><span style="color:var(--red)">&#9482;</span> Market</span>
     </div>
+
+    {# WHY the model priced him there, as multipliers on a typical player at
+       his position.
+
+       Multipliers and not per-row dollar amounts. The model is multiplicative
+       in log space, so a dollar STEP is exp(running + delta) - exp(running)
+       and depends on where the row sits in the list: measured across all 120
+       orderings of the five groups, McDavid's Points step runs $0.11M to
+       $2.72M and Scarcity's $2.06M to $8.50M. Every one is arithmetically
+       correct, which is precisely why showing one is a trap — the figure gets
+       quoted. Only the two ENDS of the chain are dollars. Do not add a
+       running-dollar column; `test_the_factors_do_not_depend_on_their_order`
+       is there because it is the obvious "improvement".
+
+       Collapsed by default in BOTH mounts, with no flag telling them apart.
+       The bid-panel copy re-renders on every bidder toggle (that form swaps
+       `#bid-panel` outerHTML), so an open <details> would snap shut mid-
+       auction; collapsed, that is a no-op. The summary carries the top two
+       drivers so the closed state still answers the question.
+
+       No id on anything here — this partial is mounted twice and carries none
+       of its own, per the header comment. #}
+    {% if chart_drivers %}
+    <details class="price-drivers">
+        <summary>
+            <span class="collapse-chevron">&#9654;</span> Price drivers
+            {%- for r in chart_drivers.headline %} · {{ r.group }} &times;{{ "%.1f"|format(r.factor) }}{% endfor %}
+        </summary>
+        <div class="table-scroll-x">
+        <table class="table table-xs price-drivers-table">
+            <tbody>
+            <tr>
+                <td>
+                    {{ chart_drivers.base_label }}
+                    <span class="driver-detail">{{ chart_drivers.base_detail }} · sells at the floor {{ "%.0f"|format(chart_drivers.base_p_floor * 100) }}% of the time</span>
+                </td>
+                <td class="driver-effect">&mdash;</td>
+                <td class="driver-effect">${{ "%.2f"|format(chart_drivers.base_price) }}M</td>
+            </tr>
+            {% for r in chart_drivers.rows %}
+            <tr>
+                <td>
+                    {% if r.group == "Scarcity" %}<span title="Rank among same-position players by projected points, frozen at draft start. It is DERIVED from points, so this row and Points are two views of the same input and have to be read together.">{{ r.group }}</span>{% else %}{{ r.group }}{% endif %}
+                    <span class="driver-detail">{{ r.detail }}</span>
+                </td>
+                <td><span class="driver-bar {{ 'up' if r.up else 'down' }}" style="width: {{ r.bar_px }}px"></span></td>
+                <td class="driver-effect">&times;{{ "%.2f"|format(r.factor) }}</td>
+            </tr>
+            {% endfor %}
+            <tr>
+                <td>
+                    Model median
+                    {% if chart_drivers.clamp_note %}<span class="driver-detail">{{ chart_drivers.clamp_note }}</span>{% endif %}
+                </td>
+                <td class="driver-effect">&mdash;</td>
+                <td class="driver-effect">${{ "%.2f"|format(chart_drivers.median_price) }}M</td>
+            </tr>
+            </tbody>
+        </table>
+        </div>
+        {# The rows above explain the MEDIAN. E[$] is not decomposable the same
+           way — P(floor) is a separate logistic whose coefficients often point
+           the other way, sigma depends on log_mu, and the clip bounds are
+           per-position — so the arithmetic is stated rather than attributed. #}
+        <p class="driver-note">
+            E[$] ${{ "%.2f"|format(chart_drivers.expected_price) }}M
+            = {{ "%.0f"|format(chart_drivers.p_floor * 100) }}% floor
+            + {{ "%.0f"|format((1 - chart_drivers.p_floor) * 100) }}% above-floor mean.
+            P(floor) is a separate model and is not broken down here.
+        </p>
+    </details>
+    {% endif %}
 </div>
 {% else %}
 {# /player-chart used to render explanation.html here, which injected the whole

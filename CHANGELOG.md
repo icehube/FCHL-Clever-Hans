@@ -261,10 +261,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:65 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:68 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
-  to remember; `FCHL_STATE_DIR` overrides it explicitly. `main.py:126
-  (_backfill_nhl_teams)` and `main.py:150 (_backfill_keeper_flags)` follow the
+  to remember; `FCHL_STATE_DIR` overrides it explicitly.
+  `main.py:129 (_backfill_nhl_teams)` and
+  `main.py:153 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -381,7 +382,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:294 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:306 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup

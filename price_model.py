@@ -281,7 +281,7 @@ DRIVER_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("NHL team", ("team_probability",)),
     ("Reputation", ("log_lag", "has_lag")),
     ("Scarcity", ("log_rank",)),
-    ("RFA", ("is_rfa",)),
+    ("Contract", ("is_rfa",)),  # RFA vs UFA; the row says which
 )
 
 

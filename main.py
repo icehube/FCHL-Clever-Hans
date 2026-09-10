@@ -866,10 +866,10 @@ def _publish_if_current[V](
     computed against the roster from before that pick must not be published.
     Both dicts are read by templates that present them as authoritative — the
     Proj column carries a rank badge, the dots carry a verdict — so a stale one
-    is worse than none. Discarding leaves the Proj column on its estimate with
-    `#proj-basis` saying so; the dots need one extra step at the call site,
-    because their template defaults a missing verdict to "keep" and would paint
-    a discarded scan all-green.
+    is worse than none. Discarding leaves the Proj column on its estimate,
+    which is the column's resting state and needs nothing at the call site; the
+    dots need one extra step there, because their template defaults a missing
+    verdict to "keep" and would paint a discarded scan all-green.
 
     **A version counter rather than "is the dict still empty".** `_recompute()`
     already clears `exact_projections`, and empty is ALSO the normal state before
@@ -1092,32 +1092,6 @@ def _context(request: Request) -> dict:
                 projected = current
         projections[code] = {"current": current, "projected": projected}
 
-    # What BASIS the figures above were computed on. `total` is the live
-    # opponents — the only teams a solve can say anything new about — and
-    # `estimated` is the count the template actually branches on.
-    #
-    # It branches on the ESTIMATES, not on the exact ones, and the difference is
-    # a measured bug rather than a preference. With every opponent done,
-    # `exact` is 0 and there is nothing to solve, yet every figure on screen is
-    # exact: a done team projects its final roster and BOT projects its MILP
-    # optimum (both verified 2026-08-18). Reading `exact` as the flag labelled
-    # that column "estimated" and left a Solve Standings button that performed
-    # zero solves and changed nothing — broken-looking, in the one state where
-    # the operator most wants the final table.
-    #
-    # `exact` is still reported because a count is what covers the partial case:
-    # an Infeasible opponent keeps its estimate, and a column labelled exact
-    # while one cell is not is the silent-staleness problem the label exists to
-    # prevent.
-    live_opponents = sum(
-        1 for c, t in auction_state.teams.items() if not t.is_done and c != MY_TEAM
-    )
-    standings_basis = {
-        "exact": len(exact_projections),
-        "total": live_opponents,
-        "estimated": live_opponents - len(exact_projections),
-    }
-
     # Add rank (sorted by projected descending)
     for rank, (code, _) in enumerate(
         sorted(projections.items(), key=lambda x: -x[1]["projected"]), 1
@@ -1181,7 +1155,6 @@ def _context(request: Request) -> dict:
         "buyout_indicators": buyout_indicators,
         "market_prices": market_prices,
         "projections": projections,
-        "standings_basis": standings_basis,
         "default_bidders": default_bidders,
         # Both read by base.html only, so they reach the screen on a full page
         # load and not on htmx partial swaps — which is what keeps them on

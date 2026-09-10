@@ -3860,11 +3860,6 @@ class TestExactStandingsOnDemand:
         assert found, f"no proj-{code} span in the response"
         return int(found.group(1))
 
-    def _basis(self, html: str) -> str:
-        found = re.search(r'id="proj-basis"[^>]*>\s*([^<]*?)\s*<', html)
-        assert found, "no proj-basis marker in the response"
-        return found.group(1)
-
     def _live_opponents(self) -> list[str]:
         import main
 
@@ -3899,12 +3894,14 @@ class TestExactStandingsOnDemand:
             f"{missing} are swapped by the scan but render nowhere in League "
             f"State, so those swaps silently do nothing"
         )
-        # One per team plus the basis marker. A count as well as the resolution
-        # check, because a fragment that stops being emitted resolves vacuously.
-        expected = len(main.auction_state.nomination_order) + 1
+        # Exactly one per team, and nothing else — the basis marker used to be
+        # a twelfth fragment and was removed 2026-09-09. A count as well as the
+        # resolution check, because a fragment that stops being emitted resolves
+        # vacuously.
+        expected = len(main.auction_state.nomination_order)
         assert len(fragments) == expected, (
             f"the scan returned {len(fragments)} fragments against "
-            f"{expected} (one per team in League State, plus the basis marker)"
+            f"{expected} (one per team in League State)"
         )
 
     def test_an_opponents_figure_becomes_its_milp_optimum(self, client):
@@ -3960,30 +3957,8 @@ class TestExactStandingsOnDemand:
             f"a pick left {len(main.exact_projections)} exact figures cached, so "
             f"the column now describes the state before the pick"
         )
-        assert self._basis(page) == "estimated", (
-            f"the marker still reads {self._basis(page)!r} after a pick"
-        )
         assert self._figure(page, code) != exact, (
             f"{code} still shows its pre-pick exact figure {exact}"
-        )
-
-    def test_the_basis_marker_renders_in_both_states(self, client):
-        """A target that disappears with its contents can only be swapped once.
-
-        The `buyout_scan.html` bug exactly: the Scan button vanished on the way
-        to an opponent's panel and never came back, because the wrapper was
-        conditional rather than only its `hx-swap-oob` attribute.
-        """
-        page = section_of(client.get("/").text, "league-state")
-        assert self._basis(page) == "estimated"
-
-        client.get("/solve-standings")
-        after = section_of(client.get("/").text, "league-state")
-        assert self._basis(after) == "exact", (
-            f"after a clean scan the marker reads {self._basis(after)!r}. A bare "
-            f"'exact' rather than 'exact N/N': the count carries information only "
-            f"when the column is mixed, and 'exact 0/0' is worse than nothing in "
-            f"the all-done state"
         )
 
     def test_the_scan_solves_live_opponents_only(self, monkeypatch, client):
@@ -4042,8 +4017,7 @@ class TestExactStandingsOnDemand:
 
         Absence from `exact_projections` is what makes this safe — the team falls
         through to the estimate. Storing a zero would put a plausible-looking
-        last place on the board, and the marker's count is what tells you one
-        cell is still a guess.
+        last place on the board.
         """
         import main
 
@@ -4060,11 +4034,6 @@ class TestExactStandingsOnDemand:
         assert self._figure(page, code) == estimate, (
             f"{code} moved to {self._figure(page, code)} from its {estimate} "
             f"estimate despite having no solution"
-        )
-        n = len(self._live_opponents())
-        assert self._basis(page) == f"exact {n - 1}/{n}", (
-            f"the marker reads {self._basis(page)!r} while one cell is still an "
-            f"estimate — a count exists precisely so this case is visible"
         )
 
     def _badge(self, html: str, code: str) -> int | None:
@@ -4215,18 +4184,17 @@ class TestExactStandingsOnDemand:
         )
 
     def test_with_every_opponent_done_the_column_is_exact_already(self, client):
-        """The state that caught the marker branching on the wrong count.
+        """With nobody left to solve, every figure on screen is already exact.
 
         A done team projects its final roster and BOT projects its MILP optimum,
-        so with nobody left to solve every figure on screen is exact BY
-        CONSTRUCTION — and both halves of that are asserted here rather than
-        assumed, because the whole finding was that the label disagreed with what
-        the numbers actually were.
+        so the column is exact BY CONSTRUCTION — and both halves of that are
+        asserted here rather than assumed.
 
         Reachable: the design notes put 3+ early finishers in every draft and
-        `endgame-ceiling-binds` already has 8 of 10 done. Reading it wrong left a
-        Solve Standings button that performed zero solves and changed nothing, in
-        the one state where the operator most wants the final table.
+        `endgame-ceiling-binds` already has 8 of 10 done. This is the state that
+        caught a basis label branching on the wrong count, and it stays worth
+        testing without one: the button must still perform zero solves and
+        leave every figure where it was.
         """
         import main
         from optimizer import solve_optimal_roster
@@ -4236,10 +4204,6 @@ class TestExactStandingsOnDemand:
         assert not self._live_opponents(), "setup failed to retire every opponent"
 
         page = section_of(client.get("/").text, "league-state")
-        assert self._basis(page) == "exact", (
-            f"the marker reads {self._basis(page)!r} with nothing left to "
-            f"estimate — every figure here is a final roster or a MILP optimum"
-        )
         for code, team in main.auction_state.teams.items():
             if team.is_done:
                 assert self._figure(page, code) == team.current_roster_points, (
@@ -4255,7 +4219,9 @@ class TestExactStandingsOnDemand:
         client.get("/solve-standings")
         after = section_of(client.get("/").text, "league-state")
         assert main.exact_projections == {}, "there was nothing to solve"
-        assert self._basis(after) == "exact", (
-            f"pressing the button moved the marker to {self._basis(after)!r} — it "
-            f"performed zero solves, so nothing about the basis changed"
-        )
+        for code, team in main.auction_state.teams.items():
+            if team.is_done:
+                assert self._figure(after, code) == team.current_roster_points, (
+                    f"the button performed zero solves, so done team {code}'s "
+                    f"figure must be exactly where it was"
+                )

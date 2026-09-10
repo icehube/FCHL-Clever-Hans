@@ -2932,6 +2932,122 @@ class TestARecalledKeeperIsNotColouredAsAPurchase:
         )
 
 
+class TestCapCountingMinorsAreColoured:
+    """A group 2/3 minor's salary is fully on cap, and the table said so in one
+    word.
+
+    `counts_on_cap` was rendered only as the On Cap cell's Yes/No, so the rows
+    that actually cost money were unscannable in a table that is mostly the
+    other kind — at reset the whole league has 4 cap-counting minors against
+    145 that are free. The row now carries `text-warning` and drops the
+    `opacity-70` every other row has.
+
+    Keyed on `counts_on_cap` rather than on `group == "3"`: `MINOR_CAP_GROUPS`
+    is {"2", "3"}, and reading the same property the On Cap cell reads is what
+    stops the colour and the word disagreeing.
+    """
+
+    def _minors_rows(self, html_text: str) -> dict[str, str]:
+        """Every `<tr>` of the Minors table, keyed by player name.
+
+        Sliced from the Minors heading to the end of its table rather than
+        matched across the whole panel: the active-roster table above has the
+        same shape, and `/trade-between`'s form lists the same players as
+        `<option>`s.
+        """
+        panel = section_of(html_text, "team-panel")
+        start = panel.find(">Minors (")
+        assert start != -1, "no Minors table in this panel"
+        end = panel.find("</table>", start)
+        body = panel[start:end]
+        rows = {}
+        for m in re.finditer(r"<tr\b.*?</tr>", body, re.S):
+            row = m.group(0)
+            for cell in re.findall(r"<td>([^<]+)</td>", row):
+                rows.setdefault(cell.strip(), row)
+        return rows
+
+    def _bot_minors(self):
+        import main
+
+        return main.auction_state.teams[MY_TEAM].minor_players
+
+    def test_a_cap_counting_minor_is_warned_and_undimmed(self, client):
+        on_cap = [p for p in self._bot_minors() if p.counts_on_cap]
+        if not on_cap:
+            pytest.skip("BOT has no cap-counting minor in this pool")
+        rows = self._minors_rows(client.get(f"/team-view/{MY_TEAM}").text)
+        for p in on_cap:
+            row = rows.get(p.name)
+            assert row, f"{p.name} has no minors row"
+            assert "text-warning" in row, (
+                f"{p.name} is group {p.group}, fully on cap, and reads like "
+                f"every free minor around him"
+            )
+            assert "opacity-70" not in row.split(">", 1)[0], (
+                f"{p.name} should not be dimmed — he is the row that costs money"
+            )
+
+    def test_a_free_minor_is_not(self, client):
+        free = [p for p in self._bot_minors() if not p.counts_on_cap]
+        if not free:
+            pytest.skip("BOT has no cap-free minor in this pool")
+        rows = self._minors_rows(client.get(f"/team-view/{MY_TEAM}").text)
+        for p in free:
+            row = rows.get(p.name)
+            assert row, f"{p.name} has no minors row"
+            assert "text-warning" not in row.split(">", 1)[0], (
+                f"{p.name} is group {p.group} and costs nothing against the cap"
+            )
+
+    def test_the_colour_agrees_with_the_on_cap_cell(self, client):
+        """The two readings of the same property, on every row.
+
+        This is the assertion that makes the colour trustworthy: it can only
+        pass while both sides read `counts_on_cap`. Swap either one for a
+        literal group test and a group 2 minor breaks it.
+        """
+        rows = self._minors_rows(client.get(f"/team-view/{MY_TEAM}").text)
+        assert rows, "BOT has no minors to check"
+        for name, row in rows.items():
+            warned = "text-warning" in row.split(">", 1)[0]
+            says_yes = "<td>Yes</td>" in row
+            assert warned == says_yes, (
+                f"{name}: row colour says {warned}, On Cap cell says {says_yes}"
+            )
+
+    def test_an_opponents_minors_are_coloured_the_same_way(self, client):
+        """Not gated on `is_my_team` — the buyout dots are, this is not.
+
+        Reading an opponent's cap load is the point of opening their panel, and
+        their group 2/3 minors count against *their* cap identically.
+
+        The group is supplied rather than found: at reset all four of the
+        league's cap-counting minors happen to be BOT's, so an `is_my_team`
+        gate on the colour would pass every other test in this class against
+        today's players.csv. That is the data making a mutant equivalent, which
+        CLAUDE.md says to fix by providing the data that breaks it — the file
+        is replaced before every draft and the coincidence will not survive it.
+        """
+        import main
+
+        code, team = next(
+            (c, t) for c, t in main.auction_state.teams.items()
+            if c != MY_TEAM and t.minor_players
+        )
+        victim = team.minor_players[0]
+        assert not victim.counts_on_cap, "pick a free minor to promote"
+        original, victim.group = victim.group, sorted(MINOR_CAP_GROUPS)[0]
+        try:
+            assert victim.counts_on_cap
+            rows = self._minors_rows(client.get(f"/team-view/{code}").text)
+            assert "text-warning" in rows[victim.name], (
+                f"{code}'s {victim.name} is on their cap and is not marked"
+            )
+        finally:
+            victim.group = original
+
+
 class TestTheTradeFormCanSeeTheMinors:
     """A minor-league player is tradeable, and both dropdowns hid him.
 

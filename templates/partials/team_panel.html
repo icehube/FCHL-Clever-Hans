@@ -248,8 +248,23 @@
            the minors. #}
         <thead><tr><th></th><th>Pos</th><th>Grp</th><th>Player</th><th>NHL</th><th>Salary</th><th>PTS</th><th>On Cap</th><th>Actions</th></tr></thead>
         <tbody>
+        {# A minor whose salary is fully on cap is coloured, and is the one row
+           in this table that is NOT dimmed — two signals, because these are
+           the rows that cost money and the table is mostly the other kind (at
+           reset, 4 of 149 league-wide). Keyed on `counts_on_cap`, the same
+           property the On Cap cell below reads, so the colour and the word
+           cannot disagree; that covers group 2 as well as 3, which is the
+           actual `MINOR_CAP_GROUPS` rule rather than the group everyone
+           happens to have.
+
+           `text-warning` because that is already this app's "this costs you"
+           colour (team penalties, a ceiling-capped price). NOT `italic`, which
+           `test_it_is_absent_on_an_opponent` asserts appears nowhere in an
+           opponent's panel — and opponents render this table. NOT
+           `text-success`, which means "bought at auction" and is asserted as
+           such across a bench/minors/recall round trip. #}
         {% for p in viewed_team.minor_players|sort(attribute='projected_points', reverse=True) %}
-        <tr class="opacity-70">
+        <tr class="{{ 'text-warning' if p.counts_on_cap else 'opacity-70' }}">
             <td>{% if viewed_team.is_my_team and p.can_be_bought_out %}<span id="bo-{{ p.name|dom_id }}" class="buyout-light light-grey" title="Not analyzed — click 'Scan Roster for Buyout Opportunities' in the Buyout Analyzer"></span>{% endif %}</td>
             <td>{{ p.position }}</td>
             <td class="font-mono text-xs opacity-70">{{ p.group }}</td>

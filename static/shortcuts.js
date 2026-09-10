@@ -266,9 +266,18 @@ function sortTable(th) {
 }
 
 /* Renumber the leading # cell of every visible row 1..N. Only the Available
-   Players table has this column, so other tables are skipped. */
+   Players table has this column, so other tables are skipped.
+
+   Identity, not containment. This read `tbody.closest('#bid-limits')` until
+   2026-09-10, which the price-drivers table — mounted INSIDE #bid-limits —
+   also satisfies. The way in is applyPlayerFilters, which passes whatever
+   `#bid-limits tbody` resolved to: with a card open that was the drivers
+   table, and every group LABEL got overwritten with 1,2,3. Note it is NOT
+   reachable through sortTable, which hands over the tbody it just sorted —
+   measured 2026-09-10, a browser test driven through the sort path passed
+   against the unfixed build. There are two tables in that panel now. */
 function renumberRows(tbody) {
-    if (!tbody || !tbody.closest('#bid-limits')) return;
+    if (!tbody || tbody.id !== 'pool-rows') return;
     var i = 1;
     tbody.querySelectorAll('tr').forEach(function(row) {
         if (row.style.display === 'none') return;
@@ -319,7 +328,12 @@ var playerFilters = {pos: 'all', rfa: 'all'};
 var POS_LABELS = {F: 'forwards', D: 'defencemen', G: 'goalies'};
 
 function applyPlayerFilters() {
-    var tbody = document.querySelector('#bid-limits tbody');
+    // #pool-rows, never '#bid-limits tbody': querySelector takes the FIRST
+    // match in tree order, and an open price chart puts its drivers <tbody>
+    // ahead of the pool's. That hid all 7 driver rows and left the pool
+    // unfiltered — reported as "the filters don't work when the Price Model
+    // window is open".
+    var tbody = document.getElementById('pool-rows');
     if (!tbody) return;
     var visible = 0;
     tbody.querySelectorAll('tr').forEach(function(row) {
@@ -390,12 +404,15 @@ function filterRfa(rfa) {
    and #team-panel on each /team-view, neither of which touches this table.
 
    Keying on the swapped subtree is safe: bid_limits.html is included only by
-   all_panels.html, and nothing in the app targets #bid-limits directly. */
+   all_panels.html, and nothing in the app targets #bid-limits directly. It
+   asks for #pool-rows rather than '#bid-limits tbody' because a price-chart
+   swap lands inside #bid-limits too, and re-running the filters off the
+   drivers table is exactly the 2026-09-10 bug. */
 document.body.addEventListener('htmx:afterSwap', function(e) {
     if (playerFilters.pos === 'all' && playerFilters.rfa === 'all') return;
     var swapped = e.detail && e.detail.target;
     if (!swapped || !swapped.querySelector) return;
-    if (!swapped.querySelector('#bid-limits tbody')) return;
+    if (!swapped.querySelector('#pool-rows')) return;
     applyPlayerFilters();
 });
 

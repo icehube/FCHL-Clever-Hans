@@ -1329,7 +1329,7 @@ class TestAvailablePlayerFilters:
     def _rows(self, page):
         """(visible, visible-and-RFA, total) for the available-players table."""
         return page.evaluate("""() => {
-            const trs = [...document.querySelectorAll('#bid-limits tbody tr')];
+            const trs = [...document.querySelectorAll('#pool-rows tr')];
             const vis = trs.filter(r => r.style.display !== 'none');
             return {
                 visible: vis.length,
@@ -1428,7 +1428,7 @@ class TestAvailablePlayerFilters:
             page.click("#bid-panel form[hx-vals] button[type='submit']")
         page.wait_for_timeout(600)
 
-        nums = page.evaluate("""() => [...document.querySelectorAll('#bid-limits tbody tr')]
+        nums = page.evaluate("""() => [...document.querySelectorAll('#pool-rows tr')]
             .filter(r => r.style.display !== 'none')
             .map(r => r.cells[0].textContent.trim())""")
         assert nums, "no visible rows after the pick"
@@ -1500,11 +1500,108 @@ class TestAvailablePlayerFilters:
         still = page.evaluate(
             "() => document.getElementById('pool-no-matches').parentElement.tagName")
         assert still == "TFOOT", "sorting moved the empty-state row into the body"
-        nums = page.evaluate("""() => [...document.querySelectorAll('#bid-limits tbody tr')]
+        nums = page.evaluate("""() => [...document.querySelectorAll('#pool-rows tr')]
             .filter(r => r.style.display !== 'none')
             .map(r => r.cells[0].textContent.trim())""")
         assert nums == [str(i + 1) for i in range(len(nums))], (
             f"the # column reads {nums[:6]}… after a sort"
+        )
+
+
+class TestTheFiltersIgnoreTheDriversTable:
+    """The 2026-09-10 report: "the FDG and RFA/UFA don't work when the Price
+    Model window is open", and "the drivers table sometimes doesn't show up".
+
+    One bug, not two. `#player-chart-container` is INSIDE `#bid-limits` and
+    ahead of the pool table, so once a price chart is open the drivers
+    `<tbody>` is the FIRST match for `#bid-limits tbody` — and
+    `document.querySelector` returns first-in-tree-order. Every pool row kept
+    its old display while all seven driver rows were hidden as "not a
+    defenceman", and the footer announced "No defencemen left in the pool"
+    with 233 of them on screen.
+
+    Browser-only of necessity: the selector resolves against the assembled
+    DOM, and `TestClient` never assembles one. "Sometimes" was exact — both
+    filters on All early-returns, and any pick re-renders `#app` and heals it.
+    """
+
+    def _open_a_chart(self, page, live_server):
+        _open(page, live_server)
+        target = pool_top(1, position="F")[0]
+        page.click(f'#bid-limits a[hx-get^="/player-chart/"]:text-is("{target}")')
+        page.wait_for_selector("#player-chart-container .price-drivers")
+
+    def _driver_rows(self, page):
+        return page.evaluate("""() => {
+            const t = document.querySelector('.price-drivers-table tbody');
+            if (!t) return null;
+            const trs = [...t.querySelectorAll('tr')];
+            return {
+                total: trs.length,
+                visible: trs.filter(r => r.style.display !== 'none').length,
+                labels: trs.map(r => {
+                    const c = r.cells[0].cloneNode(true);
+                    const d = c.querySelector('.driver-detail');
+                    if (d) d.remove();
+                    return c.textContent.trim();
+                }),
+            };
+        }""")
+
+    def test_filtering_with_a_chart_open_filters_the_pool_not_the_card(
+        self, page, live_server
+    ):
+        self._open_a_chart(page, live_server)
+        before = self._driver_rows(page)
+        assert before and before["total"] >= 3, "no drivers table to be broken"
+
+        pool_before = page.evaluate(
+            "() => [...document.querySelectorAll('#pool-rows tr')]"
+            ".filter(r => r.style.display !== 'none').length")
+        page.click('[data-pos="D"]')
+        page.wait_for_timeout(200)
+
+        after = self._driver_rows(page)
+        assert after["visible"] == after["total"], (
+            f"{after['total'] - after['visible']} of {after['total']} driver "
+            f"rows were hidden by the POSITION filter — the filter is reading "
+            f"the drivers table"
+        )
+        assert after["labels"] == before["labels"], (
+            f"the driver labels became {after['labels']} — renumberRows "
+            f"overwrote them with row numbers"
+        )
+
+        pool_after = page.evaluate(
+            "() => [...document.querySelectorAll('#pool-rows tr')]"
+            ".filter(r => r.style.display !== 'none').length")
+        assert 0 < pool_after < pool_before, (
+            f"the pool went {pool_before} -> {pool_after} visible rows on a "
+            f"D filter; with a chart open the filter did not reach it"
+        )
+        positions = page.evaluate(
+            "() => [...new Set([...document.querySelectorAll('#pool-rows tr')]"
+            ".filter(r => r.style.display !== 'none').map(r => r.dataset.position))]")
+        assert positions == ["D"], f"visible positions are {positions}, not just D"
+
+    def test_the_footer_does_not_claim_an_empty_pool_with_a_chart_open(
+        self, page, live_server
+    ):
+        """The visible half of the same bug, and the one that misleads.
+
+        `showPoolEmptyState` is handed the count the filter loop produced, so
+        reading the drivers table made it 0 and the footer said the position
+        was gone. On draft day that reads as "everyone at that position is
+        drafted", which is a decision, not a cosmetic glitch.
+        """
+        self._open_a_chart(page, live_server)
+        page.click('[data-pos="D"]')
+        page.wait_for_timeout(200)
+        empty = page.evaluate(
+            "() => { const r = document.getElementById('pool-no-matches');"
+            " return r ? getComputedStyle(r).display : 'missing'; }")
+        assert empty == "none", (
+            "the empty-state row is showing while D players are on screen"
         )
 
 

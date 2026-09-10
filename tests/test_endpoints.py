@@ -3927,7 +3927,10 @@ class TestEverySortableColumnCanActuallySort:
         found = []
         for n, table in enumerate(re.findall(r"<table.*?</table>", html, re.S)):
             head = re.search(r"<thead>(.*?)</thead>", table, re.S)
-            body = re.search(r"<tbody>(.*?)</tbody>", table, re.S)
+            # `<tbody[^>]*>`, not `<tbody>`: the pool table carries
+            # id="pool-rows" and a literal match silently skipped it, taking
+            # the only alt-fallback column on the page with it.
+            body = re.search(r"<tbody[^>]*>(.*?)</tbody>", table, re.S)
             if not head or not body:
                 continue
             rows = re.findall(r"<tr[^>]*>(.*?)</tr>", body.group(1), re.S)

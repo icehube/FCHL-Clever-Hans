@@ -43,7 +43,14 @@
                     <th></th>
                 </tr>
             </thead>
-            <tbody>
+            {# Named, and the name is load-bearing. #player-chart-container
+               above is INSIDE #bid-limits, so once a price chart is open the
+               drivers table's <tbody> is the FIRST one in tree order and
+               `querySelector('#bid-limits tbody')` silently returns it — the
+               2026-09-10 bug where the filter buttons stopped working and the
+               drivers table vanished. Anything reaching for the pool rows
+               addresses #pool-rows. #}
+            <tbody id="pool-rows">
             {% for p in bid_limits %}
             <tr class="hover {% if p.in_optimal %}in-optimal{% endif %} {% if p.is_rfa %}is-rfa{% endif %}" data-position="{{ p.position }}">
                 <td class="opacity-60">{{ loop.index }}</td>

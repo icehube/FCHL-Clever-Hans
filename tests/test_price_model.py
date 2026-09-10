@@ -9,6 +9,8 @@ import csv
 
 import pytest
 
+from tests.helpers import pool_top
+
 from price_model import (
     DRIVER_GROUPS,
     PricePrediction,
@@ -509,3 +511,72 @@ class TestReferenceFeatures:
             f"the reference barely moved ({moved}), so this test no longer "
             f"demonstrates why it has to be frozen"
         )
+
+
+class TestTheReferenceIsFrozenForTheDraft:
+    """Not a property of `compute_reference_features` — of how it is CALLED.
+
+    The function will happily recompute against whatever pool it is handed;
+    `TestReferenceFeatures.test_it_does_not_move_as_the_pool_shrinks_by_itself`
+    measures how far that moves. These are the tests that the app never asks
+    it to.
+    """
+
+    def test_build_initial_state_freezes_one(self):
+        import data_loader
+
+        state = data_loader.build_initial_state()
+        assert set(state.price_reference) == {"F", "D", "G"}
+
+    def test_it_survives_a_save_and_a_reload(self):
+        """The reason it lives on AuctionState and not in a main.py global.
+
+        `TestSnapshotFieldsCannotDrift` covers the mechanism; this names the
+        consequence, which is what a future reader needs — a mid-draft restart
+        rebuilding the reference from the surviving pool would move the
+        baseline under every explanation given for the rest of the draft.
+        """
+        import data_loader
+        from state import AuctionState
+
+        state = data_loader.build_initial_state()
+        reloaded = AuctionState.from_json(state.to_json())
+        assert reloaded.price_reference == state.price_reference
+
+    def test_forty_picks_do_not_move_it(self, client):
+        """The `pos_rank` rule, on the field that needs it for the same reason.
+
+        Runs through the endpoints so `_recompute()` fires on every pick: that
+        is the function which would recompute the reference if anybody put it
+        there, and it is called on every mutation.
+        """
+        import main
+        from tests.helpers import assign
+
+        before = dict(main.auction_state.price_reference)
+        assert before, "precondition: the app booted without a reference"
+
+        for name in pool_top(40):
+            if name in main.auction_state.available_players:
+                assign(client, name, "SRL", 0.5)
+
+        assert main.auction_state.price_reference == before, (
+            "the reference moved during the draft, so an explanation given at "
+            "pick 1 no longer agrees with the same one now"
+        )
+
+    def test_a_legacy_snapshot_without_one_gets_it_backfilled(self):
+        """An old save predates the field and would otherwise render no card."""
+        import json
+
+        import data_loader
+        import main
+        from state import AuctionState
+
+        payload = json.loads(data_loader.build_initial_state().to_json())
+        del payload["price_reference"]
+        state = AuctionState.from_json(json.dumps(payload))
+        assert state.price_reference == {}, "precondition"
+
+        main._backfill_model_inputs(state)
+        assert set(state.price_reference) == {"F", "D", "G"}

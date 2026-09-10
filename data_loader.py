@@ -12,7 +12,11 @@ from config import (
     NHL_TEAM_ALIASES,
     RFA_GROUPS,
 )
-from price_model import compute_pos_ranks
+from price_model import (
+    compute_pos_ranks,
+    compute_reference_features,
+    load_model_params,
+)
 from state import AuctionState, Player, PlayerOnRoster, TeamState
 
 # Team codes that are real FCHL teams (not UFA/RFA placeholders)
@@ -327,4 +331,10 @@ def build_initial_state(
         available_players=biddable,
         nomination_order=nomination_order,
         snake_draft=snake_draft,
+        # Frozen here, beside the pos_rank ranking above and for the same
+        # reason — this is the draft-time pool, and it is the last moment the
+        # reference describes the league rather than what is left of it.
+        price_reference=compute_reference_features(
+            biddable, load_model_params(model_params_path)
+        ),
     )

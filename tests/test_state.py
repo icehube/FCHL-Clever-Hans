@@ -548,6 +548,7 @@ class TestSnapshotFieldsCannotDrift:
             nomination_round=3,
             nomination_index=1,
             snake_draft=False,
+            price_reference={"D": {"projected_points": 44.0, "log_rank": 1.5}},
         )
 
     def test_every_field_reaches_the_json(self):
@@ -657,6 +658,7 @@ class TestSnapshotFieldsCannotDrift:
         state.nomination_round = 99
         state.nomination_index = 98
         state.snake_draft = True
+        state.price_reference = {}
         assert all(
             self._value(getattr(state, n)) != before[n] for n in self._fields()
         ), "the mutation left a field untouched, so restoring it proves nothing"

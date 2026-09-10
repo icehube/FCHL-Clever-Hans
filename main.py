@@ -48,8 +48,11 @@ from optimizer import (
     solve_optimal_roster,
 )
 from price_model import (
+    PriceBreakdown,
     PricePrediction,
     compute_pos_ranks,
+    compute_reference_features,
+    decompose_player,
     load_model_params,
     predict_all_prices,
 )
@@ -221,6 +224,12 @@ def _backfill_model_inputs(state: AuctionState) -> None:
     mid-draft snapshots — drafted players no longer count — but only
     legacy snapshots ever hit this path). Goalie wins come from the
     projection stats file; unmatched goalies use the points fallback.
+    `price_reference` is approximate in exactly the same way and for the same
+    reason: it belongs to the draft-time pool, and a legacy snapshot no longer
+    has one, so the surviving pool is the best available stand-in. It is only
+    ever read by the price-driver breakdown, which is an explanation rather
+    than a draft record, so an approximate baseline degrades the wording of a
+    card and nothing else.
     """
     pool = state.available_players
     if any(p.pos_rank <= 0 for p in pool.values()):
@@ -237,6 +246,9 @@ def _backfill_model_inputs(state: AuctionState) -> None:
             if goalie_wins is None:
                 goalie_wins = load_goalie_wins()
             p.proj_wins = goalie_wins.get(p.name)
+    # Last, because it reads the three fields repaired above.
+    if not state.price_reference and pool:
+        state.price_reference = compute_reference_features(pool, load_model_params())
 
 
 def _load_saved_state(path: str) -> AuctionState | None:

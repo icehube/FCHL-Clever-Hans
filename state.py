@@ -480,6 +480,16 @@ class AuctionState:
     nomination_round: int = 0
     nomination_index: int = 0
     snake_draft: bool = True
+    # The per-position "typical player" the price-driver breakdown measures
+    # against, frozen at draft time for exactly the reason `Player.pos_rank`
+    # is: the pool shrinks. Recomputed against a drafted-down pool the
+    # reference log_mu moves F -0.194, D -0.139, G -0.794, so an explanation
+    # given at pick 10 would silently disagree with the same one at pick 170.
+    #
+    # On the state rather than a `main.py` global because `available_players`
+    # is what a mid-draft reload restores: a global rebuilt at startup would be
+    # computed from the surviving pool and be wrong for the rest of the draft.
+    price_reference: dict[str, dict[str, float]] = field(default_factory=dict)
     _snapshots: list[str] = field(default_factory=list, repr=False)
 
     def current_nominator(self) -> str | None:
@@ -593,6 +603,7 @@ class AuctionState:
             "nomination_round": self.nomination_round,
             "nomination_index": self.nomination_index,
             "snake_draft": self.snake_draft,
+            "price_reference": self.price_reference,
         }
         if include_snapshots:
             data["_snapshots"] = self._snapshots
@@ -620,6 +631,7 @@ class AuctionState:
         state.nomination_round = data["nomination_round"]
         state.nomination_index = data["nomination_index"]
         state.snake_draft = data["snake_draft"]
+        state.price_reference = data.get("price_reference", {})
         state._snapshots = data.get("_snapshots", [])
         return state
 

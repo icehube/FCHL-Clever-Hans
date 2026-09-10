@@ -483,6 +483,90 @@ class TestReferenceFeatures:
                 )
             assert math.exp(r["log_rank"]) >= 1.0
 
+    def _pool(self, salaries, rfas):
+        """Five forwards with unambiguous medians — pts 30, rank 3, odds 3.0.
+
+        Odd-sized on purpose: `_median` averages the middle pair on an even
+        list, and `round()` is banker's, so a 4-player pool would pin the
+        reference rank to a rounding rule rather than to the policy.
+        """
+        from state import Player
+
+        return {
+            f"ref-pool-{i}": Player(
+                name=f"ref-pool-{i}", position="F", group="3", nhl_team="BOS",
+                age=25, projected_points=pts, is_rfa=rfa, salary=salary,
+                team_probability=float(rank), pos_rank=rank,
+            )
+            for i, (pts, rank, salary, rfa) in enumerate(
+                zip([10, 20, 30, 40, 50], [1, 2, 3, 4, 5], salaries, rfas)
+            )
+        }
+
+    def test_it_is_the_median_of_the_raw_inputs_field_by_field(self, params):
+        """The per-field policy, which the LIVE pool does not pin.
+
+        Measured by mutation 2026-09-10: against the live-pool tests above and
+        the chart endpoint tests, `last_salary=None` and `pos_rank=1` both
+        survive. Either silently moves the baseline every explanation is
+        measured against — the G reference drops from $1.1M-last-season to new
+        to the league, and every forward's Scarcity factor is restated against
+        rank 1 instead of rank 203. This is the test that supplies the data
+        those two mutants need in order to die.
+        """
+        import math
+
+        from config import MIN_SALARY
+
+        ref = compute_reference_features(
+            self._pool([0.0, 0.0, 2.0, 4.0, 6.0], [False] * 5), params
+        )["F"]
+
+        assert ref["projected_points"] == 30
+        assert ref["projected_points_sq"] == 900
+        assert ref["pts_hinge_60"] == 0.0
+        assert ref["team_probability"] == 3.0
+        assert ref["log_rank"] == pytest.approx(math.log(3)), (
+            "the reference rank is not the pool's median rank"
+        )
+        # Three of five carry a lag, so the majority rule takes their median —
+        # $4M, not $2M (the median over all five, counting the newcomers as 0)
+        # and not MIN_SALARY (no lag at all).
+        assert ref["has_lag"] == 1.0
+        assert ref["log_lag"] == pytest.approx(math.log(4.0)), (
+            f"the reference lag salary is ${math.exp(ref['log_lag']):.2f}M, "
+            f"not the $4.0M median among the players who have one"
+        )
+        assert ref["is_rfa"] == 0.0
+        assert MIN_SALARY == 0.5, "the encoding below assumes the $0.5M floor"
+
+    def test_a_minority_with_a_lag_leaves_the_reference_new_to_the_league(
+        self, params
+    ):
+        """The other side of the majority rule, and the live pool covers only
+        this one (F and D reference as newcomers, G as a $1.1M returner)."""
+        import math
+
+        from config import MIN_SALARY
+
+        ref = compute_reference_features(
+            self._pool([0.0, 0.0, 0.0, 4.0, 6.0], [False] * 5), params
+        )["F"]
+        assert ref["has_lag"] == 0.0
+        assert ref["log_lag"] == pytest.approx(math.log(MIN_SALARY)), (
+            "a reference with no lag must carry the ln(MIN_SALARY) encoding, "
+            "not 0 and not the median of the two who do have one"
+        )
+
+    def test_the_reference_is_rfa_only_when_most_of_the_position_is(self, params):
+        """Untestable on the live pool, where all three positions are majority
+        UFA — so a hard-coded False would look correct forever."""
+        salaries = [0.0] * 5
+        mostly = self._pool(salaries, [True, True, True, False, False])
+        barely = self._pool(salaries, [True, True, False, False, False])
+        assert compute_reference_features(mostly, params)["F"]["is_rfa"] == 1.0
+        assert compute_reference_features(barely, params)["F"]["is_rfa"] == 0.0
+
     def test_an_empty_pool_yields_no_reference(self, params):
         assert compute_reference_features({}, params) == {}
 

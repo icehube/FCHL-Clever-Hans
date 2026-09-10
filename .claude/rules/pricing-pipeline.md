@@ -114,6 +114,22 @@ projected points can never lower a predicted price. F's effective slope:
 D is +0.0399 below 60 and +0.0100 above; G does not use points at all
 (`proj_wins`, itself bounded `>= 0`).
 
+**Flat is the boundary solution, and it has a consequence worth knowing on
+draft day.** The unconstrained fit wanted −0.0194 there, so the constrained
+optimum sits exactly on the bound: above 80 points, **every** forward gets the
+same Points factor (×6.07 against the reference). More points past the knot no
+longer *hurt* — which is the whole fix — but they no longer *help* either, so
+what separates elite forwards is Scarcity, Reputation and NHL team. Scarcity
+is derived from points, so the ordering usually still comes out right
+(McDavid 132pts $11.36M > Panarin 120pts $8.09M > Marner 85pts $7.73M), but
+not always: Barkov (80pts, rank 9, $5.4M lag) prices at **$8.61M**, above
+Panarin, on reputation and Cup odds. `tests/measure_drivers.py` reports those
+as "more points costs less OVERALL" and is explicit that they are **not** the
+defect — a lesser scorer on a better team with a bigger reputation should cost
+more. The defect measure, which holds the other four drivers out, is at
+**zero** for all three positions. Do not read the overall count as a
+regression; read the isolated one.
+
 **The exported `coef_pts_hinge_80` is NEGATIVE (−0.0422) and that is correct.**
 The exported basis holds slope *increments*, so the increment that takes a
 +0.0422 segment down to flat has to be negative. Do not "fix" it on the sign.

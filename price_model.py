@@ -270,11 +270,16 @@ def predict_all_prices(
 # spurious negative "reputation" contribution.
 #
 # `log_rank` and `is_rfa` get their own rows rather than an "other" bucket
-# because they are not small — measured on the live pool, Scarcity is the
-# LARGEST driver for every expensive forward (McDavid x7.97 against Points
-# x1.39). Note that `pos_rank` is computed FROM projected_points, so Points and
-# Scarcity are collinear by construction and have to be read together; the card
-# says so.
+# because they are not small. Measured over the live pool by
+# `tests/measure_drivers.py`: Scarcity is F's second-largest mean effect
+# (0.268 against Points' 0.324) and takes over entirely at the top, where the
+# money is — McDavid is Scarcity x7.97 against Points x1.39. Across the whole
+# pool Points is still the largest driver for 82% of forwards, because most of
+# them sit below the 80-pt knot where its slope is positive; do not restate
+# either half as "the" behaviour.
+#
+# Note `pos_rank` is computed FROM projected_points, so Points and Scarcity are
+# collinear by construction and have to be read together; the card says so.
 DRIVER_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Points", ("projected_points", "projected_points_sq",
                 "pts_hinge_60", "pts_hinge_80", "proj_wins")),

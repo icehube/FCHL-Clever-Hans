@@ -1171,7 +1171,6 @@ def _context(request: Request) -> dict:
             t for t in auction_state.transaction_log if t.transaction_type != "draft"
         ],
         "milp": milp_solution,
-        "market_info": market_info,
         "bid_limits": bid_limits,
         "nomination_order": auction_state.nomination_order,
         "current_nominator": auction_state.current_nominator(),

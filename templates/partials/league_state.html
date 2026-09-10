@@ -148,14 +148,4 @@
         </tbody>
     </table>
     </div>
-
-    {% if market_info %}
-    <div class="alert alert-sm mt-2 py-2 text-xs">
-        Market ceiling: <strong>${{ "%.1f"|format(market_info.market_ceiling) }}M</strong>
-        ({{ market_info.demand_count }} active bidders)
-        {% if market_info.highest_bidder %}
-        · Top: {{ market_info.highest_bidder }} (${{ "%.1f"|format(market_info.highest_bid) }}M)
-        {% endif %}
-    </div>
-    {% endif %}
 </section>

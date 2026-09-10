@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass, field, fields
@@ -481,35 +482,79 @@ class TransactionRecord:
 # right panel out of eleven, a minor only inside a second table in that panel,
 # and a bought-out player nowhere at all.
 
+# What an index entry points at. Three unrelated shapes that happen to share
+# `position` and `nhl_team`; `_locate` branches on `where` rather than on the
+# type, because `where` is also what the template branches on.
+Searchable = Player | PlayerOnRoster | TransactionRecord
+
 SEARCH_MIN_QUERY = 2  # one character matches hundreds; see the tier table below
 SEARCH_LIMIT = 10
 
 
-# Memoized because the folding, not the searching, was the cost. Measured
-# 2026-09-10 over the live 953 names: `_searchable()` is 0.047ms and a plain
-# `.lower()` sweep 0.018ms, but an unmemoized fold sweep is **0.792ms** — 70%
-# of a 1.13ms query, paid again on every keystroke to re-derive the same
-# answer for the same stable strings. Memoized, a query measures **0.33ms**
-# warm — the remainder is 953 cache lookups and the tier sweep, not the
-# normalize. (0.10ms was predicted here before it was measured; it was wrong,
-# and 3x wrong in the direction that would have justified more cleverness.)
-# Bounded rather than unbounded: the keys are pool names plus every prefix the
-# operator types, and `players.csv` is replaced between drafts.
+# Matching folds a name to LETTERS ONLY, plus the offset each word starts at.
+# Punctuation is not cosmetic here: `players.csv` today carries an apostrophe
+# (`Ryan O'Reilly`, `K'Andre Miller`), thirteen real hyphens
+# (`Ryan Nugent-Hopkins`), the parentheses `_disambiguated_names` adds
+# (`Matt Murray (DAL)`), and — measured 2026-09-10 — FOUR names where the file
+# encodes the hyphen as the digit `0`: `Oliver Ekman0Larsson`,
+# `Nicolas Aube0Kubel`, `Alex Barre0Boulet`, `Trey Fix0Wolansky`. CLAUDE.md
+# already records U+0060 backticks in the same file.
+#
+# So a fold that keeps punctuation makes the operator reproduce the file's
+# punctuation exactly, INCLUDING a data-entry bug they have no way of knowing
+# about. Measured against the shipped fold: `oreilly`, `kandre`,
+# `ekman-larsson`, `ekman larsson`, `barre-boulet`, `fix-wolansky`,
+# `aube-kubel` and `nugent hopkins` ALL returned zero hits for players who are
+# in the pool right now. Letters-only, all eight return exactly the right man.
+#
+# The offsets are what makes that work without demoting him. A word prefix has
+# to be matched at a BOUNDARY inside the concatenation, not against a split
+# list: `barreboulet` is no `.split()` token of `alexbarreboulet`, but it does
+# start at offset 4, which is where `barre` begins. Matching the split list
+# instead put every one of those names in the substring tier, below anyone
+# whose surname simply starts with the query.
+#
+# Memoized because the folding, not the searching, is the cost, and the names
+# are stable strings re-folded on every keystroke. Measured 2026-09-10 over
+# the live 953 names, one full query: **0.21ms** warm against **0.80ms** cold.
+# The sweep alone is 0.455ms unmemoized — cheaper than the 0.770ms the old
+# NFKD-everything fold cost, because `isascii()` skips the normalize for all
+# 953 of today's names. Bounded rather than unbounded: the keys are pool names
+# plus every prefix the operator types, and `players.csv` is replaced between
+# drafts.
+_NON_LETTER = re.compile(r"[^a-z]+")
+
+
 @lru_cache(maxsize=4096)
-def _fold(text: str) -> str:
-    """Lower-cased and stripped of diacritics, for MATCHING only.
+def _fold(text: str) -> tuple[str, tuple[int, ...]]:
+    """Letters of `text` lower-cased and de-accented, and where its words start.
 
     NFKD splits an accented character into a base letter plus a combining
     mark, which dropping category "Mn" then removes — so "Tomáš" folds to
-    "tomas" and a name typed off a broadcast graphic still finds him.
+    "tomas" and a name typed off a broadcast graphic still finds him. Guarded
+    by `isascii()` because, measured 2026-09-10, the live pool has ZERO
+    non-ASCII names: the normalize is pure cost on today's data. It is not
+    dead code — `players.csv` is replaced before every draft and NHL rosters
+    carry diacritics routinely — but a test asserting it against the live pool
+    could not fail, so the test SUPPLIES a name that needs folding.
 
-    Measured 2026-09-10: the live pool has ZERO non-ASCII names, so this is a
-    no-op on today's data and a test asserting it against the pool could not
-    fail. `players.csv` is replaced before every draft and NHL rosters carry
-    diacritics routinely, so the test SUPPLIES a name that needs folding.
+    Offsets are cumulative over the LETTERS, not indices into `text`: they are
+    only ever used as the `start` argument of `str.startswith`, and there is
+    no caller that needs to map one back to the original string.
     """
-    decomposed = unicodedata.normalize("NFKD", text.lower())
-    return "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    low = text.lower()
+    if not low.isascii():
+        low = "".join(
+            ch for ch in unicodedata.normalize("NFKD", low)
+            if unicodedata.category(ch) != "Mn"
+        )
+    words, starts, at = [], [], 0
+    for word in _NON_LETTER.split(low):
+        if word:
+            starts.append(at)
+            words.append(word)
+            at += len(word)
+    return "".join(words), tuple(starts)
 
 
 @dataclass(frozen=True)
@@ -524,8 +569,9 @@ class PlayerLocation:
     team_code: str | None  # None only for "pool"
     position: str
     nhl_team: str
-    group: str  # "" for a bought-out player; the log does not record it
-    projected_points: int  # 0 for a bought-out player, for the same reason
+    # 0 for a bought-out player: the log does not record points, and guessing
+    # them from a name that is no longer in any collection is not possible.
+    projected_points: int
     # The player's CAP HIT, or None when he has none. None in the pool is not
     # missing data: `Player.salary` is LAST season's salary — the price model's
     # lag feature, where 0 means "new to the league" — while
@@ -685,8 +731,17 @@ class AuctionState:
         self.rollback_to(self._snapshots.pop())
         return True
 
-    def _searchable(self) -> dict[str, tuple[str, str | None, object]]:
-        """Every findable name, resolved to exactly ONE location.
+    def _searchable(self) -> dict[str, tuple[str, str | None, Searchable]]:
+        """Every findable name, resolved to ONE location per name.
+
+        Per NAME, not per player, and that is a real limitation rather than a
+        guarantee: `_disambiguated_names` renames duplicates WITHIN the
+        biddable pool, but a roster row and a biddable row sharing a name go
+        to different dicts and neither is renamed, so two different people
+        can carry one string. `setdefault` then reports the roster one and
+        drops the other. Not reachable on today's data — the zero-point
+        exclusion hides both halves of every such pair — which is exactly why
+        it is written down; see BACKLOG.md.
 
         Resolution order mirrors `TeamState.find_player` and `remove_player`:
         keeper, then acquired, then minors, then the pool, then the log. The
@@ -709,7 +764,7 @@ class AuctionState:
         earlier draft of this comment cited undo as the reason and was simply
         wrong — the mutant survived the undo test, which is how it was found.)
         """
-        index: dict[str, tuple[str, str | None, object]] = {}
+        index: dict[str, tuple[str, str | None, Searchable]] = {}
         for code, team in self.teams.items():
             for in_minors, group in (
                 (False, team.keeper_players),
@@ -736,41 +791,58 @@ class AuctionState:
         mistaking a fuzzy multi-hit search for it is the confusion the name
         exists to prevent.
 
-        Ranked in three tiers, alphabetical within each, because a bare
-        substring is unusable at this pool size — measured over the live 953
-        names:
+        TWO tiers — a prefix of the whole name or of any word in it, then a
+        bare substring — ranked within each by projected points, then name. A
+        bare substring alone is unusable at this pool size; measured over the
+        live 953 names, `an` matches 229 of them and `er` 216.
 
-            query   full prefix   word prefix   substring
-            "ma"             69           100         136
-            "son"             1             1          82
-            "er"              9            12         226
+        The two halves of that are separate decisions and each has a measured
+        reason.
 
-        A word prefix is what the operator actually types (a surname), so it
-        outranks a substring; a full-name prefix outranks both.
+        **Why prefix-anywhere is ONE tier.** A full-name prefix looks like the
+        stronger match and is not: with no space in the query it means only
+        "his FIRST name starts with this", which is not what anyone types.
+        Ranked above surnames it fills all ten slots with the wrong people —
+        measured, `ma` returned MacKenzie Entwistle, MacKenzie Weegar and
+        Mackenzie Blackwood while hiding Nathan MacKinnon, Auston Matthews and
+        Cale Makar behind "+127 more", and `hu` led with Hudson Fasching while
+        burying every Hughes. A query that does contain a space still matches
+        as a full prefix (`connor mcd`), so collapsing loses nothing.
+
+        **Why points, not the alphabet.** Ten of 100 matches have to be
+        chosen, and alphabetical order is arbitrary at that ratio — `smi` led
+        with Brendan Smith over Reilly Smith. The subject object is already in
+        the index, so this costs nothing. Consequence, deliberate: a
+        bought-out player's subject is a `TransactionRecord`, which carries no
+        points, so he sorts to the BOTTOM of his tier. Acceptable because a
+        buyout search is a near-exact surname with one or two hits — but it is
+        a decision, not an accident, and `getattr` is where it lives.
         """
-        folded_query = _fold(query.strip())
+        folded_query, _ = _fold(query.strip())
         if len(folded_query) < SEARCH_MIN_QUERY:
             return PlayerSearch(query=query, hits=(), total=0)
 
         index = self._searchable()
-        by_tier: tuple[list[str], list[str], list[str]] = ([], [], [])
+        prefixes: list[str] = []
+        substrings: list[str] = []
         for name in index:
-            folded = _fold(name)
-            if folded.startswith(folded_query):
-                by_tier[0].append(name)
-            elif any(word.startswith(folded_query) for word in folded.split()):
-                by_tier[1].append(name)
-            elif folded_query in folded:
-                by_tier[2].append(name)
+            letters, starts = _fold(name)
+            if any(letters.startswith(folded_query, at) for at in starts):
+                prefixes.append(name)
+            elif folded_query in letters:
+                substrings.append(name)
 
-        ranked = [name for tier in by_tier for name in sorted(tier)]
+        def rank(name: str) -> tuple[int, str]:
+            return (-getattr(index[name][2], "projected_points", 0), name)
+
+        ranked = sorted(prefixes, key=rank) + sorted(substrings, key=rank)
         # Rank on NAMES and materialize only the survivors: the index is ~950
         # entries and all but `limit` of them would be thrown away.
         hits = tuple(self._locate(name, *index[name]) for name in ranked[:limit])
         return PlayerSearch(query=query, hits=hits, total=len(ranked))
 
     def _locate(
-        self, name: str, where: str, team_code: str | None, subject: object
+        self, name: str, where: str, team_code: str | None, subject: Searchable
     ) -> PlayerLocation:
         """One index entry as a PlayerLocation, plus its provenance."""
         last_txn = next(
@@ -781,7 +853,7 @@ class AuctionState:
             return PlayerLocation(
                 name=name, where=where, team_code=None,
                 position=subject.position, nhl_team=subject.nhl_team,
-                group=subject.group, projected_points=subject.projected_points,
+                projected_points=subject.projected_points,
                 salary=None, counts_on_cap=False, last_txn=last_txn,
             )
         if where == "bought-out":
@@ -792,13 +864,13 @@ class AuctionState:
             return PlayerLocation(
                 name=name, where=where, team_code=team_code,
                 position=subject.position, nhl_team=subject.nhl_team,
-                group="", projected_points=0,
+                projected_points=0,
                 salary=subject.salary, counts_on_cap=False, last_txn=last_txn,
             )
         return PlayerLocation(
             name=name, where=where, team_code=team_code,
             position=subject.position, nhl_team=subject.nhl_team,
-            group=subject.group, projected_points=subject.projected_points,
+            projected_points=subject.projected_points,
             salary=subject.salary, counts_on_cap=subject.counts_on_cap,
             last_txn=last_txn,
         )

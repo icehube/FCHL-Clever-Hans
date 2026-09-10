@@ -27,9 +27,14 @@ def a_query_for(name: str) -> str:
     The surname rather than the whole name because that is the query the tier
     ranking exists for, and because a full name would make every test a
     prefix-tier test by accident.
+
+    Only ALPHABETIC tokens count. `_disambiguated_names` appends " (DAL)",
+    " (VAN F)" and " (#2)", so the last token of a name is not reliably a
+    surname — and a query of "(DAL" folds to "dal", which matches the suffix
+    rather than the man and would keep passing while testing the wrong thing.
     """
-    surname = name.split()[-1] if " " in name else name
-    return surname[:4]
+    words = [w for w in name.split() if w.isalpha()] or [name]
+    return words[-1][:4]
 
 
 def hit_for(result, name: str):
@@ -216,16 +221,54 @@ class TestRankingAndLimits:
             f"a substring match ranked above a surname match: {folded[:12]}"
         )
 
-    def test_a_full_name_prefix_outranks_a_surname(self, state):
-        result = state.locate_players("mar", limit=200)
-        names = [h.name.lower() for h in result.hits]
-        first = [i for i, n in enumerate(names) if n.startswith("mar")]
-        later = [
-            i for i, n in enumerate(names)
-            if not n.startswith("mar") and any(w.startswith("mar") for w in n.split())
-        ]
-        assert first and later, "this pool no longer separates the two tiers"
-        assert max(first) < min(later)
+    def test_a_first_name_prefix_does_not_outrank_a_better_surname(self, state):
+        """A full-name prefix looks like the stronger match and is not.
+
+        With no space in the query it means only "his FIRST name starts with
+        this", which nobody types. Ranked as its own tier above surnames it
+        filled all ten slots with the wrong people — measured over the live
+        pool, "hu" led with three players whose first names begin Hu- and hid
+        every Hughes. Supplied rather than derived because the pool is
+        replaced before every draft and the pairing has to be guaranteed.
+        """
+        shared = dict(position="F", nhl_team="XXX", group="1", salary=1.0)
+        team = state.teams[MY_TEAM]
+        # The decoy's FIRST name starts with the query, so a full-name-prefix
+        # tier would put him first; he scores less, so points put him second.
+        team.acquired_players.append(PlayerOnRoster(
+            name="Aaaasurnameberg Zzzz", projected_points=20, **shared,
+        ))
+        team.acquired_players.append(PlayerOnRoster(
+            name="Zzzz Aaaasurname", projected_points=90, **shared,
+        ))
+        team._invalidate_cache()
+
+        names = [h.name for h in state.locate_players("aaaasur", limit=50).hits]
+        assert names[:1] == ["Zzzz Aaaasurname"], (
+            f"the first-name match outranked the better surname match: {names}"
+        )
+
+    def test_the_best_match_is_not_merely_the_alphabetically_first(self, state):
+        """Ten of a hundred matches get shown, so which ten is the question.
+
+        Alphabetical order is arbitrary at that ratio. Both names below are
+        surname matches in the same tier, and the alphabet puts the wrong one
+        first, so this fails against a `sorted(tier)` that ignores points.
+        """
+        shared = dict(position="F", nhl_team="XXX", group="1", salary=1.0)
+        team = state.teams[MY_TEAM]
+        team.acquired_players.append(PlayerOnRoster(
+            name="Alpha Qwertyfirst", projected_points=10, **shared,
+        ))
+        team.acquired_players.append(PlayerOnRoster(
+            name="Beta Qwertysecond", projected_points=99, **shared,
+        ))
+        team._invalidate_cache()
+
+        names = [h.name for h in state.locate_players("qwerty", limit=50).hits]
+        assert names == ["Beta Qwertysecond", "Alpha Qwertyfirst"], (
+            f"ranked by name rather than by points: {names}"
+        )
 
     def test_it_counts_the_matches_it_did_not_return(self, state):
         """Without this the panel would silently truncate, which on a common
@@ -297,6 +340,70 @@ class TestMatchingRules:
             "accent, which is the opposite of what a search box is for"
         )
         assert hit_for(state.locate_players("Tomáš", limit=200), "Tomáš Accented Hertlova")
+
+    def test_a_punctuated_name_is_found_typed_plainly(self, state):
+        """Against the LIVE pool, because this one can fail on it today.
+
+        Measured 2026-09-10, 24 pool names carry a character that is not a
+        letter, a space or a period: apostrophes, hyphens, the parentheses
+        `_disambiguated_names` adds — and four names where `players.csv`
+        encodes the hyphen as the digit `0`. Before the letters-only fold,
+        every one of those was unfindable unless you reproduced the file's
+        punctuation exactly, a data-entry bug included.
+
+        Asserts the subjects EXIST before searching, so a future CSV with
+        clean names skips loudly rather than passing hollow.
+        """
+        import re
+
+        punctuated = [
+            n for n in state.available_players
+            if re.search(r"[^A-Za-z .]", n) and " " in n
+        ]
+        assert punctuated, "no pool name carries punctuation; this cannot fail"
+
+        for name in punctuated:
+            plain = re.sub(r"[^a-z]", "", name.split(" ", 1)[1].lower())
+            found = hit_for(state.locate_players(plain, limit=500), name)
+            assert found is not None, (
+                f"{name!r} is in the pool and typing {plain!r} did not find "
+                f"him; the operator cannot be asked to guess the file's "
+                f"punctuation"
+            )
+
+    def test_punctuation_typed_a_different_way_still_matches(self, state):
+        """SUPPLIED, because the digit-for-hyphen form is a CSV bug a refresh
+        may fix, and the intent has to survive the fix. Both spellings of the
+        same surname must answer to a plainly typed query and to a hyphen.
+
+        The RANK assertion is the half that pins the offsets. Folding to
+        letters alone already makes these findable; what it does not do is
+        keep them out of the substring tier, because the fold concatenates
+        and `"alexbarreboulet".split()` is one token, so matching a split
+        list would rank a punctuated surname below anyone who merely contains
+        the query. The decoy is here to make that fail — it outscores both
+        subjects, so only tiering can put it last.
+        """
+        shared = dict(position="F", nhl_team="XXX", group="1", salary=1.0)
+        team = state.teams[MY_TEAM]
+        team.acquired_players.append(PlayerOnRoster(
+            name="Real Hyphen-Surname", projected_points=40, **shared,
+        ))
+        team.acquired_players.append(PlayerOnRoster(
+            name="Digit Hyphen0Surname", projected_points=41, **shared,
+        ))
+        team.acquired_players.append(PlayerOnRoster(
+            name="Decoy Prefixhyphensurname", projected_points=99, **shared,
+        ))
+        team._invalidate_cache()
+
+        subjects = {"Real Hyphen-Surname", "Digit Hyphen0Surname"}
+        for query in ("hyphensurname", "hyphen-surname", "hyphen surname"):
+            names = [h.name for h in state.locate_players(query, limit=50).hits]
+            assert set(names[:2]) == subjects, (
+                f"{query!r} ranked {names}; a surname at a word boundary must "
+                f"outrank a bare substring even when the substring scores more"
+            )
 
 
 class TestTheLogDoesNotOutrankReality:

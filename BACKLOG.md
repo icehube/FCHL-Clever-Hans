@@ -16,6 +16,21 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
+- [2026-09-10] [design-review] `state.py:734 (_searchable)` — **two different
+  people sharing one name yield one search hit, and the pool copy is the one
+  dropped.** `_disambiguated_names` renames duplicates *within* the biddable
+  pool, but a roster row and a biddable row carrying the same string go to
+  different dicts and neither is renamed — its own docstring names `Jack
+  Hughes` and `Elias Pettersson` as the case. `_searchable` keys by name and
+  `setdefault`s, so the roster copy wins and the draftable one is invisible in
+  the one tool built to answer "where is he?". Deferred because it is not
+  reachable on today's data: the zero-point exclusion hides both halves of
+  every such pair (measured 2026-09-10, zero pool/roster name collisions), and
+  the fix changes the index value to a list, which moves `total`, the tier
+  ranking and four tests. `players.csv` is replaced before every draft and the
+  next projection refresh removes that cover, so re-check this at refresh time
+  rather than waiting for it to be reported.
+
 - [2026-09-07] [nhl-team-join] `data/players.csv` (data, no symbol — line numbers
   drift on every refresh) — **15 player names are corrupted by two careless
   find-and-replaces, and 9 rows carry the FCHL placeholder `UFA` in the NHL TEAM

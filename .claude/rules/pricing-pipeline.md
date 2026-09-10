@@ -15,12 +15,102 @@ prediction           reality         engine
 - **Skaters are piecewise-linear in points**: hinge terms `max(pts-60, 0)` (F and D) and `max(pts-80, 0)` (F only) capture star-threshold kinks; the pts^2 coefficient is exported as 0.0.
 - **Goalies are priced on projected WINS** (`Player.proj_wins`, from `data/goalie_projection_stats.csv`), not the 2W+3SO composite -- shutouts are unprojectable noise. Fallback when wins are missing: `pts / metadata.goalie_pts_per_win` (~2.31).
 - **Reputation feature**: last season's salary (`Player.salary` for biddables; 0 = new to league) feeds `log_lag`/`has_lag`.
-- **Scarcity feature**: `Player.pos_rank` = rank by projected points within position, computed once against the draft-time pool and frozen -- never re-rank the shrinking pool mid-draft.
+- **Scarcity feature**: `Player.pos_rank` = rank by projected points within position, computed once against the draft-time pool and frozen -- never re-rank the shrinking pool mid-draft. It is DERIVED from projected points, so in the driver breakdown below Points and Scarcity are collinear by construction and must be read together.
 - **Units**: `team_probability` is in PERCENT (EDM = 11.04, league sums to ~100). `team_odds.json` stores fractions; `load_team_odds` converts.
 - **Sigma** is a function of the predicted log-price (not points): `max(sigma_intercept + sigma_slope * log_pred, sigma_floor)`; exported values are already MAD->SD corrected.
 - **Expected price** = `p_floor * 0.5 + (1 - p_floor) * clipped-lognormal MEAN` (closed form) -- never the median, which under-forecasts total spend.
 - Unused features export coefficient 0.0, so one formula serves F/D/G.
 - Golden test: `tests/fixtures/auction_predictions_current.csv` (exported by the pricer notebook alongside the params) must be reproduced within rounding by `predict_price`. When `data/model_params.json` is regenerated, copy the matching predictions CSV into the fixture too.
+
+### Decomposing a model price into its drivers
+
+`decompose_price` splits the stage-2 median against a per-position reference
+player. It is exact, because both sides are the same linear form:
+
+```
+log_mu(player) = log_mu(reference) + SUM_groups SUM_keys coef_k * (x_k - r_k)
+```
+
+Five groups (`DRIVER_GROUPS`): **Points** (`projected_points`,
+`projected_points_sq`, both hinges, and `proj_wins` for G), **NHL team**
+(`team_probability`), **Reputation** (`log_lag` + `has_lag`), **Scarcity**
+(`log_rank`), **Contract** (`is_rfa`).
+
+**Reputation is one group and must stay one.** `log_lag` is `ln(MIN_SALARY)`
+for a player new to the league, **not** 0. Split across two rows, every
+newcomer shows a spurious negative reputation contribution — the encoding
+saying something the model is not.
+
+**Report multipliers, never a per-row dollar step or percent.** The model is
+multiplicative, so a dollar step is `exp(running + delta) - exp(running)` and
+depends on where the row sits in the list. Measured 2026-09-09 across all 120
+orderings of the five groups, McDavid's Points step runs **$0.11M to $2.72M**
+and Scarcity's **$2.06M to $8.50M**. Every one is arithmetically correct, which
+is exactly what makes showing one a trap — the figure gets quoted. Only
+`exp(log_delta)` is order-invariant. So the card shows a base price, per-row
+`×factor`, and a final price, and the bar is sized on `|log_delta|`. **Do not
+add a running-dollar column**; `test_the_factors_do_not_depend_on_their_order`
+exists because it is the obvious "improvement". This also answers the question
+`BACKLOG.md` posed as "log space or % of predicted price" — the answer is
+neither, and for a reason that applies to both.
+
+**Points and Scarcity are collinear by construction.** `pos_rank` is computed
+FROM `projected_points`, so the two rows are two views of one input and have to
+be read together. Measured over the live pool: Scarcity is F's second-largest
+mean effect (0.268 against Points' 0.324) and takes over at the top, where the
+money is, while Points is still the largest driver for 82% of forwards because
+most sit below the 80-pt knot. **Do not restate either half as "the"
+behaviour.**
+
+**It explains the MEDIAN and nothing else.** `expected_price` is not
+decomposable the same way, for three separate reasons: P(floor) is a second
+logistic whose coefficients frequently point the OTHER way (F's
+`floor_coef_log_rank` is +3.006 against `coef_log_rank` −0.391, so a deep rank
+makes a player both more likely to be a floor sale *and* cheaper if he is not);
+`sigma` is a nonlinear function of `log_mu`; and the clip bounds are
+per-position (`max_bid` is 11.4 F / 8.5 D / 10.5 G, **not** `config.MAX_SALARY`).
+The clamp is the common case, not an edge — 496 of 705 pool players have an
+unclamped median below their position's `min_bid`, and 0 sit above `max_bid`.
+
+**The reference is frozen at draft time**, on `AuctionState.price_reference`,
+for exactly the reason `pos_rank` is frozen: the pool shrinks. Measured,
+recomputing it against a drafted-down pool moves the reference `log_mu` by
+F −0.194, D −0.139, G −0.794 — a goalie baseline that halves — so an
+explanation given at pick 1 would silently disagree with the same one at pick
+170. It is on the state and not a `main.py` global because `available_players`
+is what a mid-draft reload restores. `_recompute()` must never touch it. It is
+the median of the RAW inputs put through `build_features`, not the median of
+each derived feature: the two agree on this pool only by luck, and a reference
+whose `pts_hinge_60` disagreed with its own `projected_points` would describe
+no player, so the card could not name it on screen. The training means would be
+a better anchor still, but they are not in `model_params.json` and would need a
+notebook export change.
+
+### The forward points slope is negative above 80 (known bad, 2026-09-09)
+
+`coef_pts_hinge_80` is −0.0504 against a 60–80 slope of +0.0310, so F's
+effective slope is:
+
+| points | log $ per point |
+|---|---|
+| < 60 | +0.0179 |
+| 60–80 | +0.0310 |
+| **> 80** | **−0.0194** |
+
+**The forward price curve peaks at 80 points and falls.** At rank 10 with a $6M
+lag: 40pts → $2.51M, 80pts → $6.60M, 132pts → $2.44M. D is fine (+0.0399 below
+60, +0.0100 above) and G does not use points at all.
+
+Measured by `tests/measure_drivers.py`: **259** isolated forward inversions
+(pairs where more points earns a smaller Points contribution, other drivers
+held out), **zero** for D and G, and **$27.8M** of model price suppressed
+across the 8 forwards past the knot.
+
+**Not a bug in `price_model.py`** — the golden fixture reproduces it, so it is
+in the fit the notebook exported, and `data/model_params.json` may not be
+hand-edited. Two `xfail(strict=True)` guards in `tests/test_price_model.py`
+hold the property, so a corrected export fails as XPASS and forces the markers
+and the `BACKLOG.md` entry to be deleted together.
 
 **Layer 2 -- Market price** (`market.py`): Adjusts model prices using real-time auction state. Computes market ceilings from each opponent's exact remaining budget, roster needs, and minimum reserve requirements. We have perfect budget visibility during the draft, so these calculations are precise. Teams marked as "done" are excluded from market calculations.
 

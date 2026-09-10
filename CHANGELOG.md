@@ -20,6 +20,149 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-09]
+
+### Added
+
+- **The Price Model card now says WHY, not just what.** `BACKLOG.md`'s
+  "decompose Model $ into its drivers — how much comes from projected points vs
+  NHL team quality" is closed. `price_model.decompose_price` splits the stage-2
+  median against a per-position reference player:
+
+      log_mu(player) = log_mu(reference) + SUM_groups SUM_keys coef_k * (x_k - r_k)
+
+  exactly, because both sides are the same linear form. Verified over all 705
+  pool players: worst reconstruction error 6.7e-16.
+
+  **The entry's open question was answered by neither of its two options.** It
+  asked whether to show the contributions "in log space or as % of predicted
+  price". Measured: *any* per-row dollar or percent attribution is
+  **order-dependent** in a multiplicative model, because a row's dollar step is
+  `exp(running + delta) - exp(running)` and moves with where the row sits.
+  Across all 120 orderings of the five groups, McDavid's Points step runs
+  $0.11M to $2.72M and Scarcity's $2.06M to $8.50M — every one arithmetically
+  correct, which is what makes displaying one a trap, since the figure gets
+  quoted. Only `exp(log_delta)` is invariant, so the card shows a base price,
+  per-row multipliers, and a final price, with no intermediate dollar column.
+  `test_the_factors_do_not_depend_on_their_order` asserts the hazard is real
+  before asserting the factors are immune, because the dollar column is the
+  obvious "improvement" someone will reach for.
+
+  **Five drivers, not the three the entry named.** `log_rank` and `is_rfa` are
+  far too large to bucket as "other" — Scarcity is F's second-largest mean
+  effect (0.268 against Points' 0.324) and dominates at the top of the pool
+  (McDavid x7.97 against Points x1.39). Note `pos_rank` is derived FROM
+  projected points, so Points and Scarcity are collinear by construction and
+  the card's Scarcity tooltip says to read them together. `log_lag` and
+  `has_lag` are one group: split apart, every player new to the league shows a
+  spurious negative "reputation", because `log_lag` is ln(MIN_SALARY) for him
+  and not 0.
+
+  The breakdown explains the **median** and says so. `expected_price` is not
+  decomposable the same way — P(floor) is a separate logistic whose
+  coefficients frequently point the other way (F's `floor_coef_log_rank` is
+  +3.006 against `coef_log_rank` −0.391), sigma is a nonlinear function of
+  `log_mu`, and the clip bounds are per-position (`max_bid` 11.4 F / 8.5 D /
+  10.5 G, **not** `config.MAX_SALARY`). The card states the E[$] arithmetic
+  instead of attributing it. The clamp is the common case rather than an edge:
+  496 of 705 pool players have an unclamped median below their position's
+  `min_bid`, 0 above `max_bid`.
+
+  Supporting changes: `build_features`, `_score` and `_player_inputs` extracted
+  from `predict_price` so the formula exists once (the golden test's 139
+  predictions still reproduce, which is the proof); `AuctionState.price_reference`
+  freezes the reference at draft time, like `pos_rank` and for the same reason —
+  recomputed against a drafted-down pool it moves F −0.194, D −0.139, G −0.794
+  in log_mu; and `tests/measure_drivers.py` answers the same question in bulk.
+
+- **`tests/measure_drivers.py`** — the pool-wide view: slope per segment, the
+  price/points curve, driver mix per position, the top N by price with their
+  factors, inversions, and what the negative F hinge costs. Imports
+  `data_loader` and `price_model` only, so like `measure_spend.py` it
+  structurally cannot touch a live draft.
+
+  **It reports two inversion measures and keeping them apart is the point.**
+  The first draft reported only "more points, cheaper overall" and called that
+  the defect. It is not — with five drivers, a lesser scorer on a better team
+  with a bigger reputation *should* cost more, and D has 898 of those with a
+  points slope positive at every segment. Isolating the Points driver reads 259
+  for F and **zero for D and G**. Both measures also rank on the input the
+  position is actually priced on: ranking goalies by their 2W+3SO composite
+  while reading a wins-driven factor manufactured 355 goalie "inversions" out
+  of nothing. Both bugs were caught by the companion test, which is the
+  argument for `test_measure_spend.py`'s convention of giving an instrument
+  one.
+
+### Changed
+
+- **The League State panel drops two readouts.** The "Market ceiling: $X.XM (N
+  active bidders)" alert below the table was the only place `market_info`
+  reached the screen, so the context key went with it; `compute_market_ceiling`,
+  the `MarketInfo` dataclass, the `main.market_info` global and every engine
+  consumer stay untouched, as does the bid panel's own ceiling line, which comes
+  from `bid_advice.market_ceiling` — a different source. And the small grey
+  `estimated` / `exact n/m` basis line under the **Proj** header is gone, along
+  with `standings_basis.html`, both its includes and the `standings_basis` dict.
+  `GET /solve-standings`, `exact_projections` and the Solve Standings button all
+  remain.
+
+  Removing the marker meant re-pointing three tests, and two came back stronger
+  than the string they had been reading. The OOB fragment count loses its `+ 1`
+  (the marker was the twelfth fragment) rather than being loosened, since the
+  count is what stops a fragment silently ceasing to be emitted.
+  `test_the_proj_column_falls_back_to_its_estimate` grepped for the literal word
+  "estimated"; it now compares the swapped figures against a freshly rendered
+  page, which closes a vacuous pass — a response carrying no figures at all
+  satisfied its old check.
+
+- **Minors that count against the cap are coloured.** A group 2/3 minor's salary
+  is fully on cap and the table said so only in the On Cap cell's Yes/No, which
+  is unscannable in a table that is mostly the other kind — at reset the whole
+  league has 4 cap-counting minors against 145 that are free. The row now takes
+  `text-warning` and drops the `opacity-70` every other row carries. Keyed on
+  `counts_on_cap`, the same property the On Cap cell reads, so the colour and
+  the word cannot disagree — and that covers group 2, which a literal
+  `group == "3"` test would miss. Two colours were unavailable for reasons that
+  are not taste: `italic` is asserted absent from an opponent's whole panel by
+  the roster-key test, and opponents render this table; `text-success` means
+  "bought at auction" and is asserted as such across a bench/minors/recall round
+  trip. The opponent test supplies its own group-2 minor rather than finding
+  one, because all four of the league's cap-counting minors are currently BOT's
+  — with the data supplied, four mutants each die on a different test; without
+  it, two survive.
+
+### Investigated
+
+- **The forward price curve peaks at 80 projected points and falls — and it is
+  not a bug in this repo.** Chased because the owner did not trust the baseline
+  Model $ figures on the panel. He was right. F's stage-2 points slope is
+  +0.0179 below 60, +0.0310 from 60, and **−0.0194 above 80**, because
+  `coef_pts_hinge_80` is −0.0504. Past the knot every additional point *lowers*
+  the predicted price: at rank 10 with a $6M lag, 40pts → $2.51M, 80pts →
+  $6.60M, 132pts → $2.44M. On the live pool that puts Panarin (120pts) at
+  $5.46M against Marner (85pts) at $8.02M, and Forsberg (94pts, $5.10M) $4.17M
+  below Barkov, who sits exactly on the peak at 80pts.
+
+  Closed here with **no code change to the model** because `price_model.py`
+  applies the coefficients faithfully — the golden fixture reproduces the same
+  inversion, so the defect is in the fit the pricer notebook exported, and
+  `data/model_params.json` may not be hand-edited. Filed as an open
+  `BACKLOG.md` finding against a refit, with the measurement attached so nobody
+  re-derives it: 259 isolated forward inversions, zero for D and G, and $27.8M
+  of model price suppressed across the 8 forwards past the knot.
+
+  **Why the suite was green on it for two months.**
+  `test_forward_hinges_flatten_slope_past_80` asserted only that the slope past
+  80 is *damped* relative to the slope below 60 — which a negative slope
+  satisfies — and `test_higher_points_generally_higher_price` compared 40pts
+  against 90pts, straddling the peak, where the curve is still net-up. The word
+  "generally" was load-bearing. Both are now backed by `xfail(strict=True)`
+  guards asserting the real property, so a corrected export fails the suite as
+  XPASS and forces the markers and the backlog entry to be deleted together;
+  verified by simulating a refit. xfail rather than asserting the current
+  reality, because asserting it would lock the defect in and make the fix read
+  as a regression.
+
 ## [2026-09-07c]
 
 ### Added

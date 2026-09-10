@@ -160,8 +160,10 @@ def points_slopes(pos_params: dict) -> tuple[tuple[float, float], ...]:
 
     Returns ((breakpoint, slope), ...) with the hinges ACCUMULATED, so each
     entry is the total slope from that breakpoint up — which is the form you
-    need to ask whether more points ever costs less. Goalies price on wins
-    (`coef_projected_points` is 0.0 for G), so G returns one flat segment.
+    need to ask whether more points ever costs less. The shape is the same for
+    every position: three segments, always. Goalies price on wins, so G's are
+    all 0.0 rather than absent — a caller asking "is any segment negative"
+    gets the right answer without special-casing the position.
 
     A function rather than three coefficients summed at the call site: the
     guard test summed them inline and was the weaker for it.

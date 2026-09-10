@@ -148,15 +148,16 @@ rediscover the same non-problem.
 
   "Does Scarcity not apply to Goalies?" — correct, it does not: `coef_log_rank`
   is exactly `0.0` for G, because ~20 goalies a season is too coarse a field to
-  fit rank against. All 53 goalies in the pool now drop the row.
+  fit rank against. All **64** goalies in the pool drop the row.
 
   "What is Reputation? I didn't think that was in the model" — it is
   (`log_lag` + `has_lag`, last season's FCHL salary), but a player new to the
   league sits on *exactly* the reference's encoding, so the row has nothing to
   say. On `data/players-25.csv`, the pool this was reported against, **nobody**
   carries a prior salary, so it read `×1.000` on every card — indistinguishable
-  from "not in the model". It stays live where there is a reputation: 145 of
-  340 forwards on `players.csv`, Panarin ×1.645, McDavid ×1.793.
+  from "not in the model". It stays live where there is a reputation: **194 of
+  407** forwards on `players.csv` (91 of 234 D, 63 of 64 G), Panarin ×1.645,
+  McDavid ×1.793.
 
   Filtered in `main._driver_rows`, not the template, and on an **exactly zero**
   `log_delta` rather than a factor that rounds to 1.00. A ×1.004 row dropped

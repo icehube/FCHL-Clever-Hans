@@ -22,6 +22,155 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Added
+
+- **A platform-wide player search in the header, because "where is he?" had no
+  answer.** Mid-auction a name gets called and there was no way to find out
+  where that player is without hunting: the Available Players table lists only
+  the undrafted, a rostered player is visible only by opening the right one of
+  eleven team panels, a player in the minors sits in a second table inside that
+  panel, and a bought-out player was visible **nowhere at all** — `execute_buyout`
+  removes him from every list and leaves a nameless float in `team.penalties`,
+  so his `buyout` `TransactionRecord` is the only evidence he ever existed.
+  Nothing in the app scanned across teams: `main._nhl_team_of` was the one
+  function that walked every roster plus the pool, and it threw the answer away,
+  returning `p.nhl_team` and discarding *where* it found him.
+
+  `AuctionState.locate_players` is the engine. It indexes keeper → acquired →
+  minors → pool → the log, `setdefault` so live state always beats history, and
+  returns a frozen `PlayerLocation` per hit carrying the location, the team, the
+  cap hit, whether that salary counts on cap, and the latest `TransactionRecord`
+  as provenance. **Traded is not a sixth location** — a traded player is on the
+  destination roster and is found live; the trade is provenance, which is what
+  makes "find someone a trade moved" answerable without inventing a place for
+  him to be. `change_log` is deliberately not searched: `ChangeRecord` has no
+  `player_name` field at all, only a free-text `description`, and substring-
+  matching prose to find a player is a different and much worse thing.
+
+  `main._search_rows` does every figure and every string so the template only
+  branches — the shape `_driver_rows` established. Pool rows carry model price,
+  market price, `market.is_capped` and `in_optimal`, all four of which `_context`
+  already computes for the pool table at **no MILP cost**; `in_optimal` copies
+  `_context`'s guard verbatim, because reading `.roster` off an Infeasible
+  solution would star players on the strength of a plan that does not exist.
+  **No max bid, deliberately**: nothing in `bid_limits` carries one, and a max
+  bid is a binary search over MILP solves — on a keyup-triggered endpoint that is
+  exactly the stall `tests/test_event_loop.py` exists to prevent.
+
+  Three properties of `GET /find-player?q=` that are easy to regress and are each
+  pinned. It **does not call `_context`**, passing a dict already carrying
+  `"request"` through `_render`'s short-circuit: `_context` costs ~8.5ms and
+  builds a 704-row `bid_limits` list regardless of what renders, against 0.21ms
+  of actual search. `q` is a **query param, not a path segment**, for the reason
+  `/buyout-check` already documents — `_disambiguated_names`' last-resort tier is
+  ` (#n)` and a `#` in a path truncates at the fragment and never reaches the
+  server. And a blank query answers **200 with an empty body, never 204**, which
+  htmx reads as "do not swap" and which would strand the previous results on
+  screen in the one state where they are guaranteed wrong.
+
+  `team_code` and `link_team` are two fields on purpose. A bought-out player's
+  50% penalty sits on BOT's cap and is worth naming, but he is on no roster, so
+  his row names the team and navigates nowhere; conflating them sent the click to
+  a panel he is demonstrably not in.
+
+  The results partial mints **no ids at all** — `main._dom_id` owns exactly one
+  id per player for the buyout dots, and a second copy is a duplicate the roster
+  scan swaps twice. The mount `#player-search-results` carries the only id
+  involved and lives in the navbar, outside `#app`, so a panel swap cannot
+  destroy an open list.
+
+  `/` focuses the box (`preventDefault`, because Firefox binds it to Quick Find),
+  `Escape` closes the results, and the shortcuts modal grew a row — the guard's
+  regex widened from `([a-z])` to `([a-z/])` in the same commit, as its own
+  contract requires.
+
+  **Three things about dismissal were found by driving it, not by reading it.**
+  (1) A dismissal has to outlast the request still in the air: the input
+  debounces 200ms and also fires on `focus`, so clicking a hit promptly after
+  typing routinely leaves a response coming, and htmx swaps on `b.onload`
+  regardless of what the page did meanwhile — the list reappeared a fraction of
+  a second after being dismissed. Fixed by suppressing the *swap*, with a flag
+  every close sets and the next `input` or `focus` on the box clears.
+  (2) `Escape` has to clear the query as well as the list, and has to tell htmx
+  it did: `changed` compares against a value htmx cached at trigger time, not
+  against the DOM, so assigning `.value = ''` silently left it believing the box
+  still said "hu" and re-typing the same surname fired nothing. The version
+  without the dispatched event looked correct and was not.
+  (3) `focus` is a second trigger for the same reason — clicking away leaves the
+  query in the box, and without it coming back and re-typing does nothing.
+
+### Fixed
+
+- **Eight plainly-typed surnames found nobody, because the name fold kept
+  punctuation.** Shipped in the first cut of the search engine and caught by a
+  design review the same day. The fold lower-cased and stripped diacritics but
+  left punctuation in place, so the operator had to reproduce `players.csv`'s
+  spelling exactly. 24 pool names carry a non-letter — apostrophes, thirteen
+  hyphens, the parentheses `_disambiguated_names` adds — and, measured, **four
+  names encode the hyphen as the digit `0`**: `Oliver Ekman0Larsson`,
+  `Nicolas Aube0Kubel`, `Alex Barre0Boulet`, `Trey Fix0Wolansky`. So `oreilly`,
+  `kandre`, `ekman-larsson`, `ekman larsson`, `barre-boulet`, `fix-wolansky`,
+  `aube-kubel` and `nugent hopkins` all returned **zero hits** for players who
+  are in the pool right now, and one of them asked the operator to guess a
+  data-entry bug.
+
+  `_fold` now returns letters only plus the offset each word starts at, and a
+  prefix is matched at any of those offsets. **The offsets are the load-bearing
+  half**, not the letters: the fold concatenates, so `"alexbarreboulet".split()`
+  is a single token and matching a split list would find him only in the
+  substring tier, below anyone who merely contains the query. `isascii()` now
+  guards the NFKD sweep, which is pure cost on today's pool (zero non-ASCII
+  names) — the whole fold is 0.455ms unmemoized against the old 0.770ms, and a
+  warm query is 0.21ms.
+
+- **The search buried the surname you typed.** A full-name prefix was its own
+  top tier, which looks like the stronger match and is not: with no space in the
+  query it only means "his FIRST name starts with this". Measured over the live
+  pool, `ma` returned MacKenzie Entwistle, MacKenzie Weegar and Mackenzie
+  Blackwood while hiding Nathan MacKinnon, Auston Matthews and Cale Makar behind
+  "+127 more"; `hu` led with Hudson Fasching and buried every Hughes. Two tiers
+  now — prefix anywhere, then substring — ranked within each by projected points
+  then name. A query containing a space still matches as a full prefix, so
+  collapsing loses nothing. Points rather than the alphabet because ten of a
+  hundred matches get shown and alphabetical order is arbitrary at that ratio
+  (`smi` led with Brendan over Reilly Smith). A bought-out subject is a
+  `TransactionRecord` with no points and therefore sorts last in its tier — a
+  decision, not an accident, and `getattr` is where it lives.
+
+- **The navbar pushed its last control off-screen at 1024px once the search box
+  was added.** The title's flex item could not shrink below its own content
+  (css-flexbox §4.5), so the 216px input's cost landed on the `flex-none` group:
+  measured, the Reset button left the viewport and "FCHL Auction Manager" wrapped
+  to three lines inside a 45px bar. Fixed with `min-w-0` on the title group and
+  `truncate` on the title itself — **both halves are needed**, because shrinking
+  the box does nothing while the text still wraps — plus a narrower input.
+  `TestTheHeaderSearchLandsWhereItPoints` pins it at 1024 and 1280 by geometry
+  rather than a pixel constant.
+
+### Investigated
+
+- **htmx does NOT abort an in-flight request whose triggering element leaves the
+  DOM.** This claim has been in `CLAUDE.md`, in two comments in `shortcuts.js`
+  and in a browser-test docstring since 2026-08-14, always as the reason
+  dismiss-on-interaction runs on `htmx:afterRequest` rather than on click. It was
+  reasoned from the minified source and never run. Measured 2026-09-10 in Chrome
+  against the vendored htmx 1.9.10: removing a trigger element during
+  `htmx:beforeSend` fires no `htmx:abort` and **the swap lands anyway**. Reading
+  `b.onload` in the bundle says why — it calls the swap `M(n,I)` unconditionally
+  and only then fires events, re-firing them on the nearest surviving ancestor
+  via the `if(!se(n))` branch (which is a real constraint: such a handler must be
+  idempotent). It surfaced because a `click`-time clear was run as a mutant
+  against the new player-search browser tests and **all three passed**.
+
+  No code changed. `afterRequest` is still right, for a reason that was always
+  the real one and was standing beside the wrong one: `event.detail.successful`
+  is only knowable after the response, and a failed request must leave the card
+  on screen. All four sites were rewritten to say that instead, and
+  `TestMidBidClutterCanBeDismissed`'s docstring no longer claims its bid-panel
+  assertion "catches the abort" — it separates "the card went away" from "the
+  card went away and the request still landed", which is a weaker property and
+  the one it actually has.
+
 ### Changed
 
 - **The Proj basis marker is back, with different words.** Removed on

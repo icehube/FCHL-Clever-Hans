@@ -37,6 +37,50 @@ document.addEventListener('keydown', function(e) {
         e.preventDefault();
         htmx.ajax('GET', '/nominate', {target: '#nomination-panel', swap: 'outerHTML'});
     }
+
+    // /: focus the header player search. preventDefault is required — Firefox
+    // binds / to Quick Find, which would swallow the keystroke and open its
+    // own search bar over the app.
+    //
+    // Written `e.key.toLowerCase() === '/'` rather than `e.key === '/'`
+    // because TestShortcutsModal reads the bound keys out of this file with
+    // that exact pattern; a shortcut it cannot see is one the modal can drift
+    // away from silently.
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === '/') {
+        var search = document.querySelector('#player-search input');
+        if (search) {
+            e.preventDefault();
+            search.focus();
+            search.select();
+        }
+    }
+
+    // Escape closes the result list. Deliberately NOT global: the shortcuts
+    // modal is a <dialog>, which closes itself on Escape, and preventing the
+    // default anywhere else would break it. `typing` is true here by
+    // construction — focus is in the search box — which is why this sits
+    // outside that gate.
+    if (e.key === 'Escape') {
+        var box = document.getElementById('player-search');
+        if (box && box.contains(e.target)) {
+            closePlayerSearch();
+            // Clear the QUERY too, not just the list, and tell htmx about
+            // it. The input carries the `changed` modifier, and htmx compares
+            // against a value it cached at trigger time — not against the
+            // DOM — so assigning .value alone leaves it believing the box
+            // still says "hu": re-typing the same surname then fires no
+            // request and the results never come back. Measured; the
+            // silent-assignment version looked correct and was not. The
+            // dispatched event costs one request for an empty query, which
+            // answers 200 with an empty body.
+            var field = box.querySelector('input');
+            if (field && field.value !== '') {
+                field.value = '';
+                field.dispatchEvent(new Event('input', {bubbles: true}));
+            }
+            e.target.blur();
+        }
+    }
 });
 
 /* Surface failed HTMX requests — without these listeners a failed POST
@@ -63,15 +107,99 @@ document.body.addEventListener('htmx:sendError', function() {
    UFA and an RFA sale KEEPS the turn, so the other half is the next thing the
    operator needs.
 
-   On afterRequest, not on click: htmx aborts an in-flight request whose
-   triggering element is removed from the DOM, so removing the block on click
-   would cancel the very /bid-check it is meant to accompany. Gated on
-   `successful` so a failed request leaves the recommendation on screen rather
-   than silently discarding it — /nominate is the only way back. */
+   On afterRequest, not on click, and the reason is the GATE. This comment
+   used to say htmx aborts an in-flight request whose trigger leaves the DOM;
+   measured 2026-09-10 in Chrome, it does not — removing the element during
+   `htmx:beforeSend` fires no `htmx:abort` and the swap lands anyway, because
+   `b.onload` in htmx-1.9.10.min.js swaps before it fires anything. The claim
+   was reasoned off the minified source rather than run, and it was repeated
+   into two other files before anyone tried it.
+
+   What is true: `successful` is only knowable after the response, and a
+   failed request must leave the recommendation on screen — /nominate is the
+   only way back. On click you would discard it either way. */
 document.body.addEventListener('htmx:afterRequest', function(e) {
     if (!e.detail.successful) return;
     var pick = e.target.closest && e.target.closest('.nomination-pick');
     if (pick) pick.remove();
+});
+
+/* ── Platform-wide player search ─────────────────────────────────────────
+   Four ways the result list goes away, and none of them is a click handler on
+   the rows.
+
+   **Path 1 — `htmx:afterRequest`, gated on `successful`**: you acted on a hit.
+   NOT because removing the row aborts anything. Measured 2026-09-10 in Chrome,
+   removing a trigger element during `htmx:beforeSend` neither fires
+   `htmx:abort` nor stops the swap, and the vendored source says why —
+   `b.onload` calls the swap `M(n,I)` unconditionally before firing any event.
+   (The `.nomination-pick` comment above and CLAUDE.md both asserted the
+   opposite for a month; it was reasoned from the minified source, not run.)
+   The real reason is the gate: a request that FAILED should leave the list up,
+   and on click you do not yet know. htmx does re-fire `afterRequest` on the
+   nearest surviving ancestor when a handler removes its own trigger (the
+   `if(!se(n))` branch), so this must be idempotent — clearing an already-empty
+   mount twice is.
+
+   **Path 2 — `focusout` leaving the widget**: you went back to bidding. Works
+   only because a clickable row is focusable, so mousedown moves focus INTO the
+   widget and path 2 cannot fire before path 1 gets its chance.
+
+   **Path 3 — Escape**, in the keydown handler above.
+
+   **Path 4 — the suppression flag**, which is what makes the other three
+   stick. The input debounces 200ms and also fires on `focus`, so at the moment
+   a result is clicked there is routinely a /find-player response still coming;
+   clearing the mount does not stop it, and the list reappeared a fraction of a
+   second after being dismissed. Measured, reproducibly, by clicking a hit
+   promptly after typing. Suppress the SWAP rather than trying to cancel the
+   request: every close sets the flag, and the next `input` or `focus` on the
+   box clears it — those two events being the only things that can legitimately
+   want the list back.
+
+   None of the four clears on a plain successful request from elsewhere:
+   /explain auto-fires on `load` from the bid panel, and gating on "any POST
+   succeeded" would close the list mid-read. An open list can therefore go
+   stale behind a pick — accepted, because every figure in it was live as of
+   the keystroke that drew it and the next keystroke corrects it. */
+var playerSearchSuppressed = false;
+
+function closePlayerSearch() {
+    playerSearchSuppressed = true;
+    var mount = document.getElementById('player-search-results');
+    if (mount) mount.innerHTML = '';
+}
+
+document.body.addEventListener('htmx:beforeSwap', function(e) {
+    var target = e.detail.target;
+    if (!target || target.id !== 'player-search-results') return;
+    if (playerSearchSuppressed) e.detail.shouldSwap = false;
+});
+
+['input', 'focus'].forEach(function(kind) {
+    document.addEventListener(kind, function(e) {
+        var box = document.getElementById('player-search');
+        if (box && box.contains(e.target)) playerSearchSuppressed = false;
+    }, true);
+});
+
+document.body.addEventListener('htmx:afterRequest', function(e) {
+    if (!e.detail.successful) return;
+    if (!e.target.closest || !e.target.closest('#player-search-results')) return;
+    closePlayerSearch();
+    // The chart mount lives inside .auction-grid, which scrolls. Landing a
+    // chart below the fold looks exactly like a click that did nothing.
+    var path = e.detail.requestConfig ? e.detail.requestConfig.path : '';
+    if (path.indexOf('/player-chart/') !== 0) return;
+    var chart = document.getElementById('player-chart-container');
+    if (chart) chart.scrollIntoView({block: 'nearest'});
+});
+
+document.addEventListener('focusout', function(e) {
+    var box = document.getElementById('player-search');
+    if (!box || !box.contains(e.target)) return;
+    if (e.relatedTarget && box.contains(e.relatedTarget)) return;
+    closePlayerSearch();
 });
 
 /* What a cell sorts on, falling back to an image's alt text.

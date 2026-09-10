@@ -46,11 +46,67 @@
 </head>
 <body>
     <div class="navbar bg-base-200 border-b border-base-300 px-4 sticky top-0 z-50 min-h-0 h-10">
-        <div class="flex-1 gap-2">
+        {# `min-w-0` + `truncate`, together. A flex item's automatic minimum is
+           its CONTENT min-width (css-flexbox §4.5), so without min-w-0 this
+           group cannot shrink below the title's longest word and the overflow
+           lands on the flex-none group instead — measured at 1024px when the
+           search box was added, the Reset button went off the right edge and
+           the title wrapped to three lines inside a 45px navbar. `truncate`
+           is the other half: shrinking the BOX does nothing while the TEXT
+           still wraps. #}
+        <div class="flex-1 gap-2 min-w-0">
             <img src="/fchl_logos/0.gif" alt="FCHL" class="w-7 h-7">
-            <span class="text-base font-bold text-primary">FCHL Auction Manager</span>
+            <span class="text-base font-bold text-primary truncate">FCHL Auction Manager</span>
         </div>
         <div class="flex-none gap-2">
+            {# Platform-wide player finder. Mid-auction someone says a name and
+               nothing else in the app answers "where is he?" — the pool table
+               lists only the undrafted, a rostered player needs the right one
+               of eleven panels opened, a minor is in a second table inside
+               that panel, and a bought-out player appears nowhere at all.
+
+               It lives in the NAVBAR for three reasons, all checked: the
+               navbar is outside #app, so a panel swap cannot destroy an open
+               result list; it has no `overflow`, so the absolutely-positioned
+               card is not clipped (the app's only `overflow` is
+               `.auction-grid`'s, inside #app); and it already establishes a
+               `z-50` sticky stacking context.
+
+               Deliberately NOT a DaisyUI `.dropdown`. That component gates
+               `.dropdown-content` on `:focus-within`, so mousedown on a result
+               blurs the input, the card goes `visibility:hidden` before
+               mouseup, and the click never lands. Visibility here is decided
+               server-side instead — an empty response renders no card — which
+               is also a fact `TestClient` can assert.
+
+               `input` rather than `keyup`: keyup misses paste-from-menu and
+               the native clear button on `type="search"`. `changed` plus the
+               delay is what keeps arrow keys and modifiers from firing a
+               request. No `hx-sync` — htmx already queues a second request
+               from the same element as "last" (`htmx-1.9.10.min.js`,
+               `queuedRequests`), so responses cannot arrive out of order, and
+               adding one would abort the in-flight request instead.
+
+               `focus` is the second trigger and it is NOT redundant with
+               `changed`. Clicking away dismisses the list but leaves the
+               query in the box, and `changed` compares against a value htmx
+               cached at trigger time — so coming back and re-typing the same
+               surname fires nothing and the box looks broken. Measured. A
+               focus with an empty box costs one request that answers 200
+               with an empty body.
+
+               The mount is unconditional and empty (`explanation.html`'s
+               rule: a swap into a missing target is a dead swap), carries the
+               only id in the whole feature, and positions the card without
+               being it. #}
+            <div id="player-search" class="search-box">
+                <input type="search" name="q" autocomplete="off"
+                       class="input input-xs input-bordered bg-base-300 search-input"
+                       placeholder="Find a player…" aria-label="Find a player"
+                       hx-get="/find-player" hx-trigger="input changed delay:200ms, focus"
+                       hx-target="#player-search-results" hx-swap="innerHTML">
+                <div id="player-search-results"></div>
+            </div>
             <button type="button" class="btn btn-xs btn-outline" title="Keyboard shortcuts"
                     onclick="document.getElementById('shortcuts-modal').showModal()">
                 ⌨ Shortcuts
@@ -143,6 +199,15 @@
                         <td>
                             <strong>Undo</strong> the last draft action — the same as the
                             Undo button. Holding the keys does not unwind several picks.
+                        </td>
+                    </tr>
+                    <tr data-shortcut-key="/">
+                        <td class="whitespace-nowrap"><kbd class="kbd kbd-sm">/</kbd></td>
+                        <td>
+                            <strong>Find a player</strong> — jumps to the header search,
+                            which says where anyone is: in the pool, on a roster, on a
+                            bench, in the minors, or bought out. <kbd class="kbd kbd-xs">Esc</kbd>
+                            closes the results.
                         </td>
                     </tr>
                     <tr data-shortcut-key="n">

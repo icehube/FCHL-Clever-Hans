@@ -19,6 +19,14 @@
    roster, so linking there would land you on a panel he is demonstrably not
    in — and the other four rows all promise "click this and see the player".
 
+   A clickable row is a focusable div rather than a <button> because its two
+   lines are block children and <button> takes phrasing content only. The
+   cost of that choice is Enter, which a real button gets for free, so the
+   trigger names it explicitly. The row must be focusable for a second reason
+   too: `shortcuts.js` dismisses this list on `focusout` when focus leaves the
+   widget, and mousedown on a non-focusable row would move focus to <body> and
+   tear the list down before the click could land on it.
+
    Every figure here is a lookup, never a solve. See `_search_rows`. #}
 {% if search_rows %}
 <div class="search-card">
@@ -31,7 +39,8 @@
          {% if r.link_team %}hx-get="/team-view/{{ r.link_team }}" hx-target="#team-panel" hx-swap="outerHTML"
          {% elif r.where == "pool" %}hx-get="/player-chart/{{ r.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML"
          {% endif %}
-         {% if r.link_team or r.where == "pool" %}role="button" tabindex="0"{% endif %}>
+         {% if r.link_team or r.where == "pool" %}role="button" tabindex="0"
+         hx-trigger="click, keyup[key=='Enter']"{% endif %}>
         <div class="search-row-main">
             <span class="search-name">{{ r.name }}</span>
             <span class="search-meta">{{ r.position }}{% if r.nhl_team %} · {{ r.nhl_team }}{% endif %}</span>

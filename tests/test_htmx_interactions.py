@@ -485,7 +485,11 @@ class TestShortcutsModal:
 
     def _bound(self) -> set[str]:
         with open(SHORTCUTS_JS) as fh:
-            return set(re.findall(r"e\.key\.toLowerCase\(\) === '([a-z])'", fh.read()))
+            # [a-z/] — "/" focuses the header search. The class is a single
+            # character on purpose: Escape is bound as `e.key === 'Escape'`
+            # and is invisible to this guard, which is why it is described in
+            # the modal's prose rather than as a row it could never match.
+            return set(re.findall(r"e\.key\.toLowerCase\(\) === '([a-z/])'", fh.read()))
 
     def test_the_button_and_the_dialog_render(self, client):
         page = client.get("/").text

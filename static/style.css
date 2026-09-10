@@ -353,3 +353,79 @@ th.sort-desc::after { content: ' \25BC'; opacity: 1; }
 
 /* Fix DaisyUI table images — ensure logos aren't collapsed */
 .table img { min-width: 20px; min-height: 20px; }
+
+/* ── Platform-wide player search (navbar) ────────────────────────────────
+   Theme variables only, and NO opacity-suffixed DaisyUI class anywhere in
+   this feature. `bg-base-300/60` and friends are JIT-generated utilities that
+   the trimmed vendor bundle does not carry, and neither offline-assets test
+   sees this fragment: the interpolation check only matches `bg-{{ x }}/NN`
+   forms, and the rendered-class check drives GET / plus two /buyout-check
+   renders and never touches /find-player. So a missing colour here renders
+   unstyled with nothing red. Plain Tailwind utilities (opacity-60, z-50) are
+   fine — the Play CDN script generates those at runtime.
+
+   Sizes are absolute rather than rem-derived because the card must stay put
+   when the root font moves; `html { font-size: 18px }` in base.html already
+   scales every DaisyUI control by 12.5%, and a dropdown that grew with it
+   would start colliding with the panels underneath. */
+.search-box { position: relative; display: inline-flex; }
+.search-input { width: 10rem; }
+
+.search-card {
+    position: absolute;
+    top: calc(100% + 4px);
+    /* Left-anchored, not right. #toast-container is a LATER sibling of the
+       navbar at the same z-50, so it paints on top; right-anchored, a toast
+       would cover the results. From the left edge of the control group the
+       card hangs over .area-players, the column least needed mid-bid. */
+    left: 0;
+    width: 26rem;
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: 60;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 0.25rem;
+}
+
+.search-row {
+    padding: 0.3rem 0.45rem;
+    border-radius: 0.35rem;
+    font-size: 0.8rem;
+    line-height: 1.15rem;
+}
+/* Only a row that navigates offers to be clicked. A bought-out player is on
+   no roster, so his row is informative and says so by not lighting up. */
+.search-row[role="button"] { cursor: pointer; }
+.search-row[role="button"]:hover,
+.search-row[role="button"]:focus-visible {
+    background: var(--bg-hover);
+    outline: none;
+}
+
+.search-row-main { display: flex; align-items: baseline; gap: 0.4rem; }
+.search-row-where { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+
+.search-name { color: var(--text); font-weight: 600; }
+.search-meta { color: var(--text-muted); font-size: 0.7rem; }
+.search-money { color: var(--text); font-variant-numeric: tabular-nums; }
+.search-money s { color: var(--text-muted); margin-right: 0.2rem; }
+.search-flag { color: var(--green); }
+
+/* The location is the answer to the question, so it gets the colour: green
+   for money you can still spend, yellow for a contract you already own,
+   muted for a player who is gone. */
+.search-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.search-label-pool { color: var(--green); }
+.search-label-roster { color: var(--yellow); }
+.search-label-bench { color: var(--yellow); }
+.search-label-minors { color: var(--blue); }
+.search-label-bought-out { color: var(--red); }
+
+.search-more {
+    padding: 0.3rem 0.45rem;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}

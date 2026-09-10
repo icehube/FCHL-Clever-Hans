@@ -4518,7 +4518,11 @@ class TestFindingAPlayerAnywhere:
         return client.get("/find-player", params={"q": query}).text
 
     def _surname(self, name: str) -> str:
-        return (name.split()[-1] if " " in name else name)[:4]
+        """The last ALPHABETIC token. `_disambiguated_names` appends " (DAL)"
+        and " (#2)", so `split()[-1]` is not reliably a surname — it folds to
+        the suffix and matches for the wrong reason."""
+        words = [w for w in name.split() if w.isalpha()] or [name]
+        return words[-1][:4]
 
     def _row(self, html_text: str, name: str) -> str:
         """The one `.search-row` naming this player."""
@@ -4631,6 +4635,30 @@ class TestFindingAPlayerAnywhere:
         swaps twice."""
         page = self._find(client, pool_top(1)[0][:4])
         assert 'id="' not in page
+
+    def test_a_blank_query_answers_200_with_an_empty_body(self, client):
+        """200, never 204. htmx reads `204 No Content` as "do not swap", so a
+        204 here would leave the previous results on screen after the box was
+        cleared — the one state in which the list is guaranteed to be wrong.
+        """
+        r = client.get("/find-player", params={"q": ""})
+        assert r.status_code == 200, "204 tells htmx to leave stale results up"
+        assert r.text.strip() == "", f"a blank query rendered {r.text[:200]!r}"
+
+    def test_the_input_and_its_mount_live_outside_app(self, client):
+        """Both in the navbar, and the navbar is outside `#app`.
+
+        Every panel swap replaces `#app`'s innerHTML, so a mount inside it
+        would be destroyed by the first pick and every later search would swap
+        into nothing. Same rule as the startup banner and the shortcuts
+        dialog; ordering is how a response-level test can see it.
+        """
+        page = client.get("/").text
+        app_at = page.index('id="app"')
+        assert page.index('id="player-search"') < app_at
+        assert page.index('id="player-search-results"') < app_at
+        assert 'hx-get="/find-player"' in page, "nothing fires the search"
+        assert 'hx-target="#player-search-results"' in page
 
     def test_it_does_not_build_the_whole_page_context(self, client, monkeypatch):
         """The reason this endpoint bypasses `_context`: it fires on every

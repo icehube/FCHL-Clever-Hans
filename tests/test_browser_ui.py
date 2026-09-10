@@ -1174,11 +1174,14 @@ class TestMidBidClutterCanBeDismissed:
     def test_bidding_a_pick_dismisses_that_recommendation_only(self, page, live_server):
         """And the /bid-check it fired must still land.
 
-        The reason this is removed on afterRequest rather than on click: htmx
-        aborts an in-flight request whose triggering element leaves the DOM, so
-        the naive version would cancel the very bid check the button exists to
-        start. The bid-panel assertion at the end is what catches that — without
-        it this passes against a build that dismisses the card and does nothing.
+        The bid-panel assertion is what makes this more than "the card went
+        away" — without it the test passes against a build that dismisses the
+        card and does nothing at all. It does NOT, as this docstring claimed
+        until 2026-09-10, catch an htmx abort: measured that day in Chrome,
+        removing a trigger element mid-flight fires no `htmx:abort` and the
+        swap lands anyway (`b.onload` in the vendored htmx swaps before it
+        fires anything). The real reason for `afterRequest` is the
+        `successful` gate — see `shortcuts.js`.
         """
         _open(page, live_server)
         page.keyboard.press("n")
@@ -1201,8 +1204,8 @@ class TestMidBidClutterCanBeDismissed:
         )
         panel = page.locator("#bid-panel").inner_text()
         assert player in panel, (
-            f"the bid panel is not bidding on {player} — removing the card "
-            f"aborted its own /bid-check"
+            f"the bid panel is not bidding on {player} — dismissing the card "
+            f"replaced the request it was meant to accompany"
         )
 
     def test_a_failed_bid_check_leaves_the_recommendation_on_screen(
@@ -1744,3 +1747,137 @@ class TestTradeChoiceLists:
 
         page.uncheck(f'{boxes}[value="{names[0]}"]')
         assert page.text_content("#trade-panel .choice-summary").startswith("1 selected")
+
+
+class TestTheHeaderSearchLandsWhereItPoints:
+    """Three DOM-level properties of the finder, none of them server-visible.
+
+    The endpoint tests prove the right markup comes back. What they cannot see
+    is whether the click reaches the row, whether dismissing the list cancels
+    the navigation it was dismissed for, and where the card actually sits.
+    """
+
+    def _search(self, page, query: str):
+        page.fill("#player-search input", query)
+        page.wait_for_selector(".search-card .search-row")
+
+    def test_clicking_a_hit_opens_that_players_team(self, page, live_server):
+        """The click has to land, and the list has to go away — both.
+
+        Deliberately NOT sold as an abort test. A `click`-time clear was run
+        against this and all three assertions passed, which is the measurement
+        that showed htmx 1.9.10 does not abort on trigger removal at all (see
+        `shortcuts.js`). So this discriminates end-to-end behaviour — the row
+        navigates, the list closes, and /team-view leaves #bid-panel standing
+        — not the choice of event.
+
+        It does pin one thing that IS a silent failure: the row must be
+        focusable. Measured with `tabindex="0"` removed, mousedown moves focus
+        to <body>, `focusout` tears the list down between mousedown and
+        mouseup, and the click produces **no request at all** — the DaisyUI
+        `.dropdown` failure mode, reproduced in hand-rolled markup.
+        """
+        _open(page, live_server)
+        # A keeper on some team other than BOT: his row must navigate, and the
+        # panel must visibly move off the team it starts on.
+        owner, name = page.evaluate("""async () => {
+            const r = await fetch('/state');
+            const s = await r.json();
+            for (const [code, t] of Object.entries(s.teams)) {
+                if (t.is_my_team) continue;
+                const p = (t.keeper_players || [])[0];
+                if (p) return [code, p.name];
+            }
+            return null;
+        }""")
+        assert owner and owner != "BOT", "no opponent keeper to search for"
+
+        self._search(page, name.split()[-1][:5])
+        row = page.locator(f'.search-row:has-text("{name}")').first
+        assert row.count() == 1, f"{name} did not come back in the results"
+
+        with page.expect_response(re.compile(r"/team-view/")):
+            row.click()
+        page.wait_for_selector(f'#team-panel:has-text("{owner}")')
+
+        assert page.locator(".search-card").count() == 0, (
+            "the result list survived the click it acted on"
+        )
+        assert page.locator("#bid-panel").count() == 1, (
+            "/team-view replaced more than the team panel — a live bid would "
+            "have been destroyed by a search"
+        )
+
+    def test_a_late_response_cannot_reopen_a_dismissed_list(self, page, live_server):
+        """The list has to stay closed against a request still in the air.
+
+        The input debounces 200ms and also fires on `focus`, so clicking a hit
+        promptly after typing routinely leaves a /find-player response still
+        coming — and htmx swaps on `b.onload` regardless of what the page did
+        meanwhile, so the list reappeared a moment after it was dismissed.
+        Found by driving it, not by reading it. Types and clicks WITHOUT
+        waiting for the debounce to settle, then waits past it.
+        """
+        _open(page, live_server)
+        page.fill("#player-search input", "an")
+        page.wait_for_selector(".search-card .search-row")
+        # Retype so a fresh debounced request is in flight, then act at once.
+        page.fill("#player-search input", "ans")
+        row = page.locator(".search-row").first
+        if row.count():
+            row.click(timeout=2000, force=True)
+        page.wait_for_timeout(1200)
+        assert page.locator(".search-card").count() == 0, (
+            "a /find-player response that landed after the dismissal put the "
+            "result list back on screen"
+        )
+
+    def test_the_results_are_not_clipped_at_the_draft_width(self, page, live_server):
+        """1280 is the width the draft runs at. The card is absolutely
+        positioned inside a sticky navbar; the navbar has no `overflow`, but
+        that is a fact about today's CSS, not a guarantee. Also asserts the
+        card is hit-testable at its own top-left — a toast or a panel painting
+        over it would make every row unclickable while looking fine.
+        """
+        _open(page, live_server)
+        self._search(page, "an")
+        box = page.evaluate("""() => {
+            const c = document.querySelector('.search-card');
+            const b = c.getBoundingClientRect();
+            const hit = document.elementFromPoint(b.left + 20, b.top + 10);
+            return {left: b.left, right: b.right, top: b.top, bottom: b.bottom,
+                    w: window.innerWidth, h: window.innerHeight,
+                    covered: !hit || !hit.closest('.search-card')};
+        }""")
+        assert box["left"] >= 0 and box["right"] <= box["w"], (
+            f"the card is clipped horizontally: {box}"
+        )
+        assert box["top"] >= 0 and box["bottom"] <= box["h"], (
+            f"the card runs past the viewport: {box}"
+        )
+        assert not box["covered"], "something is painting over the result list"
+
+    def test_the_navbar_stays_one_row_with_the_search_box(self, page, live_server):
+        """A fifth control in a `flex-nowrap` navbar pushes the last one off
+        the edge rather than wrapping. Measured when this shipped: at 1024 the
+        Reset button left the viewport and the title wrapped to three lines
+        inside a 45px bar, because the title's flex item could not shrink
+        below its own content. Checked at both widths, and by geometry rather
+        than a pixel constant so a font change does not fail it.
+        """
+        for width in (1024, 1280):
+            page.set_viewport_size({"width": width, "height": 900})
+            _open(page, live_server)
+            r = page.evaluate("""() => {
+                const nav = document.querySelector('.navbar');
+                const last = nav.querySelector('.flex-none > :last-child');
+                const b = last.getBoundingClientRect();
+                return {sw: nav.scrollWidth, cw: nav.clientWidth,
+                        sh: nav.scrollHeight, ch: nav.clientHeight,
+                        lastRight: b.right, vw: window.innerWidth};
+            }""")
+            assert r["sw"] <= r["cw"] + 1, f"@{width}: navbar overflows: {r}"
+            assert r["sh"] <= r["ch"] + 1, f"@{width}: navbar content wrapped: {r}"
+            assert r["lastRight"] <= r["vw"] + 1, (
+                f"@{width}: the last navbar control is off-screen: {r}"
+            )

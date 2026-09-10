@@ -10,9 +10,15 @@ import csv
 import pytest
 
 from price_model import (
+    DRIVER_GROUPS,
     PricePrediction,
+    _FEATURE_KEYS,
+    build_features,
     compute_pos_ranks,
+    compute_reference_features,
+    decompose_price,
     load_model_params,
+    points_slopes,
     predict_all_prices,
     predict_price,
 )
@@ -226,3 +232,218 @@ class TestPredictAllPrices:
             assert pred.expected_price >= 0.5, f"{name} expected below min"
             assert pred.expected_price <= 11.4, f"{name} expected above global max"
             assert 0.0 <= pred.p_floor <= 1.0, f"{name} p_floor out of range"
+
+
+@pytest.fixture(scope="module")
+def pool():
+    """The live biddable pool, loaded once — several tests below sweep it."""
+    from data_loader import load_goalie_wins, load_players, load_team_odds
+
+    _, biddable = load_players(
+        team_odds=load_team_odds(), goalie_wins=load_goalie_wins()
+    )
+    return biddable
+
+
+@pytest.fixture(scope="module")
+def refs(pool):
+    return compute_reference_features(pool, load_model_params())
+
+
+class TestDriverGroups:
+    def test_every_feature_belongs_to_exactly_one_group(self):
+        """An 11th feature must join a group or fail here.
+
+        The reconstruction test below also catches it, but as a bare arithmetic
+        mismatch with no cause attached. This one names it.
+        """
+        grouped = [k for _, keys in DRIVER_GROUPS for k in keys]
+        assert sorted(grouped) == sorted(_FEATURE_KEYS), (
+            "DRIVER_GROUPS and _FEATURE_KEYS disagree; a feature is unexplained "
+            "or explained twice"
+        )
+        assert len(grouped) == len(set(grouped)), "a feature is in two groups"
+
+    def test_reputation_keeps_its_two_features_together(self):
+        """log_lag is ln(MIN_SALARY) for a newcomer, not 0.
+
+        Split across two groups, every player new to the league shows a
+        spurious negative "reputation" — the model is not saying that, the
+        encoding is.
+        """
+        reputation = dict(DRIVER_GROUPS)["Reputation"]
+        assert set(reputation) == {"log_lag", "has_lag"}
+
+
+class TestPriceBreakdown:
+    """The decomposition has to reconstruct the prediction, or it is decoration."""
+
+    CASES = [
+        ("F", 120, 5.0, False, 7.3, 2, None),
+        ("F", 20, 2.0, False, None, 203, None),
+        ("F", 85, 9.7, True, 6.4, 7, None),
+        ("D", 75, 11.0, True, 4.0, 1, None),
+        ("D", 10, 0.4, False, None, 300, None),
+        ("G", 99, 3.6, False, 5.5, 1, 41.0),
+        ("G", 60, 3.1, True, None, 20, None),
+    ]
+
+    @pytest.mark.parametrize("position,pts,prob,rfa,lag,rank,wins", CASES)
+    def test_contributions_reconstruct_log_mu(
+        self, params, refs, position, pts, prob, rfa, lag, rank, wins
+    ):
+        b = decompose_price(
+            position, pts, prob, rfa, params, refs[position],
+            last_salary=lag, pos_rank=rank, proj_wins=wins,
+        )
+        total = b.base_log_mu + sum(d.log_delta for d in b.drivers)
+        # approx, not ==: the two sums are algebraically identical and float
+        # REASSOCIATED, so bitwise equality is not a property this code has.
+        # Do not "tighten" this to == — it will pass here and flake elsewhere.
+        assert total == pytest.approx(b.prediction.log_mu, rel=1e-12)
+
+    @pytest.mark.parametrize("position,pts,prob,rfa,lag,rank,wins", CASES)
+    def test_floor_contributions_reconstruct_the_logit(
+        self, params, refs, position, pts, prob, rfa, lag, rank, wins
+    ):
+        """Stage 1 too — nothing on screen exercises it, so nothing else would."""
+        import math
+
+        b = decompose_price(
+            position, pts, prob, rfa, params, refs[position],
+            last_salary=lag, pos_rank=rank, proj_wins=wins,
+        )
+        base_logit = math.log(b.base_p_floor / (1.0 - b.base_p_floor))
+        logit = base_logit + sum(d.floor_logit_delta for d in b.drivers)
+        recovered = 1.0 / (1.0 + math.exp(-logit))
+        assert recovered == pytest.approx(b.prediction.p_floor, abs=1e-9)
+
+    def test_the_whole_pool_reconstructs(self, params, pool, refs):
+        """Every player, not a sample — the sweep is cheap and the claim is total."""
+        from price_model import decompose_player
+
+        worst = 0.0
+        for name, player in pool.items():
+            b = decompose_player(player, params, refs[player.position])
+            total = b.base_log_mu + sum(d.log_delta for d in b.drivers)
+            worst = max(worst, abs(total - b.prediction.log_mu))
+        assert worst < 1e-9, f"worst reconstruction error {worst:.3e}"
+
+    def test_the_factors_multiply_to_the_unclamped_price(self, params, refs):
+        """The form the card actually prints: base x f1 x ... x fn = price."""
+        import math
+
+        b = decompose_price("F", 120, 5.0, False, params, refs["F"],
+                            last_salary=7.3, pos_rank=2)
+        product = b.base_price
+        for d in b.drivers:
+            product *= d.factor
+        assert product == pytest.approx(b.unclamped_price, rel=1e-12)
+
+    def test_the_factors_do_not_depend_on_their_order(self, params, refs):
+        """Why the card shows factors and not per-row dollar steps.
+
+        A dollar step is exp(running + delta) - exp(running) and moves with the
+        row's position in the list; the factor does not. Asserted because the
+        dollar column is the obvious "improvement" someone will reach for.
+        """
+        import itertools
+        import math
+
+        b = decompose_price("F", 132, 11.0, True, params, refs["F"],
+                            last_salary=11.4, pos_rank=1)
+        deltas = {d.group: d.log_delta for d in b.drivers}
+        factors = {d.group: d.factor for d in b.drivers}
+
+        steps = {g: set() for g in deltas}
+        for order in itertools.permutations(deltas):
+            running = b.base_log_mu
+            for g in order:
+                steps[g].add(round(math.exp(running + deltas[g]) - math.exp(running), 6))
+                running += deltas[g]
+
+        assert any(len(v) > 1 for v in steps.values()), (
+            "no group's dollar step moved with the ordering, so this test is "
+            "not exercising the hazard it exists for"
+        )
+        for g, f in factors.items():
+            assert math.exp(deltas[g]) == pytest.approx(f, rel=1e-12), (
+                f"{g}'s factor is not exp of its log delta"
+            )
+
+    def test_a_player_against_his_own_features_has_no_drivers(self, params):
+        """Pins the sign convention, which reconstruction alone cannot see.
+
+        Swap the subtraction and every log_delta flips sign while the totals
+        still reconcile against the swapped baseline.
+        """
+        own = build_features("F", 90, 6.0, True, params, last_salary=5.0, pos_rank=4)
+        b = decompose_price("F", 90, 6.0, True, params, own,
+                            last_salary=5.0, pos_rank=4)
+        for d in b.drivers:
+            assert d.log_delta == pytest.approx(0.0, abs=1e-12), f"{d.group} moved"
+            assert d.factor == pytest.approx(1.0, abs=1e-12)
+        assert b.base_log_mu == pytest.approx(b.prediction.log_mu, rel=1e-12)
+
+    def test_a_better_player_than_the_reference_prices_above_it(self, params, refs):
+        """Direction, so a sign flip that survives the two tests above dies here."""
+        b = decompose_price("F", 110, 9.0, True, params, refs["F"],
+                            last_salary=8.0, pos_rank=3)
+        assert b.unclamped_price > b.base_price
+
+
+class TestReferenceFeatures:
+    def test_it_covers_every_position_in_the_pool(self, pool, refs):
+        assert set(refs) == {p.position for p in pool.values()}
+
+    def test_the_reference_is_a_coherent_feature_vector(self, refs):
+        """It describes a real player, which is what lets the card name it.
+
+        Median of the raw inputs THEN through build_features, not the median of
+        each derived feature — a reference whose pts_hinge_60 disagreed with its
+        own projected_points would be unnameable on screen.
+        """
+        import math
+
+        for position, r in refs.items():
+            pts = r["projected_points"]
+            assert r["projected_points_sq"] == pytest.approx(pts * pts)
+            assert r["pts_hinge_60"] == pytest.approx(max(pts - 60.0, 0.0))
+            assert r["pts_hinge_80"] == pytest.approx(max(pts - 80.0, 0.0))
+            assert r["has_lag"] in (0.0, 1.0)
+            assert r["is_rfa"] in (0.0, 1.0)
+            if not r["has_lag"]:
+                assert r["log_lag"] == pytest.approx(math.log(0.5)), (
+                    f"{position}: a no-lag reference must carry the ln(MIN_SALARY) "
+                    f"encoding, not 0, or every newcomer reads as below typical"
+                )
+            assert math.exp(r["log_rank"]) >= 1.0
+
+    def test_an_empty_pool_yields_no_reference(self, params):
+        assert compute_reference_features({}, params) == {}
+
+    def test_it_does_not_move_as_the_pool_shrinks_by_itself(self, params, pool):
+        """Not a property of the function — a warning about how it must be CALLED.
+
+        Recomputed against a drafted-down pool the reference moves a long way
+        (measured: F -0.194, D -0.139, G -0.794 in log_mu over 165 picks), which
+        is why the caller freezes it at draft time rather than rebuilding it per
+        request. This test states the size of the drift so the freezing is not
+        mistaken for ceremony.
+        """
+        from price_model import _score
+
+        full = compute_reference_features(pool, params)
+        ranked = sorted(pool.values(), key=lambda p: p.pos_rank)
+        survivors = {p.name: p for p in ranked if p.pos_rank > 15}
+        shrunk = compute_reference_features(survivors, params)
+
+        moved = {
+            pos: _score(params[pos], shrunk[pos])[1] - _score(params[pos], full[pos])[1]
+            for pos in full
+            if pos in shrunk
+        }
+        assert any(abs(v) > 0.05 for v in moved.values()), (
+            f"the reference barely moved ({moved}), so this test no longer "
+            f"demonstrates why it has to be frozen"
+        )

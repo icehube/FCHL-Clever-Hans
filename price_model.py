@@ -259,6 +259,205 @@ def predict_all_prices(
     }
 
 
+# ---------------------------------------------------------------------------
+# Price decomposition: what each driver contributes to the stage-2 median.
+# ---------------------------------------------------------------------------
+
+# The five drivers, and the grouping is not cosmetic.
+#
+# `log_lag` and `has_lag` MUST stay together: log_lag is ln(MIN_SALARY), not 0,
+# for a player new to the league, so split apart every newcomer shows a
+# spurious negative "reputation" contribution.
+#
+# `log_rank` and `is_rfa` get their own rows rather than an "other" bucket
+# because they are not small — measured on the live pool, Scarcity is the
+# LARGEST driver for every expensive forward (McDavid x7.97 against Points
+# x1.39). Note that `pos_rank` is computed FROM projected_points, so Points and
+# Scarcity are collinear by construction and have to be read together; the card
+# says so.
+DRIVER_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Points", ("projected_points", "projected_points_sq",
+                "pts_hinge_60", "pts_hinge_80", "proj_wins")),
+    ("NHL team", ("team_probability",)),
+    ("Reputation", ("log_lag", "has_lag")),
+    ("Scarcity", ("log_rank",)),
+    ("RFA", ("is_rfa",)),
+)
+
+
+@dataclass(frozen=True)
+class DriverContribution:
+    """One driver's effect on the stage-2 median, relative to the reference."""
+
+    group: str
+    keys: tuple[str, ...]
+    log_delta: float  # sum of coef_k * (feats[k] - reference[k]); ADDITIVE
+    factor: float  # exp(log_delta); MULTIPLICATIVE and order-invariant
+    floor_logit_delta: float  # the same sum over stage-1 coefficients
+
+
+@dataclass(frozen=True)
+class PriceBreakdown:
+    """Why the model priced this player where it did."""
+
+    position: str
+    features: dict[str, float]
+    reference: dict[str, float]
+    base_log_mu: float  # log_mu of the reference vector
+    base_price: float  # exp(base_log_mu), UNCLAMPED — may sit below MIN_SALARY
+    base_p_floor: float
+    drivers: tuple[DriverContribution, ...]
+    unclamped_price: float  # exp(prediction.log_mu), before the bid clips
+    clamped: str | None  # "min" | "max" | None
+    prediction: PricePrediction
+    min_bid: float
+    max_bid: float
+
+
+def decompose_price(
+    position: str,
+    projected_points: float,
+    team_probability: float,
+    is_rfa: bool,
+    params: dict,
+    reference: dict[str, float],
+    last_salary: float | None = None,
+    pos_rank: int = 1,
+    proj_wins: float | None = None,
+) -> PriceBreakdown:
+    """Per-driver decomposition of the stage-2 median, against a reference player.
+
+        log_mu(player) = log_mu(reference) + SUM_groups SUM_keys coef_k * (x_k - r_k)
+
+    exactly, because both sides are the same linear form over the same feature
+    vector. Exponentiating turns the additive log deltas into FACTORS whose
+    product is price / reference price.
+
+    **Report the factor, never a per-row dollar step.** A dollar step is
+    exp(running + delta) - exp(running), so it depends on where the row sits in
+    the list: measured 2026-09-09 across all 120 orderings of the five groups,
+    McDavid's Points step runs $0.11M to $2.72M and Scarcity's $2.06M to
+    $8.50M. Every one of those is arithmetically correct, which is exactly what
+    makes displaying one dangerous — the figure gets quoted. The factor does not
+    move.
+
+    Stage 1 is decomposed too (`floor_logit_delta`) and is deliberately NOT the
+    headline: it is log-odds, and its coefficients frequently point the OTHER
+    way from stage 2 (for F, `floor_coef_log_rank` is +3.006 while
+    `coef_log_rank` is -0.391 — a deep rank makes a player both more likely to
+    be a floor sale and cheaper if he is not). `expected_price` is not a linear
+    function of either stage: sigma depends on log_mu and the clip bounds are
+    per-position. **This explains the MEDIAN and nothing else.**
+    """
+    pos_params = params[position]
+    feats = build_features(
+        position, projected_points, team_probability, is_rfa, params,
+        last_salary=last_salary, pos_rank=pos_rank, proj_wins=proj_wins,
+    )
+    prediction = predict_price(
+        position, projected_points, team_probability, is_rfa, params,
+        last_salary=last_salary, pos_rank=pos_rank, proj_wins=proj_wins,
+    )
+
+    base_logit, base_log_mu = _score(pos_params, reference)
+
+    drivers = tuple(
+        DriverContribution(
+            group=group,
+            keys=keys,
+            log_delta=(
+                d := sum(
+                    pos_params[f"coef_{k}"] * (feats[k] - reference[k])
+                    for k in keys
+                )
+            ),
+            factor=math.exp(d),
+            floor_logit_delta=sum(
+                pos_params[f"floor_coef_{k}"] * (feats[k] - reference[k])
+                for k in keys
+            ),
+        )
+        for group, keys in DRIVER_GROUPS
+    )
+
+    unclamped = math.exp(prediction.log_mu)
+    min_bid, max_bid = pos_params["min_bid"], pos_params["max_bid"]
+    clamped = "min" if unclamped < min_bid else "max" if unclamped > max_bid else None
+
+    return PriceBreakdown(
+        position=position,
+        features=feats,
+        reference=dict(reference),
+        base_log_mu=base_log_mu,
+        base_price=math.exp(base_log_mu),
+        base_p_floor=_sigmoid(base_logit),
+        drivers=drivers,
+        unclamped_price=unclamped,
+        clamped=clamped,
+        prediction=prediction,
+        min_bid=min_bid,
+        max_bid=max_bid,
+    )
+
+
+def decompose_player(
+    player, params: dict, reference: dict[str, float]
+) -> PriceBreakdown:
+    """decompose_price for a pool Player, through the same input rule as pricing."""
+    return decompose_price(params=params, reference=reference,
+                           **_player_inputs(player))
+
+
+def compute_reference_features(
+    players: dict, params: dict
+) -> dict[str, dict[str, float]]:
+    """The per-position "typical player" every breakdown is measured against.
+
+    Median of the RAW inputs, then through `build_features` — not the median of
+    each derived feature. The two agree on this pool because the medians happen
+    to land on the same player, but only by luck: on an even-sized pool
+    median(pts**2) != median(pts)**2, and a reference whose `pts_hinge_60`
+    disagreed with its own `projected_points` would describe no player at all,
+    so the card could not name it on screen. Booleans take the majority value;
+    `last_salary` is the median among those who have one, and None when most of
+    the position does not.
+
+    Computed ONCE against the draft-time pool and frozen, for exactly the reason
+    `compute_pos_ranks` is frozen: the pool shrinks. Measured over the first 165
+    picks the reference log_mu moves F -0.194, D -0.139, G -0.794 — a goalie
+    baseline that halves — so recomputing it per request would silently restate
+    every explanation given earlier in the draft.
+
+    A position with no players is absent from the result; callers must cope.
+    """
+    by_pos: dict[str, list] = {}
+    for player in players.values():
+        by_pos.setdefault(player.position, []).append(player)
+
+    refs: dict[str, dict[str, float]] = {}
+    for position, roster in by_pos.items():
+        lags = sorted(p.salary for p in roster if p.salary > 0)
+        wins = sorted(p.proj_wins for p in roster if p.proj_wins is not None)
+        refs[position] = build_features(
+            position=position,
+            projected_points=_median(sorted(p.projected_points for p in roster)),
+            team_probability=_median(sorted(p.team_probability for p in roster)),
+            is_rfa=sum(1 for p in roster if p.is_rfa) * 2 > len(roster),
+            params=params,
+            last_salary=_median(lags) if len(lags) * 2 > len(roster) else None,
+            pos_rank=round(_median(sorted(p.pos_rank for p in roster))) or 1,
+            proj_wins=_median(wins) if wins else None,
+        )
+    return refs
+
+
+def _median(values: list[float]) -> float:
+    """Median of an already-sorted list. Local so this module keeps no deps."""
+    n = len(values)
+    mid = n // 2
+    return values[mid] if n % 2 else (values[mid - 1] + values[mid]) / 2.0
+
+
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 

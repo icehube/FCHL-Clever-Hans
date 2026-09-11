@@ -22,23 +22,6 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
-### Fixed
-
-- **Two grill findings on the same day's batch.** The MILP headline rendered
-  two consecutive parentheticals — "Optimal Projected Points: 1230 (your Proj
-  in League State) (Cost: $26.5M)" — because the new cross-reference was
-  inserted before the cost rather than after it. Moved, and it now reads
-  "... 1230 (Cost: $26.5M) — your Proj in League State".
-
-  And the bench cap had no test for the shape it deliberately does not
-  enforce: `is_bench` has been serialized since long before the cap, so a state
-  file from any earlier build can hold more than `BENCH_SIZE` benched. The cap
-  gates transitions only — a tool that refuses to render four hours into a live
-  auction is worse than one showing an illegal roster — so an over-cap state
-  loads, renders, greys only the Bench buttons, and recovers by activating.
-  Verified by hand and now pinned, including the JSON round trip, without which
-  the recovery would be undone by the next save.
-
 ### Added
 
 - **Solve Standings now runs itself after every pick.** Asked for directly: "is
@@ -103,7 +86,199 @@ rediscover the same non-problem.
   name typo (the cross-file contract test), the listener removed, and the latch
   never released. The survivor is the header swap described above.
 
+- **A `+` on the Price Model card, so a chart you opened can start the
+  auction.** Asked for directly: "can we add a '+' to the Price Model window".
+  The pool table has had one since 2026-09-09; the chart you open *from* that
+  table did not, so reading the price model and then bidding meant scrolling
+  back and finding the row again.
+
+  No JavaScript was needed. `.btn-add-bid` is delegated on `document` and reads
+  `data-player`, deliberately, so the class and the attribute are the whole
+  contract and a button arriving by htmx swap is covered for free.
+
+  **Gated off the inline mount.** `player_chart.html` is rendered twice — into
+  `#player-chart-container` from the players table, and inside
+  `bid_panel.html` during a live auction — and in the second one the button is
+  worse than useless: you are already bidding on him, `.bid-form` (Start
+  Auction) does not exist while an auction is live, and the handler's only
+  possible answer is the "finish the current auction first" toast. The include
+  in `bid_panel.html` is wrapped in `{% with chart_inline = true %}`; the flag
+  is undefined everywhere else, including the standalone
+  `GET /player-chart/{name}` response, which is the mount that needs it.
+
+  Four mutants killed by the endpoint tests (gate removed, button removed,
+  `with`-flag dropped, `data-player` misnamed) and three more by the browser
+  tests — the browser pair is what proves the delegation actually reaches a
+  swapped-in button, which `TestClient` cannot see. One existing assertion was
+  tightened in the same commit: `TestTheChartLandsWhereYouClicked` clicked
+  `.price-chart-card button` unqualified, which would have hit the new `+`
+  first if the gate ever broke, and timed out instead of failing clearly.
+
+- **A platform-wide player search in the header, because "where is he?" had no
+  answer.** Mid-auction a name gets called and there was no way to find out
+  where that player is without hunting: the Available Players table lists only
+  the undrafted, a rostered player is visible only by opening the right one of
+  eleven team panels, a player in the minors sits in a second table inside that
+  panel, and a bought-out player was visible **nowhere at all** — `execute_buyout`
+  removes him from every list and leaves a nameless float in `team.penalties`,
+  so his `buyout` `TransactionRecord` is the only evidence he ever existed.
+  Nothing in the app scanned across teams: `main._nhl_team_of` was the one
+  function that walked every roster plus the pool, and it threw the answer away,
+  returning `p.nhl_team` and discarding *where* it found him.
+
+  `AuctionState.locate_players` is the engine. It indexes keeper → acquired →
+  minors → pool → the log, `setdefault` so live state always beats history, and
+  returns a frozen `PlayerLocation` per hit carrying the location, the team, the
+  cap hit, whether that salary counts on cap, and the latest `TransactionRecord`
+  as provenance. **Traded is not a sixth location** — a traded player is on the
+  destination roster and is found live; the trade is provenance, which is what
+  makes "find someone a trade moved" answerable without inventing a place for
+  him to be. `change_log` is deliberately not searched: `ChangeRecord` has no
+  `player_name` field at all, only a free-text `description`, and substring-
+  matching prose to find a player is a different and much worse thing.
+
+  `main._search_rows` does every figure and every string so the template only
+  branches — the shape `_driver_rows` established. Pool rows carry model price,
+  market price, `market.is_capped` and `in_optimal`, all four of which `_context`
+  already computes for the pool table at **no MILP cost**; `in_optimal` copies
+  `_context`'s guard verbatim, because reading `.roster` off an Infeasible
+  solution would star players on the strength of a plan that does not exist.
+  **No max bid, deliberately**: nothing in `bid_limits` carries one, and a max
+  bid is a binary search over MILP solves — on a keyup-triggered endpoint that is
+  exactly the stall `tests/test_event_loop.py` exists to prevent.
+
+  Three properties of `GET /find-player?q=` that are easy to regress and are each
+  pinned. It **does not call `_context`**, passing a dict already carrying
+  `"request"` through `_render`'s short-circuit: `_context` costs ~8.5ms and
+  builds a 704-row `bid_limits` list regardless of what renders, against 0.21ms
+  of actual search. `q` is a **query param, not a path segment**, for the reason
+  `/buyout-check` already documents — `_disambiguated_names`' last-resort tier is
+  ` (#n)` and a `#` in a path truncates at the fragment and never reaches the
+  server. And a blank query answers **200 with an empty body, never 204**, which
+  htmx reads as "do not swap" and which would strand the previous results on
+  screen in the one state where they are guaranteed wrong.
+
+  `team_code` and `link_team` are two fields on purpose. A bought-out player's
+  50% penalty sits on BOT's cap and is worth naming, but he is on no roster, so
+  his row names the team and navigates nowhere; conflating them sent the click to
+  a panel he is demonstrably not in.
+
+  The results partial mints **no ids at all** — `main._dom_id` owns exactly one
+  id per player for the buyout dots, and a second copy is a duplicate the roster
+  scan swaps twice. The mount `#player-search-results` carries the only id
+  involved and lives in the navbar, outside `#app`, so a panel swap cannot
+  destroy an open list.
+
+  `/` focuses the box (`preventDefault`, because Firefox binds it to Quick Find),
+  `Escape` closes the results, and the shortcuts modal grew a row — the guard's
+  regex widened from `([a-z])` to `([a-z/])` in the same commit, as its own
+  contract requires.
+
+  **Three things about dismissal were found by driving it, not by reading it.**
+  (1) A dismissal has to outlast the request still in the air: the input
+  debounces 200ms and also fires on `focus`, so clicking a hit promptly after
+  typing routinely leaves a response coming, and htmx swaps on `b.onload`
+  regardless of what the page did meanwhile — the list reappeared a fraction of
+  a second after being dismissed. Fixed by suppressing the *swap*, with a flag
+  every close sets and the next `input` or `focus` on the box clears.
+  (2) `Escape` has to clear the query as well as the list, and has to tell htmx
+  it did: `changed` compares against a value htmx cached at trigger time, not
+  against the DOM, so assigning `.value = ''` silently left it believing the box
+  still said "hu" and re-typing the same surname fired nothing. The version
+  without the dispatched event looked correct and was not.
+  (3) `focus` is a second trigger for the same reason — clicking away leaves the
+  query in the box, and without it coming back and re-typing does nothing.
+
+### Changed
+
+- **The price-drivers card no longer prints a row that does nothing.** The
+  other two items from the same review were both the card saying `×1.00` and
+  the reader concluding something false.
+
+  "Does Scarcity not apply to Goalies?" — correct, it does not: `coef_log_rank`
+  is exactly `0.0` for G, because ~20 goalies a season is too coarse a field to
+  fit rank against. All **64** goalies in the pool drop the row.
+
+  "What is Reputation? I didn't think that was in the model" — it is
+  (`log_lag` + `has_lag`, last season's FCHL salary), but a player new to the
+  league sits on *exactly* the reference's encoding, so the row has nothing to
+  say. On `data/players-25.csv`, the pool this was reported against, **nobody**
+  carries a prior salary, so it read `×1.000` on every card — indistinguishable
+  from "not in the model". It stays live where there is a reputation: **194 of
+  407** forwards on `players.csv` (91 of 234 D, 63 of 64 G), Panarin ×1.645,
+  McDavid ×1.793.
+
+  Filtered in `main._driver_rows`, not the template, and on an **exactly zero**
+  `log_delta` rather than a factor that rounds to 1.00. A ×1.004 row dropped
+  from a card that prints both a base and a median would leave a gap between
+  them that nothing on screen explains; exact equality on a continuous feature
+  only happens structurally, which is the case worth hiding. `widest` and
+  `headline` are computed after the filter, or a hidden row would set the bar
+  scale and the collapsed summary could advertise a driver the table does not
+  show.
+
+  The goalie row keeps the label **"Points"** (owner's call) — the detail line
+  already reads "N projected wins", which is where the distinction belongs.
+
+  `test_it_names_every_driver` asserted all five groups appear, which stopped
+  being true (the reference is a UFA, so Contract is dead for every UFA in the
+  pool). It is now a set equality against the engine in both directions — and
+  it picks a player with a **mixed** profile deliberately: the top forward has
+  all five drivers live, so against him the equality cannot fail in the hiding
+  direction, and the first version of it stayed green with the filter removed.
+
+- **The Proj basis marker is back, with different words.** Removed on
+  2026-09-09 as one of four requested changes, and restored the next day once
+  it was clear what it did: the owner's words were *"I didn't realize it was
+  functional. I didn't understand what it did."* That is a wording bug, not a
+  feature bug, so the mechanism came back unchanged — `standings_basis.html`,
+  both includes, the `standings_basis` dict in `_context`, the unconditional
+  span with only `hx-swap-oob` conditional, and the branch on the count of
+  ESTIMATES rather than of exact figures (the 2026-08-18 bug, and two tests
+  catch that mutant today: `test_an_unsolvable_opponent_keeps_its_estimate_rather_than_reading_zero`
+  and `test_standings_answers_when_every_opponent_is_done`).
+
+  What changed is the label. It read a bare `exact` / `exact 9/10` /
+  `estimated`. **`exact` appeared nowhere else in the feature** — the button
+  says Solve, the header tooltip says estimate — so the one word that told you
+  the column's state shared no vocabulary with the control that changes it. It
+  now reads `solved` / `9/10 solved` / `estimated`. And it carries its own
+  native `title` in every state, which is the half that was missing: a bare
+  adjective under a header does not say what it is about, and this one is
+  about a *subset* of its column, since BOT's own Proj is a real MILP optimum
+  in every state and the marker never covered it. The estimated state's
+  tooltip names Solve Standings, because knowing the figures are guesses is no
+  use without knowing what to press.
+
+  **The label stays one word, and that is measured rather than taste.**
+  `opponents estimated` was drafted first, on the reasoning that `opponents`
+  and `estimated` are both 9 characters so the panel could not get wider. That
+  reasoning was wrong twice. DaisyUI sets
+  `.table :where(thead,tfoot){white-space:nowrap}`, so a header cell's
+  min-content is its **whole string**, not its longest word — the
+  longest-word rule holds for the body, where cells wrap, and `league_state.html`
+  had stated it for the table as a whole. Measured 2026-09-10 by
+  `tests/measure_layout.py`, three variants in one run: **768px** with the
+  marker hidden, **776px** with it, **829px** with the two-word label. A second
+  word cost **53px** of the widest table in the app — nearly seven times the
+  marker itself — for something the tooltip says better.
+
 ### Fixed
+
+- **Two grill findings on the same day's batch.** The MILP headline rendered
+  two consecutive parentheticals — "Optimal Projected Points: 1230 (your Proj
+  in League State) (Cost: $26.5M)" — because the new cross-reference was
+  inserted before the cost rather than after it. Moved, and it now reads
+  "... 1230 (Cost: $26.5M) — your Proj in League State".
+
+  And the bench cap had no test for the shape it deliberately does not
+  enforce: `is_bench` has been serialized since long before the cap, so a state
+  file from any earlier build can hold more than `BENCH_SIZE` benched. The cap
+  gates transitions only — a tool that refuses to render four hours into a live
+  auction is worse than one showing an illegal roster — so an over-cap state
+  loads, renders, greys only the Bench buttons, and recovers by activating.
+  Verified by hand and now pinned, including the JSON round trip, without which
+  the recovery would be undone by the next save.
 
 - **App assets were unversioned, so two shipped fixes were re-reported as
   broken the next day.** "When I move away from the search box, the drop menu
@@ -136,128 +311,6 @@ rediscover the same non-problem.
   reproduce in a fresh browser profile is a **cache** report until proven
   otherwise, and the first thing to check is whether the asset carrying the fix
   can be revalidated at all.
-
-### Investigated
-
-- **"Does it matter whose turn it is to bid? All that I think matters is that
-  if it's mine or if it's someone else's. Is that right?" — yes, and no code
-  changed.** The answer is written into
-  `.claude/rules/pricing-pipeline.md`'s Critical rule section, where the two
-  ceiling contexts already live, because it is a domain fact that keeps being
-  re-derived.
-
-  `current_nominator()` is read in exactly one place — `nomination_panel.html`,
-  where it draws a badge and gates the "It's My Turn" button. It appears
-  nowhere in `market.py`, `optimizer.py`, `/bid-check` or the MILP. `/assign`
-  only *advances* it, and `/set-nominator` is the single mutating POST that
-  deliberately skips `_recompute()`, on the grounds `tests/test_bid_cache.py`
-  states outright: a marginal value cannot depend on whose turn it is.
-
-  What the engine reduces a bidder set to is the boolean "is BOT one of them"
-  and the **sorted multiset** of the other bidders' `physical_max_bid` —
-  `compute_live_ceiling` projects codes to numbers and sorts, destroying both
-  order and identity. So opponent identity matters only as a way to look up a
-  budget, permuting the same opponents changes nothing, and opponent roster
-  *needs* never gate a bid at all (`_bidding_opponents` gates on
-  `physical_max_bid`, not on spots remaining — a 24-man team with cap space is
-  still a bidder). `nomination_order` *is* read by four templates, but purely
-  as a stable display order.
-
-  One thing the question surfaced went to `BACKLOG.md` rather than being
-  fixed here: the `highest_bidder` form field on `/bid-check` is dead — no JS
-  writes it, and `compute_bid_recommendation` never reads the `MarketInfo`
-  field it feeds.
-
-- **"When I move away from the search box, the drop menu still displays" —
-  no code change.** The `focusout` handler at `static/shortcuts.js` already
-  closes the results, and does it correctly: it ignores a focus move to another
-  element *inside* `#player-search`, so tabbing from the input to a result does
-  not dismiss what you are reaching for. Verified in a fresh browser — the
-  results container went from 1 child to 0 on clicking away. See the
-  cache-busting entry above for why it looked broken.
-
-- **"The Position Filters don't work when the price model is open" — no code
-  change.** Fixed on 2026-09-09 by giving the pool `<tbody>` the id
-  `pool-rows`, because `#player-chart-container` sits inside `#bid-limits` and
-  before the pool table, so `document.querySelector('#bid-limits tbody')`
-  resolved to the price-drivers table once a chart was open. Verified in a
-  fresh browser at 1280px: with a drivers card open, filtering to D took the
-  pool from 614 rows to 227 and left all 6 driver rows on screen with their
-  labels intact. Same cause as above.
-
-- **The team panel's "Proj PTS" was a raw sum including bench players, so it
-  was not a legal lineup.** Reported as "in League State it says Proj.
-  Est/Solved. But then in the Team Panel it also shows Proj PTS. These values
-  are different." They were — and the panel's was the wrong one.
-
-  Three figures read as one and only one was mislabelled *and* miscomputed:
-
-  | Where | Quantity | Was |
-  |---|---|---|
-  | League State **Pts** | `current_roster_points` — best 12F/6D/2G right now | correct |
-  | League State **Proj** | optimal points once the roster is filled | correct |
-  | Team panel **Proj PTS** | `roster_players\|sum('projected_points')` | **wrong** |
-
-  Bench players score nothing under league scoring — `lineup_points` takes the
-  greedy top-k per position for exactly that reason — so summing every roster
-  player counts phantom points from anyone past 12F/6D/2G. It agreed with the
-  truth while rosters were small enough that everyone starts, which is why it
-  shipped unnoticed and bit only at the end of a draft, when the number is read
-  hardest: measured on `full-roster-still-bidding`, MAC showed **901** against
-  a real **896** and HSM **1140** against **1121**.
-
-  The tile now shows `current_roster_points` and is labelled **Lineup PTS**.
-  The rename is half the fix: "Proj" already means the optimal FILLED roster,
-  both in League State's column and in the headline two lines below the tile,
-  and a third meaning on the same screen is what the report was about.
-
-  League State's own headers deliberately did **not** change. Its `<th>`s sit
-  in the widest table in the app and DaisyUI applies `white-space: nowrap` to
-  header cells, so a header's min-content is its whole string — measured on
-  this same table, one extra word in the basis marker cost 53px. The team panel
-  has no such constraint, so that is where the vocabulary got fixed.
-
-  The MILP headline also gained "(your *Proj* in League State)" and switched
-  from `"%.0f"` to `|int`, matching `_context` — **consistency, not a bug**:
-  `MILPSolution.total_points` is declared `float` but is always fed from
-  `state.lineup_points`, which sums ints, and measured across all six scenarios
-  the two formats never disagree. The mutation swapping them back survives, and
-  the template comment says so rather than implying coverage it does not have.
-  What is pinned is the cross-panel equality, compared as **rendered** — going
-  through `_context` instead would have passed on a build where one panel
-  showed something else entirely.
-
-### Added
-
-- **A `+` on the Price Model card, so a chart you opened can start the
-  auction.** Asked for directly: "can we add a '+' to the Price Model window".
-  The pool table has had one since 2026-09-09; the chart you open *from* that
-  table did not, so reading the price model and then bidding meant scrolling
-  back and finding the row again.
-
-  No JavaScript was needed. `.btn-add-bid` is delegated on `document` and reads
-  `data-player`, deliberately, so the class and the attribute are the whole
-  contract and a button arriving by htmx swap is covered for free.
-
-  **Gated off the inline mount.** `player_chart.html` is rendered twice — into
-  `#player-chart-container` from the players table, and inside
-  `bid_panel.html` during a live auction — and in the second one the button is
-  worse than useless: you are already bidding on him, `.bid-form` (Start
-  Auction) does not exist while an auction is live, and the handler's only
-  possible answer is the "finish the current auction first" toast. The include
-  in `bid_panel.html` is wrapped in `{% with chart_inline = true %}`; the flag
-  is undefined everywhere else, including the standalone
-  `GET /player-chart/{name}` response, which is the mount that needs it.
-
-  Four mutants killed by the endpoint tests (gate removed, button removed,
-  `with`-flag dropped, `data-player` misnamed) and three more by the browser
-  tests — the browser pair is what proves the delegation actually reaches a
-  swapped-in button, which `TestClient` cannot see. One existing assertion was
-  tightened in the same commit: `TestTheChartLandsWhereYouClicked` clicked
-  `.price-chart-card button` unqualified, which would have hit the new `+`
-  first if the gate ever broke, and timed out instead of failing clearly.
-
-### Fixed
 
 - **The bench had no capacity limit, so a team could hold any number of benched
   players.** Reported as "you shouldn't be able to add more than 4 people to a
@@ -425,124 +478,6 @@ rediscover the same non-problem.
   `img[alt]` sort fallback — exactly what
   `test_the_alt_fallback_is_what_rescues_the_logo_columns` exists to notice.
 
-### Changed
-
-- **The price-drivers card no longer prints a row that does nothing.** The
-  other two items from the same review were both the card saying `×1.00` and
-  the reader concluding something false.
-
-  "Does Scarcity not apply to Goalies?" — correct, it does not: `coef_log_rank`
-  is exactly `0.0` for G, because ~20 goalies a season is too coarse a field to
-  fit rank against. All **64** goalies in the pool drop the row.
-
-  "What is Reputation? I didn't think that was in the model" — it is
-  (`log_lag` + `has_lag`, last season's FCHL salary), but a player new to the
-  league sits on *exactly* the reference's encoding, so the row has nothing to
-  say. On `data/players-25.csv`, the pool this was reported against, **nobody**
-  carries a prior salary, so it read `×1.000` on every card — indistinguishable
-  from "not in the model". It stays live where there is a reputation: **194 of
-  407** forwards on `players.csv` (91 of 234 D, 63 of 64 G), Panarin ×1.645,
-  McDavid ×1.793.
-
-  Filtered in `main._driver_rows`, not the template, and on an **exactly zero**
-  `log_delta` rather than a factor that rounds to 1.00. A ×1.004 row dropped
-  from a card that prints both a base and a median would leave a gap between
-  them that nothing on screen explains; exact equality on a continuous feature
-  only happens structurally, which is the case worth hiding. `widest` and
-  `headline` are computed after the filter, or a hidden row would set the bar
-  scale and the collapsed summary could advertise a driver the table does not
-  show.
-
-  The goalie row keeps the label **"Points"** (owner's call) — the detail line
-  already reads "N projected wins", which is where the distinction belongs.
-
-  `test_it_names_every_driver` asserted all five groups appear, which stopped
-  being true (the reference is a UFA, so Contract is dead for every UFA in the
-  pool). It is now a set equality against the engine in both directions — and
-  it picks a player with a **mixed** profile deliberately: the top forward has
-  all five drivers live, so against him the equality cannot fail in the hiding
-  direction, and the first version of it stayed green with the filter removed.
-
-### Added
-
-
-- **A platform-wide player search in the header, because "where is he?" had no
-  answer.** Mid-auction a name gets called and there was no way to find out
-  where that player is without hunting: the Available Players table lists only
-  the undrafted, a rostered player is visible only by opening the right one of
-  eleven team panels, a player in the minors sits in a second table inside that
-  panel, and a bought-out player was visible **nowhere at all** — `execute_buyout`
-  removes him from every list and leaves a nameless float in `team.penalties`,
-  so his `buyout` `TransactionRecord` is the only evidence he ever existed.
-  Nothing in the app scanned across teams: `main._nhl_team_of` was the one
-  function that walked every roster plus the pool, and it threw the answer away,
-  returning `p.nhl_team` and discarding *where* it found him.
-
-  `AuctionState.locate_players` is the engine. It indexes keeper → acquired →
-  minors → pool → the log, `setdefault` so live state always beats history, and
-  returns a frozen `PlayerLocation` per hit carrying the location, the team, the
-  cap hit, whether that salary counts on cap, and the latest `TransactionRecord`
-  as provenance. **Traded is not a sixth location** — a traded player is on the
-  destination roster and is found live; the trade is provenance, which is what
-  makes "find someone a trade moved" answerable without inventing a place for
-  him to be. `change_log` is deliberately not searched: `ChangeRecord` has no
-  `player_name` field at all, only a free-text `description`, and substring-
-  matching prose to find a player is a different and much worse thing.
-
-  `main._search_rows` does every figure and every string so the template only
-  branches — the shape `_driver_rows` established. Pool rows carry model price,
-  market price, `market.is_capped` and `in_optimal`, all four of which `_context`
-  already computes for the pool table at **no MILP cost**; `in_optimal` copies
-  `_context`'s guard verbatim, because reading `.roster` off an Infeasible
-  solution would star players on the strength of a plan that does not exist.
-  **No max bid, deliberately**: nothing in `bid_limits` carries one, and a max
-  bid is a binary search over MILP solves — on a keyup-triggered endpoint that is
-  exactly the stall `tests/test_event_loop.py` exists to prevent.
-
-  Three properties of `GET /find-player?q=` that are easy to regress and are each
-  pinned. It **does not call `_context`**, passing a dict already carrying
-  `"request"` through `_render`'s short-circuit: `_context` costs ~8.5ms and
-  builds a 704-row `bid_limits` list regardless of what renders, against 0.21ms
-  of actual search. `q` is a **query param, not a path segment**, for the reason
-  `/buyout-check` already documents — `_disambiguated_names`' last-resort tier is
-  ` (#n)` and a `#` in a path truncates at the fragment and never reaches the
-  server. And a blank query answers **200 with an empty body, never 204**, which
-  htmx reads as "do not swap" and which would strand the previous results on
-  screen in the one state where they are guaranteed wrong.
-
-  `team_code` and `link_team` are two fields on purpose. A bought-out player's
-  50% penalty sits on BOT's cap and is worth naming, but he is on no roster, so
-  his row names the team and navigates nowhere; conflating them sent the click to
-  a panel he is demonstrably not in.
-
-  The results partial mints **no ids at all** — `main._dom_id` owns exactly one
-  id per player for the buyout dots, and a second copy is a duplicate the roster
-  scan swaps twice. The mount `#player-search-results` carries the only id
-  involved and lives in the navbar, outside `#app`, so a panel swap cannot
-  destroy an open list.
-
-  `/` focuses the box (`preventDefault`, because Firefox binds it to Quick Find),
-  `Escape` closes the results, and the shortcuts modal grew a row — the guard's
-  regex widened from `([a-z])` to `([a-z/])` in the same commit, as its own
-  contract requires.
-
-  **Three things about dismissal were found by driving it, not by reading it.**
-  (1) A dismissal has to outlast the request still in the air: the input
-  debounces 200ms and also fires on `focus`, so clicking a hit promptly after
-  typing routinely leaves a response coming, and htmx swaps on `b.onload`
-  regardless of what the page did meanwhile — the list reappeared a fraction of
-  a second after being dismissed. Fixed by suppressing the *swap*, with a flag
-  every close sets and the next `input` or `focus` on the box clears.
-  (2) `Escape` has to clear the query as well as the list, and has to tell htmx
-  it did: `changed` compares against a value htmx cached at trigger time, not
-  against the DOM, so assigning `.value = ''` silently left it believing the box
-  still said "hu" and re-typing the same surname fired nothing. The version
-  without the dispatched event looked correct and was not.
-  (3) `focus` is a second trigger for the same reason — clicking away leaves the
-  query in the box, and without it coming back and re-typing does nothing.
-
-### Fixed
-
 - **Eight plainly-typed surnames found nobody, because the name fold kept
   punctuation.** Shipped in the first cut of the search engine and caught by a
   design review the same day. The fold lower-cased and stripped diacritics but
@@ -591,6 +526,94 @@ rediscover the same non-problem.
 
 ### Investigated
 
+- **"Does it matter whose turn it is to bid? All that I think matters is that
+  if it's mine or if it's someone else's. Is that right?" — yes, and no code
+  changed.** The answer is written into
+  `.claude/rules/pricing-pipeline.md`'s Critical rule section, where the two
+  ceiling contexts already live, because it is a domain fact that keeps being
+  re-derived.
+
+  `current_nominator()` is read in exactly one place — `nomination_panel.html`,
+  where it draws a badge and gates the "It's My Turn" button. It appears
+  nowhere in `market.py`, `optimizer.py`, `/bid-check` or the MILP. `/assign`
+  only *advances* it, and `/set-nominator` is the single mutating POST that
+  deliberately skips `_recompute()`, on the grounds `tests/test_bid_cache.py`
+  states outright: a marginal value cannot depend on whose turn it is.
+
+  What the engine reduces a bidder set to is the boolean "is BOT one of them"
+  and the **sorted multiset** of the other bidders' `physical_max_bid` —
+  `compute_live_ceiling` projects codes to numbers and sorts, destroying both
+  order and identity. So opponent identity matters only as a way to look up a
+  budget, permuting the same opponents changes nothing, and opponent roster
+  *needs* never gate a bid at all (`_bidding_opponents` gates on
+  `physical_max_bid`, not on spots remaining — a 24-man team with cap space is
+  still a bidder). `nomination_order` *is* read by four templates, but purely
+  as a stable display order.
+
+  One thing the question surfaced went to `BACKLOG.md` rather than being
+  fixed here: the `highest_bidder` form field on `/bid-check` is dead — no JS
+  writes it, and `compute_bid_recommendation` never reads the `MarketInfo`
+  field it feeds.
+
+- **"When I move away from the search box, the drop menu still displays" —
+  no code change.** The `focusout` handler at `static/shortcuts.js` already
+  closes the results, and does it correctly: it ignores a focus move to another
+  element *inside* `#player-search`, so tabbing from the input to a result does
+  not dismiss what you are reaching for. Verified in a fresh browser — the
+  results container went from 1 child to 0 on clicking away. See the
+  cache-busting entry above for why it looked broken.
+
+- **"The Position Filters don't work when the price model is open" — no code
+  change.** Fixed on 2026-09-09 by giving the pool `<tbody>` the id
+  `pool-rows`, because `#player-chart-container` sits inside `#bid-limits` and
+  before the pool table, so `document.querySelector('#bid-limits tbody')`
+  resolved to the price-drivers table once a chart was open. Verified in a
+  fresh browser at 1280px: with a drivers card open, filtering to D took the
+  pool from 614 rows to 227 and left all 6 driver rows on screen with their
+  labels intact. Same cause as above.
+
+- **The team panel's "Proj PTS" was a raw sum including bench players, so it
+  was not a legal lineup.** Reported as "in League State it says Proj.
+  Est/Solved. But then in the Team Panel it also shows Proj PTS. These values
+  are different." They were — and the panel's was the wrong one.
+
+  Three figures read as one and only one was mislabelled *and* miscomputed:
+
+  | Where | Quantity | Was |
+  |---|---|---|
+  | League State **Pts** | `current_roster_points` — best 12F/6D/2G right now | correct |
+  | League State **Proj** | optimal points once the roster is filled | correct |
+  | Team panel **Proj PTS** | `roster_players\|sum('projected_points')` | **wrong** |
+
+  Bench players score nothing under league scoring — `lineup_points` takes the
+  greedy top-k per position for exactly that reason — so summing every roster
+  player counts phantom points from anyone past 12F/6D/2G. It agreed with the
+  truth while rosters were small enough that everyone starts, which is why it
+  shipped unnoticed and bit only at the end of a draft, when the number is read
+  hardest: measured on `full-roster-still-bidding`, MAC showed **901** against
+  a real **896** and HSM **1140** against **1121**.
+
+  The tile now shows `current_roster_points` and is labelled **Lineup PTS**.
+  The rename is half the fix: "Proj" already means the optimal FILLED roster,
+  both in League State's column and in the headline two lines below the tile,
+  and a third meaning on the same screen is what the report was about.
+
+  League State's own headers deliberately did **not** change. Its `<th>`s sit
+  in the widest table in the app and DaisyUI applies `white-space: nowrap` to
+  header cells, so a header's min-content is its whole string — measured on
+  this same table, one extra word in the basis marker cost 53px. The team panel
+  has no such constraint, so that is where the vocabulary got fixed.
+
+  The MILP headline also gained "(your *Proj* in League State)" and switched
+  from `"%.0f"` to `|int`, matching `_context` — **consistency, not a bug**:
+  `MILPSolution.total_points` is declared `float` but is always fed from
+  `state.lineup_points`, which sums ints, and measured across all six scenarios
+  the two formats never disagree. The mutation swapping them back survives, and
+  the template comment says so rather than implying coverage it does not have.
+  What is pinned is the cross-panel equality, compared as **rendered** — going
+  through `_context` instead would have passed on a build where one panel
+  showed something else entirely.
+
 - **htmx does NOT abort an in-flight request whose triggering element leaves the
   DOM.** This claim has been in `CLAUDE.md`, in two comments in `shortcuts.js`
   and in a browser-test docstring since 2026-08-14, always as the reason
@@ -612,46 +635,6 @@ rediscover the same non-problem.
   assertion "catches the abort" — it separates "the card went away" from "the
   card went away and the request still landed", which is a weaker property and
   the one it actually has.
-
-### Changed
-
-- **The Proj basis marker is back, with different words.** Removed on
-  2026-09-09 as one of four requested changes, and restored the next day once
-  it was clear what it did: the owner's words were *"I didn't realize it was
-  functional. I didn't understand what it did."* That is a wording bug, not a
-  feature bug, so the mechanism came back unchanged — `standings_basis.html`,
-  both includes, the `standings_basis` dict in `_context`, the unconditional
-  span with only `hx-swap-oob` conditional, and the branch on the count of
-  ESTIMATES rather than of exact figures (the 2026-08-18 bug, and two tests
-  catch that mutant today: `test_an_unsolvable_opponent_keeps_its_estimate_rather_than_reading_zero`
-  and `test_standings_answers_when_every_opponent_is_done`).
-
-  What changed is the label. It read a bare `exact` / `exact 9/10` /
-  `estimated`. **`exact` appeared nowhere else in the feature** — the button
-  says Solve, the header tooltip says estimate — so the one word that told you
-  the column's state shared no vocabulary with the control that changes it. It
-  now reads `solved` / `9/10 solved` / `estimated`. And it carries its own
-  native `title` in every state, which is the half that was missing: a bare
-  adjective under a header does not say what it is about, and this one is
-  about a *subset* of its column, since BOT's own Proj is a real MILP optimum
-  in every state and the marker never covered it. The estimated state's
-  tooltip names Solve Standings, because knowing the figures are guesses is no
-  use without knowing what to press.
-
-  **The label stays one word, and that is measured rather than taste.**
-  `opponents estimated` was drafted first, on the reasoning that `opponents`
-  and `estimated` are both 9 characters so the panel could not get wider. That
-  reasoning was wrong twice. DaisyUI sets
-  `.table :where(thead,tfoot){white-space:nowrap}`, so a header cell's
-  min-content is its **whole string**, not its longest word — the
-  longest-word rule holds for the body, where cells wrap, and `league_state.html`
-  had stated it for the table as a whole. Measured 2026-09-10 by
-  `tests/measure_layout.py`, three variants in one run: **768px** with the
-  marker hidden, **776px** with it, **829px** with the two-word label. A second
-  word cost **53px** of the widest table in the app — nearly seven times the
-  marker itself — for something the tooltip says better.
-
-### Investigated
 
 - **`league_state.html`'s min-content note was right about the conclusion and
   wrong about the reason**, corrected in place. "Only shorter headers can
@@ -1060,8 +1043,6 @@ than defects, and the answers are the deliverable; two were real.
   global, so running pytest with `FCHL_PLAYERS_CSV` exported fails it — correct,
   and loud.
 
-### Added
-
 - **NHL teams joined into the converted legacy pool.** The legacy schema has no
   `NHL TEAM` column, so every player was pricing at `DEFAULT_TEAM_PROBABILITY` —
   one of the price model's ten features flat across the whole pool, and a blank
@@ -1112,72 +1093,6 @@ than defects, and the answers are the deliverable; two were real.
   nothing to do with what it checks.
 
 ## [2026-08-21]
-
-### Fixed
-
-- **A failed `.corrupt` rename could still destroy the good backup, and could
-  make the app go quiet about having lost the draft.** `lifespan` renames an
-  unreadable `auction_state.json` to `.corrupt` precisely so `_save_state`'s
-  `path → .backup` rotation cannot carry it over the last good copy. The filed
-  entry knew that rename could fail and be logged-and-ignored; reading the branch
-  there were **three** defects, and the two nobody had filed were worse than the
-  one that was.
-
-  **(a)** `_save_state` rotated unconditionally, so one save after a failed
-  rename put the unreadable file on top of the backup — the exact disaster
-  `tests/test_crash_recovery.py`'s docstring opens with, reachable by a different
-  route. There is now a `_untrusted_current_file` flag: set when the rename
-  fails, it skips the rotation, and it clears after the first successful save
-  because from then on the current file is one we wrote. **One-shot on purpose** —
-  a permanent skip would freeze `.backup` at the recovered state and stop it
-  following the draft, which is why there is a test for the guard *lifting* as
-  well as for it holding.
-
-  **(b)** The loud "this is a NEW auction" banner was gated on
-  `os.path.exists(saved_path + ".corrupt")` — an artifact of the app's own rename
-  standing in for the question it actually meant, "was there a draft here". When
-  the rename failed there was no `.corrupt`, so a boot that had just lost 150
-  picks came up looking like a normal fresh start. That is the *silence* the
-  2026-08-07 work exists to end, reintroduced one branch down and undetected for
-  two weeks. Both branches now read a `had_saved_file` local captured **before**
-  the rename, and the message only names `.corrupt` when the rename actually
-  produced one — pointing an operator at a salvage file that was never written is
-  its own failure.
-
-  **(c)** The same gate ran the other way too: nothing ever deletes `.corrupt`
-  (`/reset` included), so one left over from an earlier incident made that banner
-  claim a draft could not be read when there had never been one. The app's
-  loudest notice asserting something false.
-
-  A failed rename now also warns on screen in its own right — the backup is safe
-  in software, but a directory that will not accept a rename probably will not
-  accept a save either, and that is worth knowing before another twenty picks go
-  in against it. Six new tests in
-  `TestAFailedSetAsideDoesNotCostTheBackup` / `TestAStaleCorruptFileDoesNotInventAnAlarm`,
-  driven by a fixture that fails `os.replace` **only** for a `.corrupt`
-  destination: a read-only `STATE_DIR` is the realistic cause but the wrong
-  instrument, because it breaks the `.tmp` write too and the test could then never
-  observe whether the rotation would have eaten the backup — which is the entire
-  question. All seven mutants killed, each by the test that claims it.
-
-  **A seventh test was written and deleted.** "A good state file beside a stale
-  `.corrupt` is quiet" read as coverage and could not fail: a state file that
-  loads never enters the `auction_state is None` block, so the branch is
-  unreachable and the assertion held against the pre-fix code too. Found by
-  mutation, not by reading.
-
-- **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:314 (_warn_at_startup)` concatenated into one string, and
-  its own backlog entry said the fix was worth doing *"when a third warning source
-  is added, not before"*. (a) above adds one, and three are now simultaneously
-  true: the current file will not parse, setting it aside fails, and the backup
-  parses but a backfill raises. Run together in one strip the second and third
-  read as continuations of the first rather than as separate things that went
-  wrong. `_startup_warnings` is a `list[str]`; `base.html` renders one message as
-  a sentence and two or more as a `<ul>` — a single bulleted item reads as a list
-  with entries missing, which is why the branch exists rather than always
-  bulleting. `#data-warning` is untouched and stays a separate banner with its own
-  lifecycle.
 
 ### Changed
 
@@ -1249,6 +1164,80 @@ than defects, and the answers are the deliverable; two were real.
   reasoning, so the two were documenting each other while duplicating each other.
   Verified by digesting all six scenarios' keepers, minors, acquired, penalties,
   done flags and pool before and after: **byte-identical**, all six.
+
+- **`tests/helpers.squeeze` split in two.** The by-code form reaches into
+  `main.auction_state`, which is useless to an instrument that deliberately never
+  imports `main`, so the inversion moved to `set_headroom(team, headroom)` and
+  `squeeze` became the wrapper. No behaviour change. The docstring records why
+  `scenarios._squeeze` is not a fourth copy of the same trick: it inverts for
+  `physical_max_bid`, which adds the min-salary reserve back when spots are open,
+  so the two deliberately land on different numbers.
+
+### Fixed
+
+- **A failed `.corrupt` rename could still destroy the good backup, and could
+  make the app go quiet about having lost the draft.** `lifespan` renames an
+  unreadable `auction_state.json` to `.corrupt` precisely so `_save_state`'s
+  `path → .backup` rotation cannot carry it over the last good copy. The filed
+  entry knew that rename could fail and be logged-and-ignored; reading the branch
+  there were **three** defects, and the two nobody had filed were worse than the
+  one that was.
+
+  **(a)** `_save_state` rotated unconditionally, so one save after a failed
+  rename put the unreadable file on top of the backup — the exact disaster
+  `tests/test_crash_recovery.py`'s docstring opens with, reachable by a different
+  route. There is now a `_untrusted_current_file` flag: set when the rename
+  fails, it skips the rotation, and it clears after the first successful save
+  because from then on the current file is one we wrote. **One-shot on purpose** —
+  a permanent skip would freeze `.backup` at the recovered state and stop it
+  following the draft, which is why there is a test for the guard *lifting* as
+  well as for it holding.
+
+  **(b)** The loud "this is a NEW auction" banner was gated on
+  `os.path.exists(saved_path + ".corrupt")` — an artifact of the app's own rename
+  standing in for the question it actually meant, "was there a draft here". When
+  the rename failed there was no `.corrupt`, so a boot that had just lost 150
+  picks came up looking like a normal fresh start. That is the *silence* the
+  2026-08-07 work exists to end, reintroduced one branch down and undetected for
+  two weeks. Both branches now read a `had_saved_file` local captured **before**
+  the rename, and the message only names `.corrupt` when the rename actually
+  produced one — pointing an operator at a salvage file that was never written is
+  its own failure.
+
+  **(c)** The same gate ran the other way too: nothing ever deletes `.corrupt`
+  (`/reset` included), so one left over from an earlier incident made that banner
+  claim a draft could not be read when there had never been one. The app's
+  loudest notice asserting something false.
+
+  A failed rename now also warns on screen in its own right — the backup is safe
+  in software, but a directory that will not accept a rename probably will not
+  accept a save either, and that is worth knowing before another twenty picks go
+  in against it. Six new tests in
+  `TestAFailedSetAsideDoesNotCostTheBackup` / `TestAStaleCorruptFileDoesNotInventAnAlarm`,
+  driven by a fixture that fails `os.replace` **only** for a `.corrupt`
+  destination: a read-only `STATE_DIR` is the realistic cause but the wrong
+  instrument, because it breaks the `.tmp` write too and the test could then never
+  observe whether the rotation would have eaten the backup — which is the entire
+  question. All seven mutants killed, each by the test that claims it.
+
+  **A seventh test was written and deleted.** "A good state file beside a stale
+  `.corrupt` is quiet" read as coverage and could not fail: a state file that
+  loads never enters the `auction_state is None` block, so the branch is
+  unreachable and the assertion held against the pre-fix code too. Found by
+  mutation, not by reading.
+
+- **The startup banner is a list, because this change made a third message
+  reachable.** `main.py:314 (_warn_at_startup)` concatenated into one string, and
+  its own backlog entry said the fix was worth doing *"when a third warning source
+  is added, not before"*. (a) above adds one, and three are now simultaneously
+  true: the current file will not parse, setting it aside fails, and the backup
+  parses but a backfill raises. Run together in one strip the second and third
+  read as continuations of the first rather than as separate things that went
+  wrong. `_startup_warnings` is a `list[str]`; `base.html` renders one message as
+  a sentence and two or more as a `<ul>` — a single bulleted item reads as a list
+  with entries missing, which is why the branch exists rather than always
+  bulleting. `#data-warning` is untouched and stays a separate banner with its own
+  lifecycle.
 
 ### Investigated
 
@@ -1370,16 +1359,6 @@ than defects, and the answers are the deliverable; two were real.
   `stop_status` and verdict. A second comparison over those five would have read
   as extra rigour while proving nothing new.
 
-### Changed
-
-- **`tests/helpers.squeeze` split in two.** The by-code form reaches into
-  `main.auction_state`, which is useless to an instrument that deliberately never
-  imports `main`, so the inversion moved to `set_headroom(team, headroom)` and
-  `squeeze` became the wrapper. No behaviour change. The docstring records why
-  `scenarios._squeeze` is not a fourth copy of the same trick: it inverts for
-  `physical_max_bid`, which adds the min-salary reserve back when spots are open,
-  so the two deliberately land on different numbers.
-
 ## [2026-08-20]
 
 Adversarial review of the backlog-clearing batch below (`b01f303..6d5b4f0`),
@@ -1392,6 +1371,130 @@ Then one more pass, on a theme the day kept turning up: a **guard that reads as
 coverage and is not**. That is the first two entries below — and the second one
 started by measuring whether the test it was asked for could fail at all, which
 turned out to be the interesting part.
+
+### Added
+
+- **Tests for the two `max_workers=0` guards**, which nothing reached.
+  `ThreadPoolExecutor(max_workers=0)` raises `ValueError`, so each scan's
+  `if not <work>: return {}` is load-bearing rather than tidy: without it,
+  `/solve-standings` 500s in a league where **every** opponent is done — a legal
+  end-of-draft state the CBA allows and that CLAUDE.md records happening to 3+
+  teams every draft — and `/buyout-indicators` 500s on a BOT with no group 2/3
+  contracts. Existing coverage marked at most one team done. Mutation-checked by
+  deleting each guard in turn, one site each: both mutants raise `max_workers
+  must be greater than 0` at the `ThreadPoolExecutor` line its own test drives.
+
+  The standings test asserts `#proj-basis` reads exactly **`exact`**, not
+  `estimated`, and a first draft had that backwards. With every opponent done
+  nothing on screen is an estimate — their figures are finals and BOT's is its
+  own optimum — which is why `standings_basis.html` branches on the count of
+  *estimates* rather than of exact figures. The code was right and the assertion
+  was wrong; recorded because reasoning from "the dict is empty" to "the marker
+  says estimated" is the mistake, and it was made here.
+
+### Changed
+
+- **The bid-panel naming rule scans `<select>` and `<textarea>` too**, for the
+  same reason the trade-form test it models itself on does: the control added
+  later is the one a narrower scan waves through. Both branches carry zero
+  selects today, so one added tomorrow sailed through a test whose docstring
+  claims to state the general rule. Pinned by adding an unnamed `<select>` to the
+  panel and watching it redden.
+- **And each arm of that rule now guards itself.** `assert suspects` fired only
+  when **both** came back empty — measured, the pre-auction branch is 2 fields +
+  2 glyph buttons and the live one 2 + 3, so losing the whole field arm to an
+  attribute-style change left the glyph buttons holding the assertion up while
+  the input coverage silently vanished. Separate floors, separate messages naming
+  which scan rotted; checked by breaking each regex in turn and reading the
+  actual assertion rather than the traceback's source listing, which quotes both.
+- **`_undoable` is annotated `-> Iterator[None]`** — CLAUDE.md asks for hints on
+  signatures, 27 of `main.py`'s 30 private defs comply, and a `@contextmanager`
+  generator is where the annotation is least guessable from the body. Its
+  docstring now also states the contract it always had: `ValueError` and nothing
+  wider, so another exception mid-mutation neither rolls back nor commits —
+  unchanged from the four hand-rolled sites, and a deliberate limit rather than
+  an oversight.
+- **Two comments that had stopped matching their own code.** The guard's block
+  still opened *"Two ways … and both count"* above a one-element set, and the
+  same edit had left a 108-char docstring line.
+
+- **The RFA and UFA nomination cards are one `pick_card` macro.** 43 lines
+  duplicated for 43 lines, beside the `pick_prices` macro that had already
+  collapsed their price line — filed 2026-08-18 and deferred out of that commit.
+  Normalised, the two blocks differ in exactly two places: the `<h3>` text and
+  the RFA-only prior-team line. Nothing else, to the character, including the
+  position/logo line the backlog entry warned might diverge.
+- **`show_prior` is semantic and defaults off.** Only an RFA has a prior team
+  holding rights over him, so the line is absent from the UFA card because there
+  is nothing to print, not because it was forgotten. A caller that wants it must
+  ask.
+- **Verified by byte-diffing the rendered output**, not by the suite alone:
+  `GET /` is byte-identical, and `GET /nominate` differs only by two runs of
+  insignificant whitespace inside the RFA card's own text node, collapsed by the
+  `{%- if %}` that lets one macro serve both cards.
+- **The refactor's mutation check found a real hole and it is now closed.**
+  Deleting the whole `show_prior` block passed **all 892 tests** — nothing read
+  the prior-team line. The heading parameter was already covered (by
+  `TestMidBidClutterCanBeDismissed`, which finds a card by its heading text),
+  this half was not. Two tests added. The second one exists because the obvious
+  one is not enough: `players.csv` fills PRIOR FCHL TEAM for RFA1/RFA2 rows and
+  nothing else — 22 of 2158 — so `{% if show_prior and ... %}`'s data guard
+  masks the flag, and flipping the default to `True` or passing
+  `show_prior=True` on the UFA call *both* survived the whole suite as
+  equivalent mutants. Stamping a prior team onto the pool's UFAs kills them.
+  That matters because the CSV is replaced before every draft, so an export that
+  starts filling the column for group 3 is a live possibility and the answer is
+  still no. All four mutants now die, one site per patch.
+- **The four endpoints that can reject a request share one `_undoable`.**
+  `BACKLOG.md`, 2026-08-07: they each repeated `capture_snapshot → try → except
+  ValueError → _toast → commit_snapshot`. Attempted, judged, and landed — the
+  entry asked for a shared helper and the honest answer turned out to be yes, but
+  not for the reason it gave. It is **not** a line saving: `main.py` grows 13
+  lines, because the helper's docstring carries the protocol that four
+  paraphrases of it used to carry between them (and one of the four,
+  `move_to_roster`, had quietly stopped carrying it at all). What it buys is that
+  `capture_snapshot`, `commit_snapshot` and `rollback_to` now have exactly **one**
+  caller each, inside `_undoable`, so the pairing cannot come apart at an
+  endpoint — and `rollback=True/False` states the per-site decision as an
+  argument instead of as the presence or absence of a line. Each site keeps its
+  own one-line reason for the flag; only the invariant moved.
+- **That made `TestEveryMutatingPostTakesASnapshot` stronger, not weaker.**
+  `commit_snapshot` left `SNAPSHOTTING_CALLS`, because an endpoint that calls
+  `capture_snapshot` and forgets to commit used to satisfy the guard — capturing
+  without committing snapshots nothing. `_undoable` is a bare-name call rather
+  than `auction_state.method()`, so the ast walk had to learn a second shape;
+  getting that wrong is not a subtle false negative, it reports all four
+  endpoints as taking no snapshot at all, which is how this was noticed.
+  Mutation-checked, one site per patch: dropping `/buyout`'s `with` block reddens
+  the guard *and* an undo test; flipping the trade to `rollback=False` reddens
+  `test_a_failed_trade_still_rolls_back`; committing on the failure path inside
+  `_undoable` reddens all four `TestARejectedEditCostsNoUndoDepth` cases.
+
+Adversarial review of yesterday's parallel-scan batch. Both scans were
+re-measured on both states afterwards, against the pre-review commit run in a
+worktree side by side rather than against the published numbers: 398/431/179/561ms
+against 436/460/182/573ms, so the fixes are neutral to slightly better and
+yesterday's 384/454/182/569ms stand within noise. All 11 `proj-<CODE>` figures
+and both dot sets (15/9 fresh, 23/15 endgame) are **identical** — the error
+handling below changed no answer, which is what it should do on a run where
+nothing failed.
+
+- **`BUYOUT_PENALTY_RATE` hoisted to `main.py`'s top-level config import.** The
+  function-local `from config import` ran once per scan when it sat at the top of
+  a serial loop; after the fan-out it ran once per **player** — up to 23 times,
+  from 8 threads, each taking the import lock. `config.py` imports nothing, so
+  there was never a cycle to avoid.
+
+- **The buyout scan's thread-safety comment now names the mechanism it rests
+  on.** It said the candidate list is materialised on the caller's thread so "no
+  worker reads `team.all_players` while another is deepcopying". True but too
+  broad to protect anything: the actual hazard is that `roster_players` **lazily
+  assigns** `_roster_cache`, a plain dataclass field, so computing that list
+  inside a worker would have one thread writing BOT's `__dict__` while another
+  `deepcopy`s it. It is benign today only by luck — the field already exists, so
+  the dict cannot resize and `deepcopy` cannot raise *changed size during
+  iteration*; the clone would just carry a torn cache. Stated the old way, moving
+  that comprehension into the pool looks free.
 
 ### Fixed
 
@@ -1509,48 +1612,6 @@ turned out to be the interesting part.
   previous commit: the whole `--selftest` run across four widths is
   byte-identical, 10300 bytes either way.
 
-### Changed
-
-- **The bid-panel naming rule scans `<select>` and `<textarea>` too**, for the
-  same reason the trade-form test it models itself on does: the control added
-  later is the one a narrower scan waves through. Both branches carry zero
-  selects today, so one added tomorrow sailed through a test whose docstring
-  claims to state the general rule. Pinned by adding an unnamed `<select>` to the
-  panel and watching it redden.
-- **And each arm of that rule now guards itself.** `assert suspects` fired only
-  when **both** came back empty — measured, the pre-auction branch is 2 fields +
-  2 glyph buttons and the live one 2 + 3, so losing the whole field arm to an
-  attribute-style change left the glyph buttons holding the assertion up while
-  the input coverage silently vanished. Separate floors, separate messages naming
-  which scan rotted; checked by breaking each regex in turn and reading the
-  actual assertion rather than the traceback's source listing, which quotes both.
-- **`_undoable` is annotated `-> Iterator[None]`** — CLAUDE.md asks for hints on
-  signatures, 27 of `main.py`'s 30 private defs comply, and a `@contextmanager`
-  generator is where the annotation is least guessable from the body. Its
-  docstring now also states the contract it always had: `ValueError` and nothing
-  wider, so another exception mid-mutation neither rolls back nor commits —
-  unchanged from the four hand-rolled sites, and a deliberate limit rather than
-  an oversight.
-- **Two comments that had stopped matching their own code.** The guard's block
-  still opened *"Two ways … and both count"* above a one-element set, and the
-  same edit had left a 108-char docstring line.
-
-### Investigated
-
-- **One import line shifted every `main.py` reference in both docs**, and three
-  of the six were pointing at a plain `def`, so they landed one line above their
-  own function and `test_backlog_refs` failed — as designed. All six re-anchored
-  in the same commit, including the three the guard did **not** catch:
-  `_symbol_ranges` starts a span at the first **decorator**, so a reference to an
-  `@app.post` line stays in range while being exactly as stale. Worth knowing
-  before trusting a green run as proof that no reference drifted.
-
-Clearing the backlog's cheap tail — items that are small, self-contained and
-not blocked on draft-day experience, so that what is left in `BACKLOG.md` is the
-work that genuinely needs a draft to settle.
-
-### Fixed
-
 - **Six controls in the bid panel had no usable accessible name.** `BACKLOG.md`
   filed this on 2026-08-15 as *"the bid panel's price input has no accessible
   name … a fix here should name both"* — two attributes on one form. The file has
@@ -1610,71 +1671,6 @@ work that genuinely needs a draft to settle.
   log. The selector is unchanged and now carries that note, so the next reader
   does not repeat the hunt.
 
-### Changed
-
-- **The RFA and UFA nomination cards are one `pick_card` macro.** 43 lines
-  duplicated for 43 lines, beside the `pick_prices` macro that had already
-  collapsed their price line — filed 2026-08-18 and deferred out of that commit.
-  Normalised, the two blocks differ in exactly two places: the `<h3>` text and
-  the RFA-only prior-team line. Nothing else, to the character, including the
-  position/logo line the backlog entry warned might diverge.
-- **`show_prior` is semantic and defaults off.** Only an RFA has a prior team
-  holding rights over him, so the line is absent from the UFA card because there
-  is nothing to print, not because it was forgotten. A caller that wants it must
-  ask.
-- **Verified by byte-diffing the rendered output**, not by the suite alone:
-  `GET /` is byte-identical, and `GET /nominate` differs only by two runs of
-  insignificant whitespace inside the RFA card's own text node, collapsed by the
-  `{%- if %}` that lets one macro serve both cards.
-- **The refactor's mutation check found a real hole and it is now closed.**
-  Deleting the whole `show_prior` block passed **all 892 tests** — nothing read
-  the prior-team line. The heading parameter was already covered (by
-  `TestMidBidClutterCanBeDismissed`, which finds a card by its heading text),
-  this half was not. Two tests added. The second one exists because the obvious
-  one is not enough: `players.csv` fills PRIOR FCHL TEAM for RFA1/RFA2 rows and
-  nothing else — 22 of 2158 — so `{% if show_prior and ... %}`'s data guard
-  masks the flag, and flipping the default to `True` or passing
-  `show_prior=True` on the UFA call *both* survived the whole suite as
-  equivalent mutants. Stamping a prior team onto the pool's UFAs kills them.
-  That matters because the CSV is replaced before every draft, so an export that
-  starts filling the column for group 3 is a live possibility and the answer is
-  still no. All four mutants now die, one site per patch.
-- **The four endpoints that can reject a request share one `_undoable`.**
-  `BACKLOG.md`, 2026-08-07: they each repeated `capture_snapshot → try → except
-  ValueError → _toast → commit_snapshot`. Attempted, judged, and landed — the
-  entry asked for a shared helper and the honest answer turned out to be yes, but
-  not for the reason it gave. It is **not** a line saving: `main.py` grows 13
-  lines, because the helper's docstring carries the protocol that four
-  paraphrases of it used to carry between them (and one of the four,
-  `move_to_roster`, had quietly stopped carrying it at all). What it buys is that
-  `capture_snapshot`, `commit_snapshot` and `rollback_to` now have exactly **one**
-  caller each, inside `_undoable`, so the pairing cannot come apart at an
-  endpoint — and `rollback=True/False` states the per-site decision as an
-  argument instead of as the presence or absence of a line. Each site keeps its
-  own one-line reason for the flag; only the invariant moved.
-- **That made `TestEveryMutatingPostTakesASnapshot` stronger, not weaker.**
-  `commit_snapshot` left `SNAPSHOTTING_CALLS`, because an endpoint that calls
-  `capture_snapshot` and forgets to commit used to satisfy the guard — capturing
-  without committing snapshots nothing. `_undoable` is a bare-name call rather
-  than `auction_state.method()`, so the ast walk had to learn a second shape;
-  getting that wrong is not a subtle false negative, it reports all four
-  endpoints as taking no snapshot at all, which is how this was noticed.
-  Mutation-checked, one site per patch: dropping `/buyout`'s `with` block reddens
-  the guard *and* an undo test; flipping the trade to `rollback=False` reddens
-  `test_a_failed_trade_still_rolls_back`; committing on the failure path inside
-  `_undoable` reddens all four `TestARejectedEditCostsNoUndoDepth` cases.
-
-Adversarial review of yesterday's parallel-scan batch. Both scans were
-re-measured on both states afterwards, against the pre-review commit run in a
-worktree side by side rather than against the published numbers: 398/431/179/561ms
-against 436/460/182/573ms, so the fixes are neutral to slightly better and
-yesterday's 384/454/182/569ms stand within noise. All 11 `proj-<CODE>` figures
-and both dot sets (15/9 fresh, 23/15 endgame) are **identical** — the error
-handling below changed no answer, which is what it should do on a run where
-nothing failed.
-
-### Fixed
-
 - **The standings worker's error net did not cover its own body.** `try` wrapped
   only the `solve_optimal_roster` call; `sol.status` and the `int()` conversion
   sat outside it, under a docstring that claimed to cover them. The asymmetry
@@ -1701,46 +1697,19 @@ nothing failed.
   exception type, and still answers `"keep"` — the conservative verdict is right,
   the silence was not.
 
-### Changed
-
-- **`BUYOUT_PENALTY_RATE` hoisted to `main.py`'s top-level config import.** The
-  function-local `from config import` ran once per scan when it sat at the top of
-  a serial loop; after the fan-out it ran once per **player** — up to 23 times,
-  from 8 threads, each taking the import lock. `config.py` imports nothing, so
-  there was never a cycle to avoid.
-
-- **The buyout scan's thread-safety comment now names the mechanism it rests
-  on.** It said the candidate list is materialised on the caller's thread so "no
-  worker reads `team.all_players` while another is deepcopying". True but too
-  broad to protect anything: the actual hazard is that `roster_players` **lazily
-  assigns** `_roster_cache`, a plain dataclass field, so computing that list
-  inside a worker would have one thread writing BOT's `__dict__` while another
-  `deepcopy`s it. It is benign today only by luck — the field already exists, so
-  the dict cannot resize and `deepcopy` cannot raise *changed size during
-  iteration*; the clone would just carry a torn cache. Stated the old way, moving
-  that comprehension into the pool looks free.
-
-### Added
-
-- **Tests for the two `max_workers=0` guards**, which nothing reached.
-  `ThreadPoolExecutor(max_workers=0)` raises `ValueError`, so each scan's
-  `if not <work>: return {}` is load-bearing rather than tidy: without it,
-  `/solve-standings` 500s in a league where **every** opponent is done — a legal
-  end-of-draft state the CBA allows and that CLAUDE.md records happening to 3+
-  teams every draft — and `/buyout-indicators` 500s on a BOT with no group 2/3
-  contracts. Existing coverage marked at most one team done. Mutation-checked by
-  deleting each guard in turn, one site each: both mutants raise `max_workers
-  must be greater than 0` at the `ThreadPoolExecutor` line its own test drives.
-
-  The standings test asserts `#proj-basis` reads exactly **`exact`**, not
-  `estimated`, and a first draft had that backwards. With every opponent done
-  nothing on screen is an estimate — their figures are finals and BOT's is its
-  own optimum — which is why `standings_basis.html` branches on the count of
-  *estimates* rather than of exact figures. The code was right and the assertion
-  was wrong; recorded because reasoning from "the dict is empty" to "the marker
-  says estimated" is the mistake, and it was made here.
-
 ### Investigated
+
+- **One import line shifted every `main.py` reference in both docs**, and three
+  of the six were pointing at a plain `def`, so they landed one line above their
+  own function and `test_backlog_refs` failed — as designed. All six re-anchored
+  in the same commit, including the three the guard did **not** catch:
+  `_symbol_ranges` starts a span at the first **decorator**, so a reference to an
+  `@app.post` line stays in range while being exactly as stale. Worth knowing
+  before trusting a green run as proof that no reference drifted.
+
+Clearing the backlog's cheap tail — items that are small, self-contained and
+not blocked on draft-day experience, so that what is left in `BACKLOG.md` is the
+work that genuinely needs a draft to settle.
 
 - **Pool pruning — the cheaper-solve lever `BACKLOG.md` has named since
   2026-08-06 — is measured unsafe, and the way it fails is silent.** A cold
@@ -2133,18 +2102,7 @@ about the change being *undefended* rather than wrong.
 
 - **`/trade-evaluate` measured at last: 179ms** for one-for-one and 171ms for three-for-one, inside the 500ms interaction budget. It was the one endpoint the closed interaction-budget entry left unmeasured, for the stated reason that it needs a built-up trade form — which is now three lines of `form.getlist` payload. No change; the figure is the point.
 
-
 ## [2026-08-19]
-
-### Fixed
-
-- **The grill on the two new scenarios: a helper that could miss quietly, a test counting the wrong definition, and published numbers that did not reproduce.** The code was correct and both suites were green — every finding here is about a claim being weaker or wronger than it read.
-
-  **`_squeeze` returned success while missing its target.** `max(0.0, SALARY_CAP - salary - wanted)` yields 0 when the ask is impossible — penalties only take money AWAY, so no dead cap can *raise* a team's max — and the helper then left the team parked somewhere else while reporting nothing. That is the failure `_fill`'s own docstring argues against ("a scenario that quietly builds something other than what it says produces test failures three assertions from the cause"), in a helper whose entire contract is one figure. It now raises, naming the team, the target and the shortfall, and restores the penalties it found first so a failed build leaves no half-squeezed team behind. Measured: the branch is reached by neither shipped scenario (11 squeezes each, all exact), so this is a guard for the next one.
-
-  **The endgame's capped-row count asserted a definition the panel does not use.** `test_a_substantial_share_of_the_pool_is_capped` counted a raw `live < model - 1e-9` while the new late-draft test counted `market.is_capped`, which quantizes to the one decimal both panels print — two definitions of one rule in one file. They disagree by 3×: **83 raw against 28 quantized** of 677 on that state, because 55 of the 83 differ by less than a cent and render as two identical figures. The old floor of 40 sat *between* the two numbers, so it passed only by counting rows that show nothing, while its stated rationale is "the tooltip-left renders per capped row". Same one-definition problem `2176a56` fixed in production code the day before, back test-side.
-
-  **`_late_draft_shape` divided by zero on a single team.** `last = len(codes) - 1` is the spread's divisor. Unreachable from both callers (ten and eight) but the helper exists to be reused; one code now lands on the low end.
 
 ### Changed
 
@@ -2158,10 +2116,19 @@ about the change being *undefended* rather than wrong.
 
   The first attempt at the done-team mutation matched **two** sites and was not applied — the fifth anchor miss in this repo, caught by asserting exactly one replacement rather than by noticing a suspiciously green run.
 
+### Fixed
+
+- **The grill on the two new scenarios: a helper that could miss quietly, a test counting the wrong definition, and published numbers that did not reproduce.** The code was correct and both suites were green — every finding here is about a claim being weaker or wronger than it read.
+
+  **`_squeeze` returned success while missing its target.** `max(0.0, SALARY_CAP - salary - wanted)` yields 0 when the ask is impossible — penalties only take money AWAY, so no dead cap can *raise* a team's max — and the helper then left the team parked somewhere else while reporting nothing. That is the failure `_fill`'s own docstring argues against ("a scenario that quietly builds something other than what it says produces test failures three assertions from the cause"), in a helper whose entire contract is one figure. It now raises, naming the team, the target and the shortfall, and restores the penalties it found first so a failed build leaves no half-squeezed team behind. Measured: the branch is reached by neither shipped scenario (11 squeezes each, all exact), so this is a guard for the next one.
+
+  **The endgame's capped-row count asserted a definition the panel does not use.** `test_a_substantial_share_of_the_pool_is_capped` counted a raw `live < model - 1e-9` while the new late-draft test counted `market.is_capped`, which quantizes to the one decimal both panels print — two definitions of one rule in one file. They disagree by 3×: **83 raw against 28 quantized** of 677 on that state, because 55 of the 83 differ by less than a cent and render as two identical figures. The old floor of 40 sat *between* the two numbers, so it passed only by counting rows that show nothing, while its stated rationale is "the tooltip-left renders per capped row". Same one-definition problem `2176a56` fixed in production code the day before, back test-side.
+
+  **`_late_draft_shape` divided by zero on a single team.** `last = len(codes) - 1` is the spread's divisor. Unreachable from both callers (ten and eight) but the helper exists to be reused; one code now lands on the low end.
+
 ### Investigated
 
 - **The two new picker labels widen the navbar `<select>` by 67px and overflow nothing.** They are the longest options in the list and DaisyUI's `.select` carries no width constraint, so it is content-sized. Measured in Chrome: **402px → 469px**, with `scrollWidth == clientWidth` on both the navbar and the document at 1024 / 1280 / 1600, and the select's right edge unchanged at every width (940 / 1196 / 1516) — it grew leftward into free space. No change made.
-
 
 ## [2026-08-18e]
 
@@ -2187,8 +2154,15 @@ about the change being *undefended* rather than wrong.
 
   Six mutations, all killed, each in the test that names its claim: dropping `_squeeze` from the shape (ceiling back to `MAX_SALARY`, nothing capped — 7 tests), one flat squeeze target instead of the stagger (the distinct-maxes guard alone), the full team left one short of 24, the two squeeze targets swapped (`second_bidder` becomes the rival), the reserve added at zero spots, and the rich teams shaped last.
 
-
 ## [2026-08-18d]
+
+### Changed
+
+- **One definition of the capped rule: `market.is_capped`.** `main.py`'s `bid_limits` row and `NominationPick.capped` each carried the same quantized comparison, written in opposite directions — two copies of one rule, the second added the same day. That is the trap this file already records twice (the stale drain filter; `compute_marginal_value` carrying its own drifting copy of `physical_max_bid`'s formula). Sited beside `compute_market_price` because it is the observation that that function's `min()` bit, and `optimizer.py` already imported from `market.py`, so no new cycle. The two **test-side** copies stay hand-written on purpose, and the docstring says so — they are the independent equivalence, and importing the helper there would turn both into tautologies.
+
+- **The pool key and `Player.name` are now pinned as one identity**, in two tests: the live-data invariant (`test_data_loader.py`) and across a JSON round trip (`test_state.py`). `_nomination_pick` looks both of the panel's figures up by `player.name` while every branch that calls it iterates the pool by key — before this batch each branch used the key it was holding, so the two could not disagree. The invariant holds everywhere today and is load-bearing well beyond this change (`/assign` pops by key, both price dicts are keyed on it, `_dom_id` hashes it), but nothing tested it, and `to_json`/`from_json` store the key verbatim, so a mismatch would round-trip faithfully rather than heal. Both proven able to fail by keying a pool one character off — in the loader for the first, in `from_json` for the second.
+
+- `.claude/rules/pricing-pipeline.md` now records the drain tie-break's **display** consequence, which runs opposite to the intuition: breaking ties toward least surplus makes the UFA half systematically pick the candidate whose two figures *agree*, so a large gap on a UFA drain recommendation means the ranking is not doing what the rule says.
 
 ### Fixed
 
@@ -2199,15 +2173,6 @@ about the change being *undefended* rather than wrong.
   **The hover sentence could quote one figure twice.** The test asserted only that `"the market ceiling caps it at"` appeared *somewhere* in the response, so a title reading `Model says $2.8M … caps it at $2.8M` — self-contradicting, on screen — passed. It now has to name both figures, each derived from the price dicts for that card's player. The regex is anchored to the price line's own opening tag: the card carries an earlier `title` on the NHL logo and a bare search picked that one up ("EDM").
 
   **`TestPriceColumn` never read the rendered `capped` flag.** Its `_capped` helper *recomputes* the rule from the two price dicts — deliberately, that is what makes its assertions an equivalence rather than a tautology — but the consequence is that every assertion in the class holds identically against a flag that is wrong for every row. Measured: a `capped` predicate returning False left the class green with the Price column's marker gone. It now also reads the markup in the squeezed state, one capped row and one uncapped. Pre-existing, and surfaced only because the rule became shared (below). The row reader matches the **unescaped** row rather than escaping the name: Jinja writes an apostrophe as `&#39;` and `html.escape` gives `&#x27;`, so escaping matched **zero** rows for `Ryan O'Reilly` and `K'Andre Miller`, and which name the test picks depends on the data.
-
-### Changed
-
-- **One definition of the capped rule: `market.is_capped`.** `main.py`'s `bid_limits` row and `NominationPick.capped` each carried the same quantized comparison, written in opposite directions — two copies of one rule, the second added the same day. That is the trap this file already records twice (the stale drain filter; `compute_marginal_value` carrying its own drifting copy of `physical_max_bid`'s formula). Sited beside `compute_market_price` because it is the observation that that function's `min()` bit, and `optimizer.py` already imported from `market.py`, so no new cycle. The two **test-side** copies stay hand-written on purpose, and the docstring says so — they are the independent equivalence, and importing the helper there would turn both into tautologies.
-
-- **The pool key and `Player.name` are now pinned as one identity**, in two tests: the live-data invariant (`test_data_loader.py`) and across a JSON round trip (`test_state.py`). `_nomination_pick` looks both of the panel's figures up by `player.name` while every branch that calls it iterates the pool by key — before this batch each branch used the key it was holding, so the two could not disagree. The invariant holds everywhere today and is load-bearing well beyond this change (`/assign` pops by key, both price dicts are keyed on it, `_dom_id` hashes it), but nothing tested it, and `to_json`/`from_json` store the key verbatim, so a mismatch would round-trip faithfully rather than heal. Both proven able to fail by keying a pool one character off — in the loader for the first, in `from_json` for the second.
-
-- `.claude/rules/pricing-pipeline.md` now records the drain tie-break's **display** consequence, which runs opposite to the intuition: breaking ties toward least surplus makes the UFA half systematically pick the candidate whose two figures *agree*, so a large gap on a UFA drain recommendation means the ranking is not doing what the rule says.
-
 
 ## [2026-08-18c]
 
@@ -2255,8 +2220,17 @@ about the change being *undefended* rather than wrong.
 
 - **One door from the pool onto a roster, and one into the minors.** `PlayerOnRoster.from_pool(player, salary)` now owns the RFA group conversion a sale requires (RFA1 → 2, RFA2 → 3), which lived inline in `/assign` and did not exist in scenario setup at all. That was harmless only while no scenario put a purchase in the minors: `counts_on_cap` reads the group and `MINOR_CAP_GROUPS` is `{"2", "3"}`, so a player left on his pool group sits in the minors costing his team nothing against the cap — and `endgame-last-goalie` stashes 33 of them. Note the knock-on: `_drain` now converts too, so `endgame-ceiling-binds`' purchases carry groups 2 and 3 instead of RFA1 and RFA2. That is a fix, not a regression — `/assign` converts, so no real draft can produce an RFA-grouped roster player — and it makes those purchases buyout-eligible in that scenario, as they would be in a real one. `TeamState.add_minor_player` is the other half, because `add_acquired_player` only routes to the minors when the roster is **full**, so stashing depth on a team with open spots meant reaching through `_invalidate_cache` from outside. Its overflow branch delegates rather than repeating the flags, and both paths are pinned on `is_minor` and `is_bench` **together** — a copy that forgot `is_bench` still satisfies "he is in the minors" and then displaces a starter on recall.
 
-
 ## [2026-08-18]
+
+### Added
+
+- **Tests for the rank badge, which is the reason the scan exists and had none.** Measured: deleting the badge from the macro passed all twelve tests in the class. Three tests now, and the third exists because the second was not enough — a mutant that emitted the badge inline but omitted it from the out-of-band payload passed both of the others, because they re-fetch `GET /` and get a fresh inline render. **A browser does not**: htmx replaces the span with what the response contains, so the badge would vanish from the live DOM until some later full-panel swap restored it. Reading the swap payload is different evidence from reading the page rendered after it, and only one of them is what htmx applies. The first two are invariants over what is rendered (BOT's badge is BOT's position among the figures in the table) rather than expected numbers, so they hold in every state; the endgame one asserts the badge moves **up**, not that it reads `#1`, which would be a `players.csv` fingerprint in the wrong file.
+
+  Also recorded in `BACKLOG.md` rather than fixed: both multi-solve endpoints are `async def` around seconds of synchronous CBC work, so they run on the event loop and every other request queues behind them — including the `/bid-check` that fires while the operator types a price. Pre-existing and file-wide (`/bid-check` is itself `async def` around ~1000ms of cold solving). The fix is deleting a keyword, which is why it is not casual: it moves the handlers onto a threadpool, and the module globals they mutate would then be written off the loop.
+
+### Changed
+
+- **One definition of the Proj figure instead of two.** The id, the number and the rank badge existed inline in `league_state.html` and again in `standings_cells.html`, and htmx matches the out-of-band swap **by id**, so the two had to agree character for character. CLAUDE.md names this hazard for the buyout dots, where the fix shared only the id through the `dom_id` filter and left the markup duplicated across two files. `templates/macros/standings.html` now exports `proj_figure(...)` and both callers use it — the better tool was already in the project (`macros/player.html`, imported by three partials). The existing out-of-band tests are the proof and were not modified.
 
 ### Fixed
 
@@ -2267,17 +2241,6 @@ about the change being *undefended* rather than wrong.
 - **A solver that blew up on one opponent said nothing at all.** `except Exception: continue` dropped the team silently. The marker reveals *that* a cell is still an estimate and can never say which team or why, so nothing was diagnosable. The broad catch stays — one opponent's failure must not cost the other nine, the same stance as `_load_saved_state` — with a `logging.warning` naming the team, the exception type and its message. The path now has a test, which it did not before: the existing unsolvable-opponent test forces a non-Optimal *result*, not an exception.
 
 - **A 1.26s click that looked identical to no click.** Measured: the app styles neither `.htmx-request` nor an `htmx-indicator` anywhere, so Solve Standings (1262ms, 10 solves) and the buyout Scan (~15 solves) gave no feedback at all, and a second click started the whole run again. `hx-disabled-elt="this"` on both buys the visible state and the double-click guard together — confirmed in the vendored bundle rather than assumed (`htmx-1.9.10.min.js`, function `sr`, sets `disabled=""` for the request's duration). Both buttons, stated in the tests as a rule over the pair: one greying while the other sits inert is a worse inconsistency than neither.
-
-### Changed
-
-- **One definition of the Proj figure instead of two.** The id, the number and the rank badge existed inline in `league_state.html` and again in `standings_cells.html`, and htmx matches the out-of-band swap **by id**, so the two had to agree character for character. CLAUDE.md names this hazard for the buyout dots, where the fix shared only the id through the `dom_id` filter and left the markup duplicated across two files. `templates/macros/standings.html` now exports `proj_figure(...)` and both callers use it — the better tool was already in the project (`macros/player.html`, imported by three partials). The existing out-of-band tests are the proof and were not modified.
-
-### Added
-
-- **Tests for the rank badge, which is the reason the scan exists and had none.** Measured: deleting the badge from the macro passed all twelve tests in the class. Three tests now, and the third exists because the second was not enough — a mutant that emitted the badge inline but omitted it from the out-of-band payload passed both of the others, because they re-fetch `GET /` and get a fresh inline render. **A browser does not**: htmx replaces the span with what the response contains, so the badge would vanish from the live DOM until some later full-panel swap restored it. Reading the swap payload is different evidence from reading the page rendered after it, and only one of them is what htmx applies. The first two are invariants over what is rendered (BOT's badge is BOT's position among the figures in the table) rather than expected numbers, so they hold in every state; the endgame one asserts the badge moves **up**, not that it reads `#1`, which would be a `players.csv` fingerprint in the wrong file.
-
-  Also recorded in `BACKLOG.md` rather than fixed: both multi-solve endpoints are `async def` around seconds of synchronous CBC work, so they run on the event loop and every other request queues behind them — including the `/bid-check` that fires while the operator types a price. Pre-existing and file-wide (`/bid-check` is itself `async def` around ~1000ms of cold solving). The fix is deleting a keyword, which is why it is not casual: it moves the handlers onto a threadpool, and the module globals they mutate would then be written off the loop.
-
 
 ## [2026-08-17d]
 
@@ -2304,7 +2267,6 @@ about the change being *undefended* rather than wrong.
 
   Seven tests, eight mutations verified dead — and **the mutation that renames the OOB ids survived the first version of the test written to catch it.** That test collected fragments with `id="(proj-[\w-]+)"`, so renaming them to `projection-<CODE>` made all eleven invisible to the very regex looking for them; it saw only the basis marker, whose target was still fine, and passed against 11 dead swaps. It now collects every id carrying `hx-swap-oob` with no assumption about the name, and counts them, because a fragment that is never emitted resolves vacuously. Two existing tests needed re-anchoring, both because they were working: `TestTooltipsStayInsideTheirPanel` requires each tooltip by a text fragment and the Proj tooltip's "Computed two ways" is gone with the rewrite (re-anchored on "Solve Standings" — the mechanism, not a turn of phrase), and `BACKLOG.md`'s `_context` line reference in `main.py` had to move down 53 lines. (Written first as the literal `path:line` pair, which `tests/test_backlog_refs.py` collects out of this file too — so quoting a stale reference in prose *creates* a live one and fails the suite. The same slip is already recorded under 2026-08-17.)
 
-
 ## [2026-08-17c]
 
 ### Fixed
@@ -2326,7 +2288,6 @@ about the change being *undefended* rather than wrong.
   Four tests over `report()` with `capsys` (`TestTheReportSurvivesWhatPeopleActuallyOpen`), and five mutants verified dead, each at the test that claims it: guard narrowed to `ValueError` → the missing-key test alone; guard deleted → the corrupt and missing-key tests; message no longer naming the file or cause → the same two; the empty-log branch deleted from `report()` → the new empty-log test alone; the `path.exists()` check deleted → the missing-file test. That last mutant is the interesting one — with the new guard in place its failure mode *degrades* from a traceback to a less useful message (`FileNotFoundError` is an `OSError`), which is exactly the kind of quiet regression a guard invites, and the test still catches it.
 
   The empty-log case now has **two** tests that look redundant and are not: `test_an_empty_log_reports_no_picks_rather_than_zeros` fails if `summarize` starts returning zero-filled keys, the new `capsys` one fails if `report` stops branching on them. A refactor can do either without the other, and only one test notices each. Also dropped the `f` prefix from four placeholder-less f-strings (F541).
-
 
 ## [2026-08-17b]
 
@@ -2351,8 +2312,13 @@ about the change being *undefended* rather than wrong.
 
   Unlike `measure_layout.py` and `measure_ceiling.py`, the logic is a pure `summarize()` with **a real pytest test** (`tests/test_measure_spend.py` — 6 tests over `summarize()` with 6 mutations verified; this entry said 5, miscounted, and the file is at 10 after the `report()` guard above). That split is deliberate: `measure_layout.py` could not see a stale selector for two days, and `measure_ceiling.py`'s numbers now appear in four documents unchecked, both because their logic only exists inside a `__main__` nothing runs.
 
-
 ## [2026-08-17]
+
+### Changed
+
+- **Re-anchored the opponent-editable-panel backlog entry**, whose two line references had drifted: the entry moved from line 120 to 152, and the salary-box line it cites in prose moved to 179. The second was **already stale before this change**, pointing 17 lines off, and `tests/test_backlog_refs.py` was green on it the whole time — because for a non-`.py` path that test only asserts the file exists and the line is in range (`line <= total`), then returns. There are no symbols to anchor a template to, so **every** template reference in `BACKLOG.md` is checked for existence and nothing else; drift inside one is invisible. Filed as a test-infrastructure finding rather than fixed here.
+
+  A first version of this entry blamed the missing `templates/partials/` prefix instead. That was wrong — the bare form is collected and does resolve — and it mattered, because it would have sent the next person to add a prefix and believe the reference was then verified.
 
 ### Fixed
 
@@ -2366,14 +2332,15 @@ about the change being *undefended* rather than wrong.
 
   Three tests, and **the mutation map is not the one the plan predicted** — recorded because the plan's table was wrong and the docstrings were corrected against measurement, not reasoning. `test_the_team_panel_says_why_the_buy_list_is_gone` uniquely kills deleting the `elif`. `test_a_solvable_optimizer_leaves_the_team_panel_quiet` uniquely kills splitting the note out into a separate `if viewed_team.is_my_team` — the obvious "simplification", which stays BOT-only but stops being exclusive with the healthy headline. `test_an_opponents_panel_stays_silent_about_bots_optimizer` uniquely kills both `elif` → `{% else %}` and dropping `is_my_team`; neither is visible while the view is on BOT, which is why it has to `GET /team-view` first.
 
-### Changed
-
-- **Re-anchored the opponent-editable-panel backlog entry**, whose two line references had drifted: the entry moved from line 120 to 152, and the salary-box line it cites in prose moved to 179. The second was **already stale before this change**, pointing 17 lines off, and `tests/test_backlog_refs.py` was green on it the whole time — because for a non-`.py` path that test only asserts the file exists and the line is in range (`line <= total`), then returns. There are no symbols to anchor a template to, so **every** template reference in `BACKLOG.md` is checked for existence and nothing else; drift inside one is invisible. Filed as a test-infrastructure finding rather than fixed here.
-
-  A first version of this entry blamed the missing `templates/partials/` prefix instead. That was wrong — the bare form is collected and does resolve — and it mattered, because it would have sent the next person to add a prefix and believe the reference was then verified.
-
-
 ## [2026-08-16]
+
+### Added
+
+- **`tests/test_market.py::TestWhenTheCeilingLeavesTheCap`** — where the idle ceiling stops being `MAX_SALARY`. It is the second-highest of ten, so it holds at the cap until **all but one** opponent is priced out, not until the league is broke. That threshold is what makes the `min` inert early and nobody had written it down, so a change to `physical_max_bid` or to the second-highest rule would have moved it silently. Two tests: a walk that squeezes the real 11-team league one opponent at a time and pins the whole transition, and the single state it turns on stated alone, so a mutant that shifts the threshold says which end moved.
+
+### Fixed
+
+- **`test_second_highest_is_ceiling` could not fail.** Found while pinning the threshold above, in the test named for the rule the whole layer rests on. `_make_league`'s OPP1 and OPP2 both come out at `physical_max_bid = 11.4` — clamped at `MAX_SALARY` — so its two assertions read `11.4 == 11.4` twice and passed just as happily against a `compute_market_ceiling` returning the **highest**. Verified by mutation: the whole of `tests/test_market.py` was green against that change except the two tests added the same day. Heavier keeper salaries put all three opponents below the cap and distinct, plus an explicit guard on that separation so the next budget tweak fails loudly instead of quietly disarming it.
 
 ### Investigated
 
@@ -2395,15 +2362,6 @@ about the change being *undefended* rather than wrong.
   **A second claim from the same triage, also killed by measurement.** It reported that `stop_status` would therefore read `at_cap` for the entire draft and the panel's "Should win it" figure would never show a number. Wrong: `/bid-check` builds its own `MarketInfo` from `compute_live_ceiling` over the *named bidders only* (`main.bid_check`), not the idle ceiling. Over every matchup rather than a sample — 10 single-rival and 45 two-rival, since an average would hide that the same rich teams pin it — the live ceiling is below `MAX_SALARY` in **7/10** and **21/45** by mid-draft, against 0/10 and 0/45 on a fresh state. The advisor's forecast fires routinely. Reasoning from one ceiling to the other is the specific mistake, it was made twice here, and `.claude/rules/pricing-pipeline.md` now says so under the Critical rule.
 
   Left behind: the numbers in `.claude/rules/pricing-pipeline.md` and one clause on CLAUDE.md's three-layer row; the open design question in `BACKLOG.md` (should a planning price be demand-aware rather than a second-highest-of-ten nobody reaches?), deferred deliberately because changing it moves every bid recommendation in the tool and there is a draft coming; and a note in `test_dry_run.py` that its 40 picks are a stopping point, since full length is now covered on demand.
-
-### Fixed
-
-- **`test_second_highest_is_ceiling` could not fail.** Found while pinning the threshold above, in the test named for the rule the whole layer rests on. `_make_league`'s OPP1 and OPP2 both come out at `physical_max_bid = 11.4` — clamped at `MAX_SALARY` — so its two assertions read `11.4 == 11.4` twice and passed just as happily against a `compute_market_ceiling` returning the **highest**. Verified by mutation: the whole of `tests/test_market.py` was green against that change except the two tests added the same day. Heavier keeper salaries put all three opponents below the cap and distinct, plus an explicit guard on that separation so the next budget tweak fails loudly instead of quietly disarming it.
-
-### Added
-
-- **`tests/test_market.py::TestWhenTheCeilingLeavesTheCap`** — where the idle ceiling stops being `MAX_SALARY`. It is the second-highest of ten, so it holds at the cap until **all but one** opponent is priced out, not until the league is broke. That threshold is what makes the `min` inert early and nobody had written it down, so a change to `physical_max_bid` or to the second-highest rule would have moved it silently. Two tests: a walk that squeezes the real 11-team league one opponent at a time and pins the whole transition, and the single state it turns on stated alone, so a mutant that shifts the threshold says which end moved.
-
 
 ## [2026-08-15f]
 
@@ -2521,16 +2479,6 @@ about the change being *undefended* rather than wrong.
 
 - **`TransactionRecord.nhl_team`**, so the log can show an NHL club badge. Denormalised deliberately: **the log outlives the roster.** A bought-out player is on no roster *and* gone from the pool, so resolving the club by name at render time draws nothing on precisely the rows the Transaction tab exists for — which is what `test_the_nhl_club_outlives_the_roster` pins, and it is the only test that distinguishes the stored field from a lookup.
 
-### Fixed / decided
-
-- **"NHL team logos in both logs" was not buildable as written, and the plan said so before any code moved.** `ChangeRecord` is `timestamp`/`kind`/`team_code`/`description` — no player at all — so there is nothing there to resolve an NHL club from. Settled as: FCHL team logos in **both** logs (from `teams[code].logo`, the same expression `league_state.html` uses), NHL club logos in the transaction log only.
-
-- **The Auction/Transaction split is a TOTAL partition (`draft` vs everything else), deliberately against CLAUDE.md's allowlist rule for `transaction_type`.** That rule exists because a mis-routed value points `_viewed_team` at the string `"SRL→MAC"`. Here the failure inverts: a record matching no branch **disappears from the draft record entirely**, which is worse than one landing in the wrong tab. So the two lists always sum to `len(transaction_log)`, a new transaction type is visible by default, and a test asserts the sum across three different writers. The `"SRL→MAC"` hazard is handled where it actually bites — `_log_team_link.html` renders a `/team-view` link only when `row.team_code in teams`, and plain text otherwise. CLAUDE.md now records this as the one deliberate exception rather than leaving the two rules to look contradictory.
-
-- **The plan's own call-site table was wrong about `/trade-execute`.** It assumed `PlayerOnRoster`; the endpoint actually works with `PlayerTrade`, a DTO with no `nhl_team` — and its *receive* side is assembled from **client-submitted JSON**, so threading the field through there would mean trusting the browser for a value the log keeps forever. Resolved with `_nhl_team_of()`, a lookup used at that one site and nowhere else, on the grounds that a trade always leaves every player somewhere (a roster, or the pool when there is no source team) and so cannot come up empty the way a buyout can. The distinction is written into the helper's docstring, because "why is this a lookup here and a stored field there" is exactly the question a later tidy-up would get wrong.
-
-- **Legacy save files still load.** `_transaction_from_dict` reads the new key with `.get`, and that is load-bearing rather than defensive: `_load_saved_state` treats *any* parse exception as an unusable file and renames it `.corrupt`, so a bare lookup would discard a byte-perfect draft on the first boot after this change — at the exact moment every real save file is a legacy one. `_backfill_nhl_teams` then refills historical records from the same `players.csv` map it already builds for rostered players. Both halves are pinned, and they needed *separate* tests: the `.get` keeps the file parsing, the backfill keeps pre-upgrade picks from showing a blank badge for the rest of the draft.
-
 ### Investigated
 
 - **A grill pass found two things in the new panel and one pre-existing bug behind them.** Fixed here: the NHL column's header was clickable and inert (`sortTable` reads `textContent`, the cell holds only an `<img>`, so every row tied and the order never moved — measured in Chrome), now non-sortable and pinned by `test_no_header_offers_a_sort_that_cannot_work`, which states the general rule so a future icon column is caught too; and the two row fragments had drifted into two contracts, `_log_team_link.html` taking an explicit `row` while `_log_nhl_logo.html` read the loop variable `t` by name — both now take `row`. The pre-existing half is `bid_limits.html:36 (data-sort-col="3")`, which has the same dud sort on its own NHL column, filed rather than fixed because the right answer there is an `img[alt]` fallback in shared JS, not removing the affordance.
@@ -2540,6 +2488,16 @@ about the change being *undefended* rather than wrong.
 - **Tailwind's Play JIT costs nothing per htmx swap, so the vendored bundle stays.** The open backlog entry deferred a real build on tooling risk; the reason to revisit was a hypothesis that its MutationObserver re-scans on every panel swap, which across a 150-pick auction would be a genuine draft-day cost. Measured in Chrome instead of reasoned: injected CSS grew **72 characters on the first `/bid-check` swap and 0 on every swap after**, with one longtask on that first swap and none subsequently — the JIT only compiles classes it has not seen, and after the first render every class in the app is already compiled. The load cost is real (398KB transferred, ~560ms of longtasks, DCL 868ms) but it is paid once, and the app is opened once on draft day. The entry stands, on stronger grounds than it was originally written with.
 
 - **Three tests were written, watched pass, and then found unable to fail** — recorded because the failures were all in the *test*, not the code. (1) A backfill test asserted `/nhl_logos/<club>.svg` against the whole page; the drafted player is on BOT's roster, whose table renders the same URL, so it passed with the backfill deleted — fixed by scoping through `section_of`. (2) Counting `<tbody>` blocks to get per-tab row counts silently renumbered the tabs whenever one rendered its empty state instead of a table; fixed by slicing on the three radio inputs. (3) Nothing covered a *live* pick's badge — deleting `nhl_team=p.nhl_team` from `/assign` left the buyout test and both legacy-file tests green, because the backfill refills the field on the way in and so hides a writer that stopped passing it.
+
+### Fixed / decided
+
+- **"NHL team logos in both logs" was not buildable as written, and the plan said so before any code moved.** `ChangeRecord` is `timestamp`/`kind`/`team_code`/`description` — no player at all — so there is nothing there to resolve an NHL club from. Settled as: FCHL team logos in **both** logs (from `teams[code].logo`, the same expression `league_state.html` uses), NHL club logos in the transaction log only.
+
+- **The Auction/Transaction split is a TOTAL partition (`draft` vs everything else), deliberately against CLAUDE.md's allowlist rule for `transaction_type`.** That rule exists because a mis-routed value points `_viewed_team` at the string `"SRL→MAC"`. Here the failure inverts: a record matching no branch **disappears from the draft record entirely**, which is worse than one landing in the wrong tab. So the two lists always sum to `len(transaction_log)`, a new transaction type is visible by default, and a test asserts the sum across three different writers. The `"SRL→MAC"` hazard is handled where it actually bites — `_log_team_link.html` renders a `/team-view` link only when `row.team_code in teams`, and plain text otherwise. CLAUDE.md now records this as the one deliberate exception rather than leaving the two rules to look contradictory.
+
+- **The plan's own call-site table was wrong about `/trade-execute`.** It assumed `PlayerOnRoster`; the endpoint actually works with `PlayerTrade`, a DTO with no `nhl_team` — and its *receive* side is assembled from **client-submitted JSON**, so threading the field through there would mean trusting the browser for a value the log keeps forever. Resolved with `_nhl_team_of()`, a lookup used at that one site and nowhere else, on the grounds that a trade always leaves every player somewhere (a roster, or the pool when there is no source team) and so cannot come up empty the way a buyout can. The distinction is written into the helper's docstring, because "why is this a lookup here and a stored field there" is exactly the question a later tidy-up would get wrong.
+
+- **Legacy save files still load.** `_transaction_from_dict` reads the new key with `.get`, and that is load-bearing rather than defensive: `_load_saved_state` treats *any* parse exception as an unusable file and renames it `.corrupt`, so a bare lookup would discard a byte-perfect draft on the first boot after this change — at the exact moment every real save file is a legacy one. `_backfill_nhl_teams` then refills historical records from the same `players.csv` map it already builds for rostered players. Both halves are pinned, and they needed *separate* tests: the `.get` keeps the file parsing, the backfill keeps pre-upgrade picks from showing a blank badge for the rest of the draft.
 
 ## [2026-08-14]
 
@@ -2559,8 +2517,13 @@ about the change being *undefended* rather than wrong.
 
 - **`TestExplain` had a silent trap and an assert-nothing test, in the code path being changed.** `test_explain_player` fetched a hard-coded `Sidney Crosby` and asserted `"Counterfactual" in r.text` — but "Counterfactual" is the *panel heading*, present in the 267-byte empty state too, so once that name left `players.csv` the test would have passed against a page holding no counterfactual at all. It now derives the name from the pool and asserts on `.counterfactual-card`, and pointing the derivation at a missing player reddens it where the old form stayed green. `test_explain_invalid` asserted only `status_code == 200`, which is true of every response the endpoint can produce; it now pins the empty state by size and by the absence of the card. Two new cases cover what the close button depends on: both mounts render it, and the inline mount carries no `id="explanation"` — previously only the mount's `inline=1` *attribute* was checked, never the response's id-freedom.
 
-
 ## [2026-08-13]
+
+### Added
+
+- **`endgame-ceiling-binds`, a scenario for the half of the market ceiling a fresh reset cannot reach.** On `/reset` all 11 teams sit at `physical_max_bid` = 11.4, so the ceiling *is* the salary cap, every bid reports `stop_status = at_cap` with no forecast, and **not one** row in Available Players is `capped` — which is why the app's only `tooltip-left` had never been placement-checked in a browser. Three backlog entries were parked on states this reaches. **Two plausible designs were built and measured first, and both produced zero capped rows**, which is the part worth recording: draining budgets by buying the best available got the ceiling to $5.2M and capped nothing, because buying top-down removes exactly the players whose model price the ceiling would have capped; and reserving the top 40 while draining with mid-tier depth put the ceiling back at $11.4M, because the price distribution is far steeper than it looks — 19 players above $4M, 40 above $3M, and **563 of 705 at the $0.5M floor** — so reserving 40 reserves everything over $3.0M and teams fill all 24 spots with floor-priced depth while staying rich. The distribution is also why this state never arises by accident: pool value is ~$632M against ~$338M of league money for ~165 open spots, so a real draft consumes the entire expensive tier and drained budgets never coexist with unsold stars. What produces it is a rule the league already has — **a done team is excluded from the ceiling** — so the scenario marks most teams done, drains the two still bidding, and holds back the top of the pool. Result: ceiling **$2.8M**, **83 capped rows**, McDavid $9.5M → $2.8M, BOT's MILP **Optimal** at 1311 points, and the advisor reporting `stop_status = live` with a real `expected_stop` instead of a dash. `_drain` converges rather than overshooting, and the arithmetic is the interesting bit: seating a player at price P costs P of budget but frees one reserved spot, so `spendable` moves by `-(P - MIN_SALARY)` — hence a `P <= headroom + MIN_SALARY` bound to avoid crossing the target and a `P > MIN_SALARY` bound to make progress, because a min-salary buy leaves `spendable` **unchanged** and without it the loop never terminates while floor-priced players remain. The first version lacked both and landed **both** live opponents on the same $0.9M max from targets of $3.0M and $2.2M, which makes `second_bidder` meaningless. Mutation-checked four ways — no team done (5 tests), nothing reserved (1), the overshooting drain restored (1), the `<option>` removed from `base.html` (2) — and the nothing-reserved mutant initially **survived all 13 tests**, because the star-check asked whether `max(available)` was expensive, which is very nearly a tautology: whatever is left is by definition the richest thing left. It measures against the draft-time pool now and names the stars that got sold. Also added a two-way guard that `SCENARIOS` and the navbar picker cannot drift apart, mirroring `TestShortcutsModal` — a registered scenario with no `<option>` is invisible, and an `<option>` with no scenario looks available and answers with an error toast.
+
+- **The `tooltip-left` in Available Players is placement-checked at last**, and required by name so the coverage cannot quietly lapse. `TestTooltipsStayInsideTheirPanel` runs the endgame scenario at 375/1024/1280 on top of its seven fresh widths — three rather than seven because each costs a page load plus a live bid and the risk does not vary smoothly (375 is the 1-col case, 1024 the tightest 3-col track, 1280 the draft width). It passes. The **vertical** exposure `BACKLOG.md` predicted for it is real but bounded, and measured rather than asserted: the bubble is 99px tall against ~64px rows, so on the last row visible inside the 405px `.scroll-container` it overhangs by **~25px**, and scrolling one row cures it. No assertion was added deliberately — a naive vertical check flags every row below the fold, since an unscrolled row is trivially outside the client box, which is the same mistake as the original probe measuring against `innerWidth`.
 
 ### Changed
 
@@ -2583,12 +2546,6 @@ about the change being *undefended* rather than wrong.
 - **A team that had stopped drafting was still projected as though it hadn't, by up to +1101 points, and it corrupted the rank badge.** Found by building the scenario below and then doing the thing the backlog entry asked for — re-measuring the Proj heuristic against a real per-team MILP — which turned up a different and much larger bug sitting in the same block. `_context` estimates every opponent's finished total as `current + unfilled_starter_slots × mean(points of the affordable top)`. For a **done** team there are no more picks, so every one of those points is invented; and the error is enormous rather than marginal because a team that stopped early never spent its budget, so its `physical_max_bid` is still `MAX_SALARY` and the affordability filter hands it the best players in the pool. Measured on `endgame-ceiling-binds`: the eight done teams read **+673 to +1101** above their real finals — SRL 390 actual against **1491** shown. The damage lands on the **rank badge**, which is the one figure that answers "am I winning": BOT's real 1311 sat behind five phantom teams and the panel said **#6** while BOT was first by a distance. Not an edge case — the design notes put 3+ early finishers in every draft, so this was wrong on draft day, in the second half, every time. Fixed with one branch, `projected = current` when `is_done`, ordered **ahead** of the MILP branch so it also covers BOT: marking your own team done is a legal move in that table, and a MILP that keeps planning purchases you have sworn off is the same lie aimed at yourself. This is not a new rule so much as an existing one reaching the last place it had not — done teams were already excluded from market ceilings, demand counts and nomination order. Three tests, mutation-checked two ways that kill **different** sets: deleting the branch reddens the two opponent cases (naming "1158 invented points" and "the rank badge reads backwards"), while merely reordering it after the MILP branch reddens only the BOT case, which is what that third test exists to pin. The heuristic's *original* complaint stays open and is now measured rather than assumed: it is **not** systematically optimistic (+62 mean on a fresh state, but +146 and −72 on the two still-drafting endgame teams), so a budget-aware greedy fill would not just shave off a known bias, and 11 extra MILPs per action still looks like a bad trade.
 
 - **`measure_layout.py` could not see the table that caused the bug it exists to diagnose.** `TARGETS` carried `#league-state > table`, and the `.table-scroll-x` wrapper added by the 2026-08-11 grid fix broke that child match — so for two days the report printed `(absent)` for the 955px element that forced the column, and `min_contents()` dropped it with no line at all, on the one number a layout investigation turns on. `(absent)` is also what a legitimately-unrendered element prints, so nothing distinguished "your selector is wrong" from "there is nothing there". Tables are matched by descendant selector now and both `.table-scroll-x` wrappers joined the list. `--whatif` was worse than useless: it injected `minmax(0, 1fr)`, which had shipped, so it re-measured the baseline and labelled it a hypothesis — it now injects the bare `1fr` **bug**, which makes the failure reproducible on demand. The numbers in `CLAUDE.md` are consequently checkable rather than trusted: baseline 414.7/414.7/414.7 with +0 overflow, `--whatif` 292.5/990.8/584.6 with +624 and `.area-team` at x=1310.
-
-### Added
-
-- **`endgame-ceiling-binds`, a scenario for the half of the market ceiling a fresh reset cannot reach.** On `/reset` all 11 teams sit at `physical_max_bid` = 11.4, so the ceiling *is* the salary cap, every bid reports `stop_status = at_cap` with no forecast, and **not one** row in Available Players is `capped` — which is why the app's only `tooltip-left` had never been placement-checked in a browser. Three backlog entries were parked on states this reaches. **Two plausible designs were built and measured first, and both produced zero capped rows**, which is the part worth recording: draining budgets by buying the best available got the ceiling to $5.2M and capped nothing, because buying top-down removes exactly the players whose model price the ceiling would have capped; and reserving the top 40 while draining with mid-tier depth put the ceiling back at $11.4M, because the price distribution is far steeper than it looks — 19 players above $4M, 40 above $3M, and **563 of 705 at the $0.5M floor** — so reserving 40 reserves everything over $3.0M and teams fill all 24 spots with floor-priced depth while staying rich. The distribution is also why this state never arises by accident: pool value is ~$632M against ~$338M of league money for ~165 open spots, so a real draft consumes the entire expensive tier and drained budgets never coexist with unsold stars. What produces it is a rule the league already has — **a done team is excluded from the ceiling** — so the scenario marks most teams done, drains the two still bidding, and holds back the top of the pool. Result: ceiling **$2.8M**, **83 capped rows**, McDavid $9.5M → $2.8M, BOT's MILP **Optimal** at 1311 points, and the advisor reporting `stop_status = live` with a real `expected_stop` instead of a dash. `_drain` converges rather than overshooting, and the arithmetic is the interesting bit: seating a player at price P costs P of budget but frees one reserved spot, so `spendable` moves by `-(P - MIN_SALARY)` — hence a `P <= headroom + MIN_SALARY` bound to avoid crossing the target and a `P > MIN_SALARY` bound to make progress, because a min-salary buy leaves `spendable` **unchanged** and without it the loop never terminates while floor-priced players remain. The first version lacked both and landed **both** live opponents on the same $0.9M max from targets of $3.0M and $2.2M, which makes `second_bidder` meaningless. Mutation-checked four ways — no team done (5 tests), nothing reserved (1), the overshooting drain restored (1), the `<option>` removed from `base.html` (2) — and the nothing-reserved mutant initially **survived all 13 tests**, because the star-check asked whether `max(available)` was expensive, which is very nearly a tautology: whatever is left is by definition the richest thing left. It measures against the draft-time pool now and names the stars that got sold. Also added a two-way guard that `SCENARIOS` and the navbar picker cannot drift apart, mirroring `TestShortcutsModal` — a registered scenario with no `<option>` is invisible, and an `<option>` with no scenario looks available and answers with an error toast.
-
-- **The `tooltip-left` in Available Players is placement-checked at last**, and required by name so the coverage cannot quietly lapse. `TestTooltipsStayInsideTheirPanel` runs the endgame scenario at 375/1024/1280 on top of its seven fresh widths — three rather than seven because each costs a page load plus a live bid and the risk does not vary smoothly (375 is the 1-col case, 1024 the tightest 3-col track, 1280 the draft width). It passes. The **vertical** exposure `BACKLOG.md` predicted for it is real but bounded, and measured rather than asserted: the bubble is 99px tall against ~64px rows, so on the last row visible inside the 405px `.scroll-container` it overhangs by **~25px**, and scrolling one row cures it. No assertion was added deliberately — a naive vertical check flags every row below the fold, since an unscrolled row is trivially outside the client box, which is the same mistake as the original probe measuring against `innerWidth`.
 
 ## [2026-08-12]
 
@@ -2646,20 +2603,17 @@ about the change being *undefended* rather than wrong.
 
 - **The bid panel advertised $11.5M — an illegal bid — on every player in the pool.** Reported from the 2026-08-07 live testing pass as two complaints that turned out to be one bug: the "Should win it" figure was wrong, *and* it was identical for everybody. `expected_stop` is `round(ceiling + SALARY_INCREMENT, 1)` with no clamp, and every ceiling reaching `compute_bid_recommendation` is already clamped at `MAX_SALARY` by `physical_max_bid` — so the sum overshoots the legal maximum exactly when the ceiling *is* the maximum. Measured on a fresh state: **all 11 teams sit at `physical_max_bid` = 11.4**, so `compute_market_ceiling` returns 11.4 and all 704 players showed $11.5M at once. The identical-for-everyone half is the same fact seen from the other side — while nobody is budget-constrained the forecast says nothing about any particular player. The live path was no different, since `compute_live_ceiling` with BOT bidding returns the *highest* opponent max, also 11.4. **A clamp to $11.4M would have been the wrong fix**, and this is the part the original backlog entry got right: `.claude/rules/pricing-pipeline.md` defines `ceiling + 0.1` as *"by construction the price that outbids the strongest opponent"*, and that construction breaks precisely at the cap — there is no legal price above $11.4M, so a rival can match and the winner is decided by who bids it rather than by budget. Showing $11.4M would have kept the promise "bid this and you should win", which the engine cannot keep there. So the forecast is reported absent, with a fifth `stop_status` (`at_cap`) explaining *why*: it did not retire the way `passed` and `uncontested` describe, it never started. Reusing either would have been a specific false claim — `passed` says a real price falsified it, `uncontested` says there are no rivals, which is the opposite of the situation. The panel now reads `Should win it: — (rivals can reach the max)`. **It was a display bug only**, and that claim is now a test rather than a commit-message assertion: `value_cap` is `min(marginal, physical_max_bid)` and `physical_max_bid` is itself clamped at `MAX_SALARY`, so `value_cap <= MAX_SALARY < expected_stop` and the old `min(value_cap, expected_stop)` already returned `value_cap` — no advice has ever been wrong because of this. `TestTheForecastAtTheCap::test_max_bid_and_verdict_are_untouched_by_the_new_status` checks the new code against an independent restatement of the pre-change rule across all 110 legal ceilings × 5 prices, rather than against the new code's own arithmetic, which would be a tautology. The new arm is ordered ahead of the `passed` check because `current_price >= expected_stop` is unreachable through legal bidding when `expected_stop > MAX_SALARY`; the two can only meet on an illegally typed price, where "the ceiling is the league max" is the more honest answer. **One existing test had to be re-stated, not weakened**: `test_bidding_the_shown_figure_always_retires_the_forecast` swept every legal ceiling asserting the status ends up `passed`, which now fails at 11.4 — where the panel is telling the truth by showing nothing. It reads the *figure* now ("if one is shown, bidding it must retire it"), which covers both cases and still catches the float-quantization bug it was written for, plus a guard that the sweep exercises the live path at all (>100 of the 110 ceilings) so it cannot go quiet-green. Mutation-checked three ways: the `at_cap` arm deleted (kills 2 tests), `max_bid` in that arm set to `expected_stop` (kills 2), and the template branch removed so the case falls through to the neutral dash (kills the parametrized render test). Verified against the running app in both directions — fresh state shows the dash and no `11.5` anywhere in the panel; after draining two opponents to `physical_max_bid` 1.2 and 0.0, the same panel shows a live `$1.3M`. `max_salary` joined the template context so the tooltip quotes `config.MAX_SALARY` instead of carrying its own copy of "11.4" to drift.
 
-
 ## [2026-08-07]
 
 ### Added
 
 - `/undo` cannot drift. Ten POST endpoints take a snapshot; **four had an undo test** (`/assign`, `/trade-execute`, `/buyout`, `/team-done`). The other six — `/adjust-salary`, `/toggle-bench`, `/move-to-minors`, `/move-to-roster`, `/set-nominator`, `/trade-between` — had none, on the one operation with nothing behind it: mid-draft there is no second Ctrl+Z, so an undo that restores less than it should is unrecoverable and invisible until much later. All six were probed first and **all six already worked**, so this is insurance rather than a fix — the work was removing the fail-open lists that make a future failure likely. There were three, the same shape as the `_panels_viewing()` design deleted earlier the same day. (1) `restore_snapshot` hand-assigned eight fields; it now enumerates `fields(self)`, so a new field on `AuctionState` is restored automatically instead of being forgotten. `_snapshots` is skipped by name, and that skip is load-bearing: snapshots are written with `include_snapshots=False`, so the restored object's chain is always the empty default and copying it would make Ctrl+Z work exactly once per session. (2) The enumeration does not help if `to_json` never writes a field — then `from_json` supplies the *default* and undo restores a zero, which is worse than restoring nothing. Two guards cover that, and they are not redundant: dropping a `to_json` key fails `test_every_field_reaches_the_json`, while making `from_json` ignore a key it still writes fails **only** `test_every_field_survives_a_round_trip` — verified by running both mutants. (3) A new mutating POST that forgets `save_snapshot()` is invisible until someone hits Ctrl+Z mid-draft, so `TestEveryMutatingPostTakesASnapshot` walks `main.py`'s ast and requires every `@app.post` handler to snapshot or to be named in `NO_SNAPSHOT_NEEDED` with its reason; it carries its own not-vacuous check, since a decorator rename would otherwise turn every assertion in it green. **One of the six tests could not fail when first written, and the cause is worth recording**: `/move-to-minors` needs the player benched first, `/toggle-bench` takes a snapshot of its own, and with a counts-only reading `/undo` popped the *bench* snapshot — pre-bench has the same roster and minors counts as post-bench, so the test passed against a build where `/move-to-minors` had stopped snapshotting entirely. This is precisely the shared-chain hazard the function-scoped `client` shadow exists to avoid, arriving through the test's own precondition rather than through another test. The reading now carries `(is_minor, is_bench)`, which separates the two states. Mutation-checked seven ways: `save_snapshot()` deleted from each of the six endpoints in turn (each kills only its own test), the restore loop made to skip `teams`, the `_snapshots` skip dropped, a `to_json` key removed, `from_json` made to ignore one, a plausible new un-snapshotting endpoint added, and the ast walk broken. Browser-verified: three real edits on an opponent's roster driven by clicking the controls, three `Ctrl+Z`, exact walk-back each time, zero console errors — which also surfaced the new open finding above, that undo returns the panel to BOT even when what it undid was an opponent's roster edit.
 
-
 ### Changed
 
 - the view moved to the server, closing the two open entries against it — the dead Scan button in `buyout_panel.html` and the view reset in `main.py (team_done)`, both dropped from Open findings, deliberately without their line numbers since a closed entry's line only rots — and an unflagged third. **Supersedes the `_panels_viewing` entry above** — that helper is deleted. Carrying the view per-endpoint failed open: every handler rendering `all_panels.html` had to remember to pass a team code, and the ones that didn't threw you back to BOT. Five carried it *on their success paths only*, so the **error branches of all five** were the worst of the set and were in no backlog entry: auditing SRL, you fix a salary, the player was traded away a second earlier → warning toast *and* you lose the roster you were auditing at the moment you most need to look at it. `main._viewed_team` now holds it and `_context` reads it, so there is nothing left to forget; `/team-view/{code}` is the sole setter, `/assign`, `/undo`, `/buyout`, `/reset` and `/load-scenario` call `_view_my_team()` (the 2026-08-07 owner decision, now pinned rather than assumed), and `/team-done` and `/trade-execute` started preserving it **without being touched** — which is the argument for the design. A module global and **not** a field on `AuctionState`: on the state it would serialize into the save file and `/undo` would restore a *view*, which is not a draft action; `test_the_view_never_reaches_the_state_file` asserts both halves. A deliberate semantic change rode along: `/team-view/FAKE` used to render BOT and now changes nothing, so a bad link cannot move your view — `test_edge_cases.py::test_team_view_nonexistent_changes_nothing` was rewritten to that stronger contract. The Scan Roster button is gated on a derived `buyout_dots_on_screen` boolean rather than on `viewed_team`, because CLAUDE.md lets no panel but `team_panel.html` read that key and the rule is about a panel *acting* on the wrong roster — a boolean describing whether the swap targets exist in the DOM carries no roster and cannot leak one. **The mutation checks earned their keep on the fourth one.** Pointing `trade_panel.html` at `viewed_team` — the 2026-08-05 leak, reproduced — left `TestPanelContextIsolation` **passing**: both its cases posted an edit for an opponent without opening that opponent, which the old design made sufficient (the code travelled with the request) and the new one does not, so `viewed_team` was still BOT and the leak leaked BOT into BOT. The refactor had silently disarmed the guard on the exact defect it was written for. Both cases now open the panel first, which is also the only way the edit happens for real — every one of those controls renders inside `team_panel.html` — and the mutant kills them. **The manual browser pass then caught what neither the endpoint tests nor the automated browser cases did**, which is the argument for still doing one. Gating the button inside `buyout_panel.html` fixed only the outbound direction: `/team-view` swaps `#team-panel` alone — it *cannot* return `all_panels.html`, which would replace `#bid-panel` and destroy the bidding session — so switching **back** to your own team restored the dots but not the button, and it stayed missing until some unrelated full-page swap happened to bring it back. Every endpoint test read `GET /` afterwards, a fresh document where the answer is always right; both browser cases only ever went one way. The button is now `buyout_scan.html`, returned out-of-band by `team_view_response.html`, with the wrapper div unconditional and only the `hx-swap-oob` attribute conditional — a target that disappears with its contents is one-way by construction, which is the bug restated. Verified end to end in Chrome: load → SRL → a `/team-done` toggle → back to BOT, then Scan, and all 11 dots resolved with **zero console errors** (the `htmx:oobErrorNoTarget` noise is gone in both directions). Pinned by `TestTheViewSticks` (8 cases through the HTTP surface), `TestBuyoutScanIsOfferedOnlyWhereItWorks` (5, including both swap directions and a guard that `GET /` carries no `hx-swap-oob`, or the fragment would swap itself over itself on every pick), and two browser cases for the claims that only read as fixed on screen. Mutation-checked all four ways from the plan, plus both directions of the OOB fix.
 
 - test order stopped being load-bearing. The `client` fixture was `scope="module"`, so `POST /reset` ran **once for 98 tests** and anything a test mutated without putting back changed what every later test in the file saw. **The entry named one file; it was four** — `test_endpoints.py`, `test_edge_cases.py`, `test_htmx_interactions.py`, `test_stress.py`, 172 tests — with three more (`test_auction_draft.py`, `test_dry_run.py`, `test_trade_buyout_undo.py`, 74 tests) that are sequential *by design* and must stay module-scoped, since `test_dry_run.py` is one continuous 40-pick auction where the flow **is** the test. **This changed no test outcome**, and that was established before touching anything: all 98 `test_endpoints.py` tests were run individually and every class in the other three alone — zero depended on state left by another. The value is preventive, and the entry's own framing ("eat the per-test `/reset` cost") had made it look expensive when it is not: `/reset` is **109ms**, not seconds. Two measurements shaped the design. A naive `scope="function"` rebuilds `TestClient` and re-runs the lifespan every test (**221ms**, 38s across the suite); a session-scoped transport with a per-test reset costs **107ms** (18.5s). So `conftest.py` gained `_app_client` (session, holds no auction state) and `client` (function, resets), and the four local copies were deleted. Measured end to end the suite went 593 tests / 301s → 600 / 307s, i.e. +6s, better than the +18.5s predicted because the deleted fixtures were themselves rebuilding clients. **Two class-level shadows in `test_endpoints.py` turned out to be workarounds for this very problem** — their docstrings said "the module fixture resets once for the whole file" — and both also repointed `main.STATE_DIR` to a fresh temp dir with no restore, silently overriding the session-wide `isolated_state_dir` for everything that ran after. Deleting them took two now-unused imports with them. The guard is `tests/test_fixture_scopes.py`, aimed at the direction that fails **silently**: converting a sequential file fails loudly on the next run (`test_01` needs `test_00`), but a *new* file declaring a module-scoped client re-introduces the coupling with nothing to notice. It ast-scans for `client` fixtures, requires every module-scoped one to be in `SEQUENTIAL_BY_DESIGN` with a reason, requires the allow-list to have no stale entries, requires each listed file to say "ON PURPOSE" in the fixture docstring where a future reader will actually be standing, and carries a not-vacuous check so a rename cannot turn it green. It also states what it cannot prove: it reads a declaration, not behaviour, and cannot tell whether a file's tests are genuinely a sequence. Because nothing depended on leaked state, reverting the scope fails **no existing test** — so `TestTheFixtureActuallyIsolates` is a written-on-purpose ordered pair (mutate, then assert it is gone) and is the only thing in the change that can demonstrate it did anything. Mutation-checked five ways: conftest's `client` back to module scope (kills only that pair), a module-scoped client added to a non-listed file, an allow-list entry for a file that is not module-scoped, the ast scan broken, and an "ON PURPOSE" docstring removed.
-
 
 ### Fixed
 
@@ -2687,7 +2641,6 @@ about the change being *undefended* rather than wrong.
 
 - browser test harness, and the stale-counterfactual race **closed as not reachable**. Six UI changes shipped that day and none had been opened in a browser; the two manual confirmations on file both predated them, and one (`d57d344`, Assign reads the live price) was taken against the *pre-9ms* code, i.e. a version where latency masked the very race later fixed. `tests/test_browser_ui.py` drives the installed Chrome through Playwright (`channel="chrome"`, so no `playwright install` and no browser download; `requirements-dev.txt` keeps it out of the runtime set, and `importorskip` keeps the suite green without it). Seven checks, each for something `TestClient` cannot see. Two paid for the harness immediately, by mutation: moving the counterfactual mount above the Assign form makes the button **jump 322px** as the analysis lands — the placement rule had only ever been defended by an assertion on HTML ordering — and reverting `hx-select="#bid-advice"` on the price input swallows the Assign click outright, no toast, no pick recorded, which is the blur race reproduced live at the speed that made it dangerous. Also pinned: exactly one `/explain` per panel render (the `hx-swap="innerHTML"` no-loop claim, previously reasoned from minified htmx), `n` mid-bid, bidder toggles, the 1-col breakpoint, and the runtime-built `'alert-' + type` toast class that a source-scanning Tailwind build would silently drop. **The race itself turned out to be unreachable, and the earlier finding was wrong about that.** htmx 1.9.10 really does leave a superseded XHR running and really does resolve the target by id — but `/explain` is `async def` wrapping a *blocking* MILP solve, so it holds the single event loop and requests serialise FIFO. Measured: a WARM request fired 20ms after a COLD one still finished last (202.5ms vs 198.8ms). No `hx-sync` was added, because shipping an untestable attribute against a race that cannot occur is worse than not shipping it. Instead `TestResponsesCannotOvertakeEachOther` asserts the precondition, so the obvious future optimisation — moving the solve off the loop to kill the 200ms cold path — fails loudly with the fix to apply written in the assertion message rather than reintroducing the hazard in silence.
 
-
 ### Changed
 
 - offline: htmx, DaisyUI and the Tailwind Play CDN are vendored under `static/vendor/` and pinned by `tests/test_offline_assets.py` — **manually confirmed working offline 2026-08-06**
@@ -2697,7 +2650,6 @@ about the change being *undefended* rather than wrong.
 - Max-bid display: the bid panel now shows the two numbers `max_bid` was always made of — `Worth up to` (value cap, hard) and `Should win it` (expected stop, forecast) — instead of the blend that doubled from $4.1M to $8.5M when the price rose one increment past the forecast. `BidRecommendation` gained `value_cap`/`expected_stop`/`stop_status`; `max_bid` is untouched, so the ~15 assertions resting on it needed no edits. `stop_status` distinguishes the two reasons the forecast retires — "no rivals left" vs "bidding passed it" — because a bare dash for both told the operator nothing. Bonus: when `value_cap < expected_stop` the panel now reads "worth $8.5M, will take $11.5M", which is *why* the verdict is DROP — information the single figure never carried. Pinned by `tests/test_bid_calculator.py::TestBidPanelNumbers`, whose load-bearing test is that `value_cap` never moves with price
 
 - bid advisor latency: `/bid-check` went from **~1000ms to ~9ms** on repeat interactions (114×), meeting the long-carried <500ms interaction budget. 97% of the request was `compute_bid_recommendation` and 80% was the ten MILP solves inside `compute_marginal_value` — which takes neither a price nor a bidder list, so it is pure in (roster, budget, pool, market prices) and *cannot* change between two bid checks on the same player. A live auction was spending a second per $0.1M increment re-deriving an identical number. Now cached per state epoch in `main._marginal_value`, cleared wholesale by `_recompute()` for the same reason it drops `last_trade_eval`; `compute_bid_recommendation` gained an optional `marginal_value` kwarg so the optimizer stays pure and the ~15 tests that call it with synthetic states are untouched. Clearing rather than versioning because an empty dict cannot serve a stale entry. The first check on a new player is still ~1000ms and correctly so. Pinned by `tests/test_bid_cache.py`, whose load-bearing test walks ten mutating endpoints and compares cached against freshly-computed after each — the failure mode being guarded is not slowness but a stale number shown as live advice. That file costs ~40s of suite time, 20.5s of it in the mutation walk, because each mutation runs a real `_recompute()` solve — inherent to what it proves, recorded here so it doesn't read as waste to whoever next looks at suite time
-
 
 ### Fixed
 
@@ -2714,7 +2666,6 @@ about the change being *undefended* rather than wrong.
 - buyouts: eligibility restricted to groups 2/3 (`can_be_bought_out`), the panel now lists eligible players wherever they sit, trade scenarios stop proposing illegal buyouts, keepers can be sent to the minors, and both buyout endpoints report the real reason. **The old entry here asked for "minors-aware buyout math" — that premise was wrong.** Under the owner's rules (2026-08-06) a legal buyout only ever targets a group 2/3 player, whose salary is fully on the cap wherever they sit, so `salary_freed`/`net_cap_freed` needed no branch and got none. The actual defects were a missing legality guard in both directions: the panel offered A-E prospects on the active roster (illegal, and the numbers looked plausible because those *do* count on cap) while hiding group 2/3 players in the minors (legal, and where everyone drafted past 24 lands). Pinned by `tests/test_buyout_eligibility.py`
 
 - over-cap warnings on the remaining three endpoints: a full grill of the trade-warning change found `/move-to-roster` had the same gap, worse. `PlayerOnRoster.counts_on_cap` is `group in MINOR_CAP_GROUPS` (`{"2","3"}`) for a minor, so a group A-E prospect is cap-free while down and cap-counted the instant it is recalled — and **145 of the 149 players in the minors at reset are group A-E, all with a real salary** (up to $3.0M). Only the 4 auto-routed draftees are cap-neutral to recall, so the safe case was the rare one. The endpoint also ended with a bare `_render()`, i.e. no toast at all on success, so an over-cap recall was silent rather than merely mis-coloured. Closed alongside the two remaining members of the class: `/adjust-salary` (backlogged the same day) and `/assign` (deferred as commissioner-protected, included because a free check on the busiest endpoint is what makes the same warning elsewhere trustworthy). An audit of all 13 mutating endpoints found no others — `/move-to-minors`, `/buyout` and `/toggle-bench` cannot raise cap load. `/adjust-salary` composes its two independent warnings into one toast instead of returning on the first, and supplies a subject when only the cap note fires: *"John Gibson set to $2.0M — BOT $0.5M over cap"* rather than a bare fact about the team. Pinned by `tests/test_endpoints.py::TestOverCapRosterEdits`; the load-bearing test is the group-3 recall, which proves the warning tracks `counts_on_cap` rather than firing on any near-cap move
-
 
 ### Investigated
 
@@ -2739,3 +2690,4 @@ Before the backlog carried write-ups. Fix commits only.
 ### Fixed
 
 - `200e80d`, `e4a5871`, `c30a636`, `8622f74`, `6dd17e6`, `9aece0d`
+

@@ -1141,6 +1141,31 @@ class TestPlayerChart:
         page = client.get("/").text
         assert page.count('id="player-chart-container"') == 1
 
+    def test_the_card_offers_a_way_into_the_bidding_form(self, client):
+        """No JS of its own — `.btn-add-bid` is delegated on `document` and
+        reads `data-player`, so the class and the attribute ARE the contract."""
+        name = pool_top()[0]
+
+        r = client.get(f"/player-chart/{name}")
+
+        assert r.text.count("btn-add-bid") == 1
+        assert f'data-player="{name}"' in r.text
+        assert 'aria-label="Start an auction for this player"' in r.text
+
+    def test_the_inline_mount_offers_none(self, client):
+        """During a live auction the button is pointless — you are bidding on
+        him already, `.bid-form` (Start Auction) does not exist while an auction
+        is live, and the handler would answer a click with "finish the current
+        auction first"."""
+        name = pool_top()[0]
+
+        r = client.post("/bid-check", data={
+            "player": name, "bidders": "SRL", "price": 1.0, "highest_bidder": "",
+        })
+
+        assert "Price Model" in r.text, "the inline chart did not render"
+        assert "btn-add-bid" not in r.text
+
     def test_unknown_player_does_not_leak_the_counterfactual_panel(self, client):
         """The failure path rendered explanation.html — a whole other panel.
 

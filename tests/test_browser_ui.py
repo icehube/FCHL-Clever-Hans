@@ -520,12 +520,48 @@ class TestTheChartLandsWhereYouClicked:
         bid_player, other = self._open_with_a_live_bid(page, live_server)
         self._click_chart_link(page, other)
 
-        page.click("#bid-panel .price-chart-card button")
+        page.click('#bid-panel .price-chart-card button[aria-label^="Close"]')
         page.wait_for_selector("#bid-panel .price-chart-card", state="detached")
         assert page.locator("#player-chart-container .price-chart-card").count() == 1, (
             "closing the bid panel's chart also closed the table's, in the "
             "other column — × resolved to the wrong element"
         )
+
+
+class TestTheChartCanStartAnAuction:
+    """The `+` on the price chart, which has no JS of its own.
+
+    `.btn-add-bid` is delegated on `document` and reads `data-player`, so the
+    endpoint tests can prove the markup and nothing else — whether a click on
+    THAT copy of the class actually reaches the handler and lands in the Start
+    Auction field is a browser question. The pool table's `+` proves the
+    handler; this proves the delegation covers a button that arrives by swap.
+    """
+
+    def test_the_plus_fills_the_start_auction_field(self, page, live_server):
+        _open(page, live_server)
+        target = pool_top()[0]
+
+        link = page.locator(
+            f'#bid-limits a[hx-get^="/player-chart/"]:text-is("{target}")'
+        )
+        with page.expect_response(re.compile(r"/player-chart/")):
+            link.click()
+        page.wait_for_selector("#player-chart-container .price-chart-card")
+
+        page.click("#player-chart-container .btn-add-bid")
+
+        assert page.input_value(".bid-form input[name='player']") == target
+
+    def test_a_live_auction_chart_offers_no_plus(self, page, live_server):
+        """`.bid-form` does not exist while an auction is live, so the handler
+        would answer a click with "finish the current auction first" — a button
+        whose only outcome is a refusal."""
+        _open(page, live_server)
+        _start_bid(page, pool_top()[0])
+        page.wait_for_selector("#bid-panel .price-chart-card")
+
+        assert page.locator("#bid-panel .price-chart-card .btn-add-bid").count() == 0
 
 
 class TestShortcutsModalOpens:

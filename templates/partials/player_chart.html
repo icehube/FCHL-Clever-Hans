@@ -13,8 +13,27 @@
 <div class="price-chart-card card bg-base-300 p-2 mb-2">
     <div class="flex items-center justify-between mb-1">
         <h3 class="font-semibold text-sm">Price Model: {{ chart_player.name }}</h3>
-        <button onclick="this.closest('.price-chart-card').remove()" class="btn btn-xs btn-ghost"
-                aria-label="Close the price chart" title="Close">&times;</button>
+        <div class="flex gap-1 items-center">
+            {# No JS of its own: the `.btn-add-bid` handler in shortcuts.js is
+               delegated on `document` and reads `data-player`, so a button
+               anywhere in the page works. Same markup as the pool table's.
+
+               Gated off the INLINE mount. This partial is rendered twice — into
+               #player-chart-container from the players table, and inside
+               bid_panel.html during a live auction — and in the second one the
+               button is pointless: you are already bidding on him, `.bid-form`
+               (Start Auction) does not exist while an auction is live, and the
+               handler would answer a click with "finish the current auction
+               first". `chart_inline` is undefined everywhere else, including the
+               standalone GET /player-chart/{name} response, which is the mount
+               that needs it. #}
+            {% if not chart_inline %}
+            <button class="btn btn-xs btn-ghost btn-circle btn-add-bid" data-player="{{ chart_player.name }}"
+                    aria-label="Start an auction for this player" title="Add to bid">+</button>
+            {% endif %}
+            <button onclick="this.closest('.price-chart-card').remove()" class="btn btn-xs btn-ghost"
+                    aria-label="Close the price chart" title="Close">&times;</button>
+        </div>
     </div>
     <div class="chart-meta">
         {{ chart_player.position }} · <img src="/nhl_logos/{{ chart_player.nhl_team }}.svg" alt="{{ chart_player.nhl_team }}" class="h-5 inline object-contain" title="{{ chart_player.nhl_team }}"> · {{ chart_player.projected_points }}pts

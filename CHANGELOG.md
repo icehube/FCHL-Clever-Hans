@@ -22,6 +22,36 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Added
+
+- **A `+` on the Price Model card, so a chart you opened can start the
+  auction.** Asked for directly: "can we add a '+' to the Price Model window".
+  The pool table has had one since 2026-09-09; the chart you open *from* that
+  table did not, so reading the price model and then bidding meant scrolling
+  back and finding the row again.
+
+  No JavaScript was needed. `.btn-add-bid` is delegated on `document` and reads
+  `data-player`, deliberately, so the class and the attribute are the whole
+  contract and a button arriving by htmx swap is covered for free.
+
+  **Gated off the inline mount.** `player_chart.html` is rendered twice — into
+  `#player-chart-container` from the players table, and inside
+  `bid_panel.html` during a live auction — and in the second one the button is
+  worse than useless: you are already bidding on him, `.bid-form` (Start
+  Auction) does not exist while an auction is live, and the handler's only
+  possible answer is the "finish the current auction first" toast. The include
+  in `bid_panel.html` is wrapped in `{% with chart_inline = true %}`; the flag
+  is undefined everywhere else, including the standalone
+  `GET /player-chart/{name}` response, which is the mount that needs it.
+
+  Four mutants killed by the endpoint tests (gate removed, button removed,
+  `with`-flag dropped, `data-player` misnamed) and three more by the browser
+  tests — the browser pair is what proves the delegation actually reaches a
+  swapped-in button, which `TestClient` cannot see. One existing assertion was
+  tightened in the same commit: `TestTheChartLandsWhereYouClicked` clicked
+  `.price-chart-card button` unqualified, which would have hit the new `+`
+  first if the gate ever broke, and timed out instead of failing clearly.
+
 ### Fixed
 
 - **The bench had no capacity limit, so a team could hold any number of benched

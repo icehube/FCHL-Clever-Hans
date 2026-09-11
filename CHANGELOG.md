@@ -22,6 +22,70 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Added
+
+- **Solve Standings now runs itself after every pick.** Asked for directly: "is
+  there a way to autorun Solve Standings once a player is assigned to a team?"
+  Owner decision on the shape: always, after every pick — not a toggle, not
+  only on a turn change.
+
+  `_recompute()` empties `exact_projections` on every mutation, so one pick
+  returned all ten opponents' Proj figures to an estimate that runs +68 mean /
+  +193 worst (+14.2%) and moves 9 of 10 teams in rank order, BOT's own badge
+  included. The column degraded after every sale and stayed degraded until
+  somebody noticed the `estimated` marker and clicked.
+
+  `POST /assign`'s **success path** returns
+  `HX-Trigger-After-Settle: {"solveStandings": true}` and `shortcuts.js`
+  answers with `htmx.ajax('GET', '/solve-standings', {swap: 'none'})`. A
+  rejected assign fires nothing, and neither does any other mutation — all of
+  them still degrade the column, and the manual button is still the only way
+  back from those.
+
+  Three decisions about the shape, two of which were nearly wrong:
+
+  - **Server-driven, not an `hx-trigger="load"` mount.** The obvious placement
+    is a zero-height div in `league_state.html`, and it is wrong: that template
+    ships inside `all_panels.html`, which answers thirteen different things
+    **including `GET /`**. A load trigger would fire a ten-solve scan on
+    initial page load and after every bench toggle and salary edit.
+  - **`HX-Trigger-After-Settle`, and the obvious reason for it is false.** htmx
+    1.9.10 does dispatch plain `HX-Trigger` before the swap — verifiable in the
+    vendored source, where it runs in the onload handler right after
+    `htmx:beforeOnLoad` while after-settle runs inside the settle callback. But
+    the tempting conclusion, that plain `HX-Trigger` would aim the scan at the
+    `proj-<CODE>` spans the `#app` swap is about to destroy, does **not**
+    follow: htmx resolves an out-of-band target when the RESPONSE arrives, and
+    this scan takes 250–400ms against a swap that is synchronous in the same
+    tick. The mutation swapping the two headers survives both browser tests,
+    and the comment in `_toast` says so. After-settle is kept because it is a
+    guarantee rather than a timing margin, and it lets the panel finish
+    painting before up to 8 CBC subprocesses compete with the renderer.
+  - **Coalesced, not stacked.** A second pick landing mid-scan makes
+    `_publish_if_current` discard the first scan silently, so two quick picks
+    would otherwise run 16 CBC subprocesses for one usable answer. The listener
+    holds at most one in flight and re-fires once on completion if a pick
+    arrived while it ran — a latch with no queue would leave the column on
+    estimates exactly when drafting fast, which is the case this feature exists
+    for. The latch is released in `finally`, so one network hiccup cannot
+    silently retire the feature for the rest of the draft.
+
+  **The cost, stated plainly.** ~384ms of up to `SCAN_WORKERS` parallel CBC
+  subprocesses, after every one of ~165 picks. A warm `/bid-check` measures
+  43ms during a scan against 3ms idle — well inside the 500ms budget, but it
+  scales with the cap. If typing feels sticky on draft day, lower
+  `SCAN_WORKERS` before looking anywhere else.
+
+  `CLAUDE.md`'s "**Never put this on an action path**" was rewritten in the
+  same commit rather than left to contradict the code. `tests/test_event_loop.py`
+  needed no change and that is not an accident: its three guards constrain
+  *where* a solve runs, not who triggers it, and `/solve-standings` was already
+  in `THREADED_SCANS`.
+
+  Six mutants, five killed: `/assign` silent (endpoint and browser), a listener
+  name typo (the cross-file contract test), the listener removed, and the latch
+  never released. The survivor is the header swap described above.
+
 ### Fixed
 
 - **App assets were unversioned, so two shipped fixes were re-reported as
@@ -1696,7 +1760,7 @@ nothing failed.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1372 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1411 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -1801,7 +1865,7 @@ nothing failed.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1353 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1392 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

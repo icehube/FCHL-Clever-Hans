@@ -1015,11 +1015,43 @@ def _cap_overages(*team_codes: str | None) -> list[str]:
     return [msg for _, msg in sorted(over, reverse=True)]
 
 
-def _toast(response: HTMLResponse, message: str, toast_type: str = "info") -> HTMLResponse:
-    """Attach a toast notification to an HTMX response via HX-Trigger header."""
+# The event POST /assign fires to make the standings re-solve themselves. A
+# constant because it is a contract across two files with no import between
+# them — tests/test_endpoints.py asserts this exact string appears in
+# static/shortcuts.js, since a typo on either side is completely silent.
+SOLVE_STANDINGS_EVENT = "solveStandings"
+
+
+def _toast(
+    response: HTMLResponse,
+    message: str,
+    toast_type: str = "info",
+    *,
+    after_settle: dict | None = None,
+) -> HTMLResponse:
+    """Attach a toast notification to an HTMX response via HX-Trigger header.
+
+    `after_settle` rides a SECOND header, `HX-Trigger-After-Settle`. The
+    ordering difference is real and verifiable in the vendored htmx 1.9.10:
+    plain `HX-Trigger` is dispatched in the onload handler immediately after
+    `htmx:beforeOnLoad` and BEFORE the swap, while after-settle fires inside
+    the settle callback once the new elements are in place.
+
+    Be precise about what that buys, because the obvious claim is wrong: it is
+    NOT that plain `HX-Trigger` would fire `/solve-standings` at the doomed
+    `proj-<CODE>` spans. htmx resolves an out-of-band target when the RESPONSE
+    arrives, and this scan takes ~250-400ms against a swap that is synchronous
+    in the same tick — so the targets are always the fresh ones either way, and
+    the mutation swapping the two headers survives both browser tests. What
+    after-settle buys is a guarantee instead of a timing margin, and a panel
+    that has finished painting before up to 8 CBC subprocesses start competing
+    with the renderer for cores.
+    """
     response.headers["HX-Trigger"] = json.dumps(
         {"showToast": {"message": message, "type": toast_type}}
     )
+    if after_settle:
+        response.headers["HX-Trigger-After-Settle"] = json.dumps(after_settle)
     return response
 
 
@@ -1340,6 +1372,14 @@ async def assign_player(
         f"{p.name} → {team} at ${salary}M{clamp_note}{minors_note}"
         + (f" — {'; '.join(over)}" if over else ""),
         "warning" if (to_minors or over) else "success",
+        # `_recompute()` above just emptied `exact_projections`, so every
+        # opponent's Proj went back to an estimate that runs +68 mean / +193
+        # worst and moves 9 of 10 teams in rank order. Owner decision
+        # 2026-09-10: re-solve after every pick rather than leave the column
+        # degraded until someone notices the marker. SUCCESS PATH ONLY — the
+        # rejection branches above all return before this, and a refused pick
+        # must not spend ten MILP solves.
+        after_settle={SOLVE_STANDINGS_EVENT: True},
     )
 
 

@@ -188,6 +188,60 @@ class TestTheAssignClickSurvives:
         )
 
 
+class TestTheStandingsResolveThemselves:
+    """The only test that can see the auto-scan happen.
+
+    The endpoint tests prove `/assign` sets `HX-Trigger-After-Settle` and that
+    `shortcuts.js` contains a listener for that exact string. Whether htmx
+    actually fires the event, whether the listener runs, and whether the
+    out-of-band swap lands on the spans the `#app` swap just replaced are all
+    browser facts — and the last one is the reason the header is
+    *After-Settle* rather than plain `HX-Trigger`, which fires before the swap.
+    """
+
+    def _basis(self, page) -> str:
+        return page.inner_text("#proj-basis").strip()
+
+    def _assign_through_the_panel(self, page, player: str):
+        _start_bid(page, player)
+        with page.expect_response(re.compile(r"/assign")):
+            page.click("#bid-panel form[hx-vals] button[type='submit']")
+
+    def test_a_pick_re_solves_the_column_with_no_click(self, page, live_server):
+        _open(page, live_server)
+        assert self._basis(page) == "estimated", (
+            "a fresh league should start on estimates, or this proves nothing"
+        )
+
+        self._assign_through_the_panel(page, pool_top()[0])
+
+        page.wait_for_function(
+            "() => document.getElementById('proj-basis')"
+            "  && document.getElementById('proj-basis').innerText.trim() === 'solved'",
+            timeout=15000,
+        )
+
+    def test_two_quick_picks_still_end_up_solved(self, page, live_server):
+        """The coalescing queue. The second pick bumps `_state_version`, so
+        `_publish_if_current` discards the first scan — with a latch but no
+        queue the column would stay on estimates exactly when drafting fast,
+        which is the case this feature exists for."""
+        _open(page, live_server)
+        first, second = pool_top(2)
+
+        self._assign_through_the_panel(page, first)
+        self._assign_through_the_panel(page, second)
+
+        page.wait_for_function(
+            "() => document.getElementById('proj-basis')"
+            "  && document.getElementById('proj-basis').innerText.trim() === 'solved'",
+            timeout=20000,
+        )
+        assert len(main.auction_state.teams["BOT"].acquired_players) >= 2, (
+            "both picks must have landed, or the queue was never exercised"
+        )
+
+
 class TestBiddingSessionSurvives:
     """The session lives only in the DOM: player, price, bidder toggles.
 

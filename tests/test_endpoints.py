@@ -4986,6 +4986,104 @@ class TestFindingAPlayerAnywhere:
         assert "search-row" in r.text
 
 
+class TestTheStandingsResolveThemselvesAfterAPick:
+    """`_recompute()` empties `exact_projections`, so one pick returns all ten
+    opponents' Proj figures to an estimate that runs +68 mean / +193 worst and
+    moves 9 of 10 teams in rank order. Owner decision 2026-09-10: re-solve
+    after every pick rather than leave the column degraded until somebody reads
+    the marker.
+
+    These tests can see the header and the contract; only the browser test can
+    see the scan actually happen, because the trigger is JS.
+    """
+
+    def _settle_events(self, response) -> dict:
+        header = response.headers.get("HX-Trigger-After-Settle")
+        return json.loads(header) if header else {}
+
+    def test_a_pick_asks_for_a_re_solve(self, client):
+        import main
+
+        target = pool_top()[0]
+
+        r = assign(client, target, MY_TEAM, 1.0)
+
+        assert self._settle_events(r).get(main.SOLVE_STANDINGS_EVENT) is True
+
+    def test_the_toast_still_rides_the_plain_header(self, client):
+        """Two headers, two purposes. `HX-Trigger` fires BEFORE the swap, which
+        is right for a toast and wrong for a scan whose out-of-band targets the
+        swap is about to replace."""
+        r = assign(client, pool_top()[0], MY_TEAM, 1.0)
+
+        assert toast_of(r), "the toast moved off HX-Trigger"
+        assert "showToast" not in r.headers.get("HX-Trigger-After-Settle", "")
+
+    def test_a_rejected_pick_asks_for_nothing(self, client):
+        """A refused assign is not a draft action and must not spend ten MILP
+        solves. `/assign` answers 200 when it rejects, so the status code
+        proves nothing here — the toast type is what separates them."""
+        r = client.post("/assign", data={
+            "player": pool_top()[0], "team": "NOPE", "salary": 1.0,
+        })
+
+        assert r.status_code == 200
+        assert toast_of(r).get("type") == "error", "this was supposed to reject"
+        assert self._settle_events(r) == {}
+
+    def test_no_other_mutation_asks_for_one(self, client):
+        """Deliberately narrow. Every mutation invalidates the column, but the
+        owner asked for it on a PICK, and the cost is ~384ms of up to 8 CBC
+        subprocesses each time."""
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = bot.roster_players[0].name
+
+        quiet = [
+            client.post("/toggle-bench",
+                        data={"team_code": MY_TEAM, "player_name": victim}),
+            client.post("/team-done", data={"team_code": "SRL"}),
+            client.post("/adjust-salary", data={
+                "team_code": MY_TEAM, "player_name": victim, "new_salary": 1.1,
+            }),
+        ]
+
+        for r in quiet:
+            assert self._settle_events(r) == {}, (
+                "a non-pick mutation is firing a ten-solve scan"
+            )
+
+    def test_the_event_name_is_the_same_string_in_both_files(self):
+        """A cross-file contract with no import between the two sides, so a
+        typo on either is completely silent — the header fires an event nothing
+        listens for, the column quietly stays on estimates, and the only symptom
+        is a marker the operator was already ignoring. Same reasoning as
+        `TestShortcutsModal`, which pins the shortcut sets in both directions.
+        """
+        from pathlib import Path
+
+        import main
+
+        js = (Path(main.__file__).resolve().parent / "static"
+              / "shortcuts.js").read_text()
+
+        assert f"'{main.SOLVE_STANDINGS_EVENT}'" in js, (
+            f"nothing in shortcuts.js listens for "
+            f"'{main.SOLVE_STANDINGS_EVENT}'"
+        )
+        assert "'/solve-standings'" in js, (
+            "the listener exists but no longer calls the scan"
+        )
+
+    def test_the_manual_button_is_still_there(self, client):
+        """The auto-scan is a convenience on top, not a replacement: it fires
+        only on a pick, and every other mutation still degrades the column."""
+        assert 'hx-get="/solve-standings"' in section_of(
+            client.get("/").text, "league-state"
+        )
+
+
 def main_state():
     import main
 

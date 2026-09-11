@@ -9,6 +9,53 @@ document.body.addEventListener('showToast', function(e) {
     setTimeout(function() { div.remove(); }, 4000);
 });
 
+/* Auto-solve the League State Proj column after a pick.
+
+   `_recompute()` empties `exact_projections` on every mutation, so one pick
+   returns all ten opponents' Proj figures to an estimate that runs +68 mean /
+   +193 worst and moves 9 of 10 teams in rank order — BOT's own rank badge
+   included. Owner decision 2026-09-10: re-solve after every pick rather than
+   leave the column degraded until someone reads the `estimated` marker.
+
+   Server-driven, via HX-Trigger-After-Settle on POST /assign, and NOT an
+   `hx-trigger="load"` mount inside league_state.html. That template ships
+   inside all_panels.html, which answers thirteen different things including
+   GET / — a load trigger would fire a ten-solve scan on initial page load and
+   after every bench toggle and salary edit. /assign is what the owner asked
+   for and what the server can name.
+
+   Coalesced, not stacked. A second pick landing mid-scan makes
+   `_publish_if_current` discard the first scan's work silently (by design —
+   `_state_version` moved), so without a guard two quick picks would run 16 CBC
+   subprocesses for one usable answer. With a guard but no queue, the column
+   would stay on estimates exactly when drafting fast, which is the failure
+   this feature exists to remove. So: at most one in flight, and re-fire once
+   on completion if a pick arrived while it ran.
+
+   `swap: 'none'` because the response is out-of-band fragments only — the same
+   reason the manual Solve Standings button uses it. */
+var standingsScanInFlight = false;
+var standingsScanQueued = false;
+
+function autoSolveStandings() {
+    if (standingsScanInFlight) {
+        standingsScanQueued = true;
+        return;
+    }
+    standingsScanInFlight = true;
+    // `finally`, not `then`: a failed scan must still release the latch, or one
+    // network hiccup silently retires the feature for the rest of the draft.
+    htmx.ajax('GET', '/solve-standings', {swap: 'none'}).finally(function() {
+        standingsScanInFlight = false;
+        if (standingsScanQueued) {
+            standingsScanQueued = false;
+            autoSolveStandings();
+        }
+    });
+}
+
+document.body.addEventListener('solveStandings', autoSolveStandings);
+
 /* Keyboard shortcuts for auction day */
 
 document.addEventListener('keydown', function(e) {

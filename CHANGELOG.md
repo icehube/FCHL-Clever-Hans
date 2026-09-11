@@ -287,6 +287,23 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **A test added the day before was flaky by construction, and this batch
+  tripped it.** `TestAppAssetsAreCacheBusted::test_the_token_tracks_the_file`
+  asserted that `style.css` and `shortcuts.js` get different cache-busting
+  tokens, on the stated grounds that comparing two real files avoids the mtime
+  resolution problem a touch-and-compare has. That reasoning is backwards: two
+  real files are not guaranteed to differ, and the first commit to edit both
+  inside the same second — the trade-panel fix, which changed the JS and the
+  CSS together — gave them the identical token `1789100528` and turned a
+  correct implementation red.
+
+  Rewritten to stamp two temp files with `os.utime` and assert the exact tokens,
+  with `cache_clear()` on both sides because `_asset_version` is `lru_cache`d.
+  A second test keeps the live half — both real assets exist and neither took
+  the `"0"` fallback — while saying nothing about the two differing, because
+  they legitimately do not. Both die under a constant-returning buster and under
+  one keyed on file size.
+
 - **Evaluating a trade wiped the form you had just filled in.** Reported as
   "when I evaluate a trade, the players get deselected, so I have to readd all
   of them to modify the trade to recheck things".

@@ -342,16 +342,50 @@ class TestAppAssetsAreCacheBusted:
             assert m, f"/static/{asset} is referenced without a ?v= cache buster"
             assert int(m.group(1)) > 0, f"{asset} got the missing-file fallback"
 
-    def test_the_token_tracks_the_file(self):
-        """Two different files must get two different tokens, or the buster is
-        a constant and changes nothing. Compares real files rather than
-        touching one — mtime resolution makes a touch-and-compare flaky."""
+    def test_the_token_tracks_the_file(self, tmp_path, monkeypatch):
+        """A buster returning the same string for every file busts nothing.
+
+        Two files with mtimes set EXPLICITLY, not the two real app assets. The
+        first version of this compared `style.css` against `shortcuts.js` on
+        the grounds that "mtime resolution makes a touch-and-compare flaky" —
+        and went red on 2026-09-10, the first commit to edit both inside the
+        same second, which is the same flakiness arriving from the other
+        direction. Two real files are not guaranteed to differ; two files you
+        stamped yourself are.
+
+        `cache_clear()` on both sides because `_asset_version` is `lru_cache`d
+        and would otherwise answer for the real STATIC_DIR, or poison it.
+        """
+        import os
+
         import main
 
-        tokens = {a: main._asset_version(a) for a in self.APP_ASSETS}
-        assert len(set(tokens.values())) == len(tokens), (
-            f"every asset got the same token: {tokens}"
-        )
+        monkeypatch.setattr(main, "STATIC_DIR", tmp_path)
+        main._asset_version.cache_clear()
+        try:
+            for name, when in (("early.css", 1_700_000_000),
+                               ("later.js", 1_700_000_042)):
+                (tmp_path / name).write_text("x")
+                os.utime(tmp_path / name, (when, when))
+
+            assert main._asset_version("early.css") == "1700000000"
+            assert main._asset_version("later.js") == "1700000042", (
+                "the token does not track mtime, so editing a file leaves the "
+                "browser on the cached copy"
+            )
+        finally:
+            main._asset_version.cache_clear()
+
+    def test_every_app_asset_resolves_to_its_own_mtime(self):
+        """The live half: both real assets exist and neither took the
+        missing-file fallback. Says nothing about the two differing — they
+        legitimately do not when one commit touches both."""
+        import main
+
+        for asset in self.APP_ASSETS:
+            token = main._asset_version(asset)
+            assert token != "0", f"{asset} took the missing-file fallback"
+            assert token == str(int((main.STATIC_DIR / asset).stat().st_mtime))
 
     def test_a_missing_asset_does_not_break_the_page(self):
         """A cache-busting token is no reason to fail a render mid-draft."""

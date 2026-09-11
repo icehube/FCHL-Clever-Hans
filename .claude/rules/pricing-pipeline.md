@@ -72,13 +72,53 @@ Scarcity is now the largest for **none of them**. It is still the second
 largest mean effect, and still collinear, so the two rows are still read
 together; what is gone is the "takes over at the top" half.
 
-**It explains the MEDIAN and nothing else.** `expected_price` is not
-decomposable the same way, for three separate reasons: P(floor) is a second
-logistic whose coefficients frequently point the OTHER way (F's
-`floor_coef_log_rank` is +3.006 against `coef_log_rank` −0.196, so a deep rank
-makes a player both more likely to be a floor sale *and* cheaper if he is not);
-`sigma` is a nonlinear function of `log_mu`; and the clip bounds are
-per-position (`max_bid` is 11.4 F / 8.5 D / 10.5 G, **not** `config.MAX_SALARY`).
+**Two chains, and neither of them reaches `expected_price`.** The card has
+carried a second column since 2026-09-11: stage 2 multiplies the PRICE he sells
+for if he clears the floor, stage 1 multiplies the ODDS he goes at the minimum
+at all. Both are attributable per row for the same reason — a multiplier is
+order-invariant — and the stage-1 chain reconstructs exactly, `base_odds ×
+PROD(odds ratios) = player_odds` to a maximum relative error of **6.8e-13** over
+the pool.
+
+**The floor column is an ODDS RATIO and must never become percentage points.**
+That is the dollar-step trap in a logistic costume: the sigmoid is nonlinear, so
+a per-row "+12pp" depends on what the running odds were when the row was
+applied, while `exp(floor_logit_delta)` does not.
+`test_the_floor_odds_do_not_depend_on_their_order_either` measures both through
+the same permutation loop so the comparison is like for like. It is also why
+`main._odds_label` is not a `%.2f`: the ratios span **8.6e-08 to 51.6** over the
+pool, so two fixed decimals print `×0.00` on **66 rows** — a column reporting
+"this driver did nothing" about the single largest effect on the card. It shows
+the reciprocal as `÷`, with precision following magnitude (p50 1.99, p90 14.2,
+p99 3392) and a `÷1000+` cap, because the measured maximum is 11,691,617 and
+those digits are not a number anyone uses.
+
+**A row is hidden only when BOTH columns print 1.00 — reading one of them is a
+bug.** Measured 2026-09-11, **11 of the 12** rows whose price factor rounds to
+`×1.00` move the floor odds by something worth seeing, against exactly **1**
+row inert in both. The rule is *rounded*, not exactly zero: the comment that
+justified exact equality claimed a dropped `×1.004` row would leave an
+unexplained gap between the base and the median, and the gap is already there
+and 70x larger — printed base × printed factors misses the printed unclamped
+median by more than $0.01M on **312 of 705** players (max $0.19M), purely from
+rounding each factor to 2dp, and dropping every `×1.00` row changes that by
+$0.0000M.
+
+**The two stages' coefficients often carry opposite signs, and that is not a
+contradiction.** F's `floor_coef_log_rank` is +3.006 against `coef_log_rank`
+−0.196: a deep rank makes a player both more likely to be a floor sale *and*
+cheaper if he is not — two mechanisms pointing at the same cheaper player. What
+it does mean is that the two columns cannot share a palette or a direction.
+Measured, they disagree about what they do to the PRICE on **195 of 2361** rows
+(dearer if he clears the floor, likelier to sell at the floor), which is exactly
+the signal the column exists to show, so the floor bar is coloured on its own
+sign in its own hues and never on the price row's.
+
+**`expected_price` is where the two chains meet, and it is stated rather than
+attributed.** It is not decomposable the way either stage is: P(floor) is a
+second logistic pointing its own way (above); `sigma` is a nonlinear function of
+`log_mu`; and the clip bounds are per-position (`max_bid` is 11.4 F / 8.5 D /
+10.5 G, **not** `config.MAX_SALARY`).
 The clamp is the common case, not an edge — re-measured 2026-09-10, **490 of
 705** pool players have an unclamped median below their position's `min_bid`.
 **One now sits ABOVE `max_bid`**, where none did before the refit: stars price

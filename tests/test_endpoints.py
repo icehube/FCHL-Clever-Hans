@@ -1324,7 +1324,13 @@ class TestTheChartExplainsThePrice:
         return pool_top(1, position="F")[0]
 
     def _live_groups(self, name: str) -> set[str]:
-        """The groups the engine says actually move this player's price."""
+        """The groups the engine says say something about this player.
+
+        BOTH columns, and rounded. Reading `log_delta != 0.0` — which this did
+        until 2026-09-11 — is wrong in two directions at once now: it keeps a
+        row whose price factor prints x1.00, and it would drop a row that does
+        nothing to the price while multiplying the floor odds by 20.
+        """
         import main
         from price_model import decompose_player
 
@@ -1333,7 +1339,11 @@ class TestTheChartExplainsThePrice:
             player, main.model_params,
             main.auction_state.price_reference[player.position],
         )
-        return {d.group for d in b.drivers if d.log_delta != 0.0}
+        return {
+            d.group for d in b.drivers
+            if not (main._is_unit(d.factor)
+                    and main._is_unit(math.exp(d.floor_logit_delta)))
+        }
 
     def test_it_names_exactly_the_drivers_that_are_in_play(self, client):
         """Set equality, both directions, against the engine.
@@ -1478,7 +1488,7 @@ class TestTheChartExplainsThePrice:
         # figure": the E[$] note below the table prints one too, and reading
         # that as the median is how the first version of this failed.
         # The LAST figure in the row, which is the effect cell. A non-greedy
-        # `Model median.*?\$([\d.]+)M` reads the first one instead, and the
+        # `This player.*?\$([\d.]+)M` reads the first one instead, and the
         # clamp note sits between the label and the effect — so the moment a
         # star forward's unclamped median cleared $11.4M this read $15.85M
         # and called it the median.
@@ -1488,7 +1498,7 @@ class TestTheChartExplainsThePrice:
             return float(re.findall(r"\$([\d.]+)M", row.group(0))[-1])
 
         base = _effect(r"Typical \w")
-        median = _effect("Model median")
+        median = _effect("This player")
         assert base == pytest.approx(b.base_price, abs=0.005)
         assert median == pytest.approx(b.prediction.median_price, abs=0.005)
 
@@ -1512,12 +1522,20 @@ class TestTheChartExplainsThePrice:
         constant width would misread as "every driver contributed equally".
 
         Scaled on |log_delta|, which is order-invariant — never on a dollar
-        step. Checked as an ORDERING against the factors rather than against
-        exact pixel counts, so a change to the 60px scale is not a failure.
+        step. Checked as an ORDERING against the factors, plus the one pixel
+        fact that carries meaning: the largest effect fills the scale.
+
+        The pattern anchors on the price bar's EXACT class and takes the factor
+        from the cell immediately after it. It used to read
+        `driver-bar[^"]*" ... .*?&times;` across the row, which silently began
+        pairing each FLOOR bar with the next row's price factor when the second
+        column landed 2026-09-11 — five matches, every assertion green, every
+        pairing wrong. A regex that spans cells is not reading a row.
         """
         block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
         rows = re.findall(
-            r'driver-bar[^"]*" style="width: (\d+)px".*?&times;([\d.]{4,})',
+            r'<span class="driver-bar (?:up|down)" style="width: (\d+)px">'
+            r'</span></td>\s*<td class="driver-effect">&times;([\d.]{4,})',
             block, re.S,
         )
         assert len(rows) == len(self.GROUPS), f"found {len(rows)} bars"
@@ -1611,10 +1629,34 @@ class TestTheChartExplainsThePrice:
         )
 
     def test_it_does_not_claim_to_explain_the_expected_price(self, client):
-        """E[$] is not decomposable the way the median is — P(floor) is a
-        separate logistic whose coefficients often point the other way."""
+        """E[$] is where the two chains MEET, and neither column reaches it.
+
+        Both columns terminate — price at the model median, floor odds at
+        P(floor) — and E[$] combines them through a clipped log-normal whose
+        sigma depends on log_mu and whose bounds are per-position. So it is a
+        stated blend, never a third column. The note used to say "P(floor) is a
+        separate model and is not broken down here", which stopped being true
+        on 2026-09-11 when stage 1 got its own column; what has to stay true is
+        that E[$] is not attributed.
+        """
         block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
-        assert "not broken down here" in block
+        note = re.search(r'<p class="driver-note">(.*?)</p>', block, re.S)
+        assert note, "the card lost the note that bounds what it explains"
+        note = " ".join(note.group(1).split())
+        assert "model median" in note, (
+            "the note does not say where the price column stops"
+        )
+        assert "blends the two" in note and "floor" in note, (
+            f"the note does not say E[$] is a blend rather than a row: {note}"
+        )
+        # The guard that matters: no per-row attribution of E[$] anywhere in
+        # the table. Three effect columns would mean someone built one.
+        # The lookahead is load-bearing: `<th[^>]*>` also matches `<thead>`,
+        # which swallowed the whole header row into one bogus "cell".
+        header_cells = re.findall(r"<th(?=[\s>])[^>]*>(.*?)</th>", block, re.S)
+        assert sum(1 for h in header_cells if h.strip()) == 2, (
+            f"the table grew a third labelled column: {header_cells}"
+        )
 
     def test_the_chart_body_still_carries_no_ids_at_all(self, client):
         """Mount-agnostic, unlike the older assertion next door.
@@ -1642,6 +1684,305 @@ class TestTheChartExplainsThePrice:
             assert "price-chart" in r.text, "the chart itself went too"
         finally:
             main.auction_state.price_reference = saved
+
+
+class TestTheFloorOddsColumn:
+    """Stage 1 reaches the screen since 2026-09-11, and it is not a price factor.
+
+    490 of 705 pool players clamp up to their position's min_bid, so for most
+    of the pool P(floor) IS the price story and the median waterfall explains a
+    figure nobody pays. The column shows the ODDS RATIO on a floor sale, which
+    is the only per-row quantity stage 1 has that does not move with the row's
+    position in the list.
+    """
+
+    def _block(self, text: str) -> str:
+        start = text.index('<details class="price-drivers">')
+        return text[start:text.index("</details>", start)]
+
+    def _decomposed(self, name: str):
+        import main
+        from price_model import decompose_player
+
+        player = main.auction_state.available_players[name]
+        return decompose_player(
+            player, main.model_params,
+            main.auction_state.price_reference[player.position],
+        )
+
+    def test_a_row_inert_in_price_but_live_on_the_floor_odds_is_shown(self, client):
+        """The mutant this whole pairing exists to stop.
+
+        Measured 2026-09-11 over the fresh pool, 11 of the 12 rows whose price
+        factor prints x1.00 move the floor odds by something worth seeing —
+        against exactly 1 row inert in both. So hiding on the price column
+        alone, which is what the 2026-09-11 rounding change would have done had
+        it shipped by itself, drops eleven rows whose entire content is in the
+        other column.
+
+        The player is derived by that ROLE and the search asserts it found one,
+        so a pool refresh that removes the case fails loudly rather than
+        passing vacuously.
+        """
+        import main
+
+        subject = None
+        for name, player in main.auction_state.available_players.items():
+            if player.position not in main.auction_state.price_reference:
+                continue
+            b = self._decomposed(name)
+            for d in b.drivers:
+                if (main._is_unit(d.factor)
+                        and not main._is_unit(math.exp(d.floor_logit_delta))):
+                    subject = (name, d)
+                    break
+            if subject:
+                break
+        assert subject, (
+            "no pool player has a driver that is inert on price and live on "
+            "the floor odds, so this test cannot fail and must be re-derived"
+        )
+        name, driver = subject
+
+        block = self._block(client.get(f"/player-chart/{name}").text)
+        assert driver.group in block, (
+            f"{name}: {driver.group} multiplies the floor odds by "
+            f"{math.exp(driver.floor_logit_delta):.3g} and the card hid the row "
+            f"because its PRICE factor rounds to 1.00"
+        )
+        assert main._odds_label(math.exp(driver.floor_logit_delta)) in block
+
+    def test_a_row_that_says_nothing_in_either_column_is_hidden(self, client):
+        """The other direction, and the whole practical effect of the rounding
+        change: measured, exactly one row across 705 players.
+
+        The subject is NUDGED, not zeroed, and that is the entire point. A
+        player decomposed against his own features has every delta at exactly
+        0.0, where the old `log_delta != 0.0` rule and the new rounding rule
+        agree — measured 2026-09-11, reverting to the old rule against a
+        zeroed subject leaves this green. So one input moves by an epsilon:
+        both of that driver's deltas become non-zero and both still print
+        1.00, which is the only shape that separates the two rules.
+
+        Constructed rather than hunted because the one real pool row is one
+        refresh away from zero, and a test that silently stops finding its
+        subject is worse than no test.
+        """
+        import main
+        from price_model import build_features, decompose_price
+
+        own = build_features("F", 90, 6.0, True, main.model_params,
+                             last_salary=5.0, pos_rank=4)
+        b = decompose_price("F", 90, 6.0 + 1e-6, True, main.model_params, own,
+                            last_salary=5.0, pos_rank=4)
+
+        nudged = [d for d in b.drivers if d.log_delta != 0.0]
+        assert len(nudged) == 1 and nudged[0].group == "NHL team", (
+            f"the nudge moved {[d.group for d in nudged]}, not just NHL team"
+        )
+        assert nudged[0].floor_logit_delta != 0.0, (
+            "the nudge did not reach stage 1, so this cannot separate the rules"
+        )
+        assert all(
+            main._is_unit(d.factor) and main._is_unit(math.exp(d.floor_logit_delta))
+            for d in b.drivers
+        ), "the nudged driver is visible at 2dp, so it is not an inert row"
+
+        assert main._driver_rows(b)["rows"] == [], (
+            "a driver that prints 1.00 in BOTH columns is still on the card"
+        )
+
+    def test_the_column_reconstructs_the_players_own_floor_percentage(self, client):
+        """Base odds x the RENDERED ratios lands on the RENDERED final figure.
+
+        The unit test in tests/test_price_model.py proves the logit chain
+        reconstructs; this proves the TEMPLATE renders that chain and not some
+        other field. Tolerance is loose on purpose — the card prints 2sf
+        multipliers and 0dp percentages, so re-multiplying is lossy by design,
+        and a tight bound here would only be re-deriving the unit test.
+        """
+        name = next(
+            n for n, p in main_module().auction_state.available_players.items()
+            if p.position in main_module().auction_state.price_reference
+        )
+        b = self._decomposed(name)
+        block = self._block(client.get(f"/player-chart/{name}").text)
+
+        pct = [int(m) for m in re.findall(r'driver-effect">(\d+)%<', block)]
+        assert len(pct) == 2, f"expected a base and a final percentage, got {pct}"
+        base_pct, final_pct = pct
+        assert base_pct == round(b.base_p_floor * 100)
+        assert final_pct == round(b.prediction.p_floor * 100)
+
+        base_odds = b.base_p_floor / (1.0 - b.base_p_floor)
+        for d in b.drivers:
+            base_odds *= math.exp(d.floor_logit_delta)
+        assert round(100 * base_odds / (1 + base_odds)) == final_pct, (
+            "the chain of odds ratios does not land on the printed P(floor)"
+        )
+
+    def test_the_two_columns_are_coloured_independently(self, client):
+        """Measured, the two disagree about the price on 195 of 2361 rows — a
+        driver that makes a player dearer while also making a $0.5M sale
+        likelier. Those rows are the reason the column exists, so the floor bar
+        carries its OWN direction and its own hues; painting both green/red off
+        one reading would make them look self-contradictory instead.
+        """
+        import main
+
+        def visible(d):
+            return (not main._is_unit(d.factor)
+                    and not main._is_unit(math.exp(d.floor_logit_delta)))
+
+        # OPPOSITE SIGNS specifically. That is the only shape that can tell a
+        # floor bar painted from `floor_up` apart from one painted from `up` —
+        # measured 2026-09-11, a subject whose two deltas share a sign leaves
+        # the mutant alive, because both readings then agree.
+        subject = None
+        for name, player in main.auction_state.available_players.items():
+            if player.position not in main.auction_state.price_reference:
+                continue
+            for d in self._decomposed(name).drivers:
+                if visible(d) and (d.log_delta > 0) != (d.floor_logit_delta > 0):
+                    subject = (name, d)
+                    break
+            if subject:
+                break
+        assert subject, (
+            "no pool player has a driver whose two columns point opposite "
+            "ways, so this test cannot fail and must be re-derived"
+        )
+        name, driver = subject
+
+        block = self._block(client.get(f"/player-chart/{name}").text)
+        # Indexed against the live drivers in ENGINE order, the way
+        # test_the_bars_are_scaled_in_log_space_not_on_factor_minus_one does.
+        # Matching on the group NAME does not work here: Scarcity's tooltip
+        # explains that it is derived from points and so contains the string
+        # "Points", which quietly matched two rows.
+        live = [d for d in self._decomposed(name).drivers
+                if not (main._is_unit(d.factor)
+                        and main._is_unit(math.exp(d.floor_logit_delta)))]
+        rows = [r for r in re.findall(r"<tr>.*?</tr>", block, re.S)
+                if "driver-bar" in r]
+        assert len(rows) == len(live), (
+            f"{len(rows)} rendered rows against {len(live)} live drivers"
+        )
+        row = rows[[d.group for d in live].index(driver.group)]
+        price_dir = "up" if driver.log_delta >= 0 else "down"
+        floor_dir = "up" if driver.floor_logit_delta >= 0 else "down"
+        assert price_dir != floor_dir
+        assert f'class="driver-bar {price_dir}"' in row, (
+            f"{name}/{driver.group}: the price bar is not {price_dir}"
+        )
+        assert f'class="driver-bar odds {floor_dir}"' in row, (
+            f"{name}/{driver.group}: the floor bar reads {price_dir}, so it is "
+            f"painted from the PRICE direction rather than its own"
+        )
+
+    def test_the_floor_column_is_never_a_percentage_point_step(self, client):
+        """The obvious 'improvement', and the reason it is wrong.
+
+        A per-row '+12pp' is exp()'s dollar-step trap in a logistic costume:
+        the sigmoid is nonlinear, so the step depends on what the running odds
+        were when the row was applied. Only the two ENDS of the chain are
+        quoted as percentages, so a percentage inside a driver row means
+        somebody built the order-dependent version.
+        """
+        name = next(
+            n for n, p in main_module().auction_state.available_players.items()
+            if p.position in main_module().auction_state.price_reference
+        )
+        block = self._block(client.get(f"/player-chart/{name}").text)
+        driver_rows = [
+            r for r in re.findall(r"<tr>.*?</tr>", block, re.S)
+            if "driver-bar" in r
+        ]
+        assert driver_rows, "no driver rows to check"
+        # The EFFECT cells only. A row's label cell legitimately prints "11.0%
+        # Cup odds (typical 2.0%)" — that is the player's INPUT, not a step.
+        for r in driver_rows:
+            for cell in re.findall(r'<td class="driver-effect">(.*?)</td>', r, re.S):
+                assert "%" not in cell, (
+                    f"a driver row's effect cell prints a percentage: {cell!r}"
+                )
+                assert "pp" not in cell
+
+
+class TestOddsLabel:
+    """`main._odds_label` — the format, which cannot be a plain %.2f.
+
+    Measured over the fresh 705-player pool the stage-1 odds ratios span
+    8.6e-08 to 51.6, so two fixed decimals print `x0.00` on 66 rows: a column
+    reporting "this driver did nothing" about the single largest effect on the
+    card. Magnitude percentiles are p50 1.99, p90 14.2, p99 3392.
+    """
+
+    def test_a_ratio_below_one_is_shown_as_a_division(self):
+        import main
+
+        assert main._odds_label(0.5) == "÷2.00"
+        assert main._odds_label(2.0) == "×2.00"
+
+    def test_the_reciprocal_pair_reads_the_same_magnitude(self):
+        """x2.00 and /2.00 are the same size effect pointing opposite ways —
+        that is the whole reason the reciprocal is shown rather than 0.50."""
+        import main
+
+        for r in (1.5, 2.0, 7.25, 40.0, 300.0):
+            up, down = main._odds_label(r), main._odds_label(1.0 / r)
+            assert up[1:] == down[1:], f"{up} and {down} read differently"
+            assert (up[0], down[0]) == ("×", "÷")
+
+    def test_precision_follows_magnitude(self):
+        import main
+
+        assert main._odds_label(1.994) == "×1.99"
+        assert main._odds_label(14.18) == "×14.2"
+        assert main._odds_label(56.97) == "×57.0"
+        assert main._odds_label(339.2) == "×339"
+
+    def test_it_caps_rather_than_printing_seven_digits(self):
+        """The measured maximum is 11,691,617. `/11691617` is not a number an
+        operator uses; "he does not go at the minimum" is the whole content,
+        and the bar carries the magnitude."""
+        import main
+
+        assert main._odds_label(1.0 / 11_691_617) == "÷1000+"
+        assert main._odds_label(3391.8) == "×1000+"
+        # Just below the cap still prints digits, so the boundary is real.
+        assert main._odds_label(999.4) == "×999"
+
+    def test_exactly_one_is_not_a_division(self):
+        import main
+
+        assert main._odds_label(1.0) == "×1.00"
+
+    def test_every_pool_row_gets_a_label_the_card_can_show(self, client):
+        """No row anywhere in the live pool renders as x0.00 or an empty
+        string — the failure a plain %.2f produces on 66 of them."""
+        import main
+        from price_model import decompose_player
+
+        seen = 0
+        for player in main.auction_state.available_players.values():
+            ref = main.auction_state.price_reference.get(player.position)
+            if not ref:
+                continue
+            for d in decompose_player(player, main.model_params, ref).drivers:
+                label = main._odds_label(math.exp(d.floor_logit_delta))
+                seen += 1
+                assert label[0] in "×÷" and len(label) > 1, label
+                assert label not in ("×0.00", "÷0.00"), (
+                    f"{player.name} {d.group} rendered as {label}"
+                )
+        assert seen > 1000, f"only {seen} rows swept; the pool did not load"
+
+
+def main_module():
+    import main
+
+    return main
 
 
 class TestBidCheckOnAPlayerItCannotFind:

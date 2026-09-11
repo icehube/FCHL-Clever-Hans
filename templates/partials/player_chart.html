@@ -158,17 +158,38 @@
         <summary>
             <span class="collapse-chevron">&#9654;</span> Price drivers
             {%- for r in chart_drivers.headline %} · {{ r.group }} &times;{{ "%.1f"|format(r.factor) }}{% endfor %}
+            {#- The floor figure belongs in the CLOSED state, not only inside.
+                556 of 705 pool players sit at P(floor) >= 50%, where the price
+                factors describe a sale that probably never happens -- a summary
+                reading "Points x6.07" alone misleads on most of the pool. #}
+            · {{ "%.0f"|format(chart_drivers.p_floor * 100) }}% floor
         </summary>
         <div class="table-scroll-x">
+        {# Two chains, side by side, and the header is what stops them being
+           read as one. Stage 2 multiplies the PRICE he sells for if he clears
+           the floor; stage 1 multiplies the ODDS he goes at the minimum at
+           all. Both columns are order-invariant multipliers, which is the only
+           reason either can be attributed per row -- see main._driver_rows. #}
         <table class="table table-xs price-drivers-table">
+            <thead>
+            <tr>
+                <th></th>
+                <th colspan="2" class="driver-effect"
+                    title="What each driver multiplies the model price by, IF he sells above the floor. The chain runs from the typical player at this position down to the model median.">Price</th>
+                <th colspan="2" class="driver-effect"
+                    title="What each driver multiplies the ODDS of a $0.5M floor sale by. Odds, not percent: the two percentages below do not multiply, the odds behind them do. A driver can raise the price AND make a floor sale likelier -- these are two different models and they disagree about 8% of the time.">Floor odds</th>
+            </tr>
+            </thead>
             <tbody>
             <tr>
                 <td>
                     {{ chart_drivers.base_label }}
-                    <span class="driver-detail">{{ chart_drivers.base_detail }} · sells at the floor {{ "%.0f"|format(chart_drivers.base_p_floor * 100) }}% of the time</span>
+                    <span class="driver-detail">{{ chart_drivers.base_detail }}</span>
                 </td>
                 <td class="driver-effect">&mdash;</td>
                 <td class="driver-effect">${{ "%.2f"|format(chart_drivers.base_price) }}M</td>
+                <td class="driver-effect">&mdash;</td>
+                <td class="driver-effect">{{ "%.0f"|format(chart_drivers.base_p_floor * 100) }}%</td>
             </tr>
             {% for r in chart_drivers.rows %}
             <tr>
@@ -178,28 +199,36 @@
                 </td>
                 <td><span class="driver-bar {{ 'up' if r.up else 'down' }}" style="width: {{ r.bar_px }}px"></span></td>
                 <td class="driver-effect">&times;{{ "%.2f"|format(r.factor) }}</td>
+                {# Coloured on its OWN direction and in its own hues. Sharing
+                   green/red with the price column would invite a cross-read,
+                   and the 195 rows where the two point opposite ways are
+                   exactly the rows worth looking at. #}
+                <td><span class="driver-bar odds {{ 'up' if r.floor_up else 'down' }}" style="width: {{ r.floor_bar_px }}px"></span></td>
+                <td class="driver-effect">{{ r.floor_label }}</td>
             </tr>
             {% endfor %}
             <tr>
                 <td>
-                    Model median
+                    This player
                     {% if chart_drivers.clamp_note %}<span class="driver-detail">{{ chart_drivers.clamp_note }}</span>{% endif %}
                 </td>
                 <td class="driver-effect">&mdash;</td>
                 <td class="driver-effect">${{ "%.2f"|format(chart_drivers.median_price) }}M</td>
+                <td class="driver-effect">&mdash;</td>
+                <td class="driver-effect">{{ "%.0f"|format(chart_drivers.p_floor * 100) }}%</td>
             </tr>
             </tbody>
         </table>
         </div>
-        {# The rows above explain the MEDIAN. E[$] is not decomposable the same
-           way — P(floor) is a separate logistic whose coefficients often point
-           the other way, sigma depends on log_mu, and the clip bounds are
-           per-position — so the arithmetic is stated rather than attributed. #}
+        {# What the table does NOT explain. Both chains END here, at the median
+           and at P(floor); E[$] combines them through a clipped log-normal
+           whose sigma depends on log_mu and whose bounds are per-position, so
+           it is not a third column -- the arithmetic is stated instead. #}
         <p class="driver-note">
-            E[$] ${{ "%.2f"|format(chart_drivers.expected_price) }}M
-            = {{ "%.0f"|format(chart_drivers.p_floor * 100) }}% floor
+            Price column ends at the model median, the $ figure for a player who
+            clears the floor. E[$] ${{ "%.2f"|format(chart_drivers.expected_price) }}M
+            blends the two: {{ "%.0f"|format(chart_drivers.p_floor * 100) }}% floor
             + {{ "%.0f"|format((1 - chart_drivers.p_floor) * 100) }}% above-floor mean.
-            P(floor) is a separate model and is not broken down here.
         </p>
     </details>
     {% endif %}

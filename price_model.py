@@ -348,13 +348,25 @@ def decompose_price(
     makes displaying one dangerous — the figure gets quoted. The factor does not
     move.
 
-    Stage 1 is decomposed too (`floor_logit_delta`) and is deliberately NOT the
-    headline: it is log-odds, and its coefficients frequently point the OTHER
-    way from stage 2 (for F, `floor_coef_log_rank` is +3.006 while
-    `coef_log_rank` is -0.391 — a deep rank makes a player both more likely to
-    be a floor sale and cheaper if he is not). `expected_price` is not a linear
-    function of either stage: sigma depends on log_mu and the clip bounds are
-    per-position. **This explains the MEDIAN and nothing else.**
+    Stage 1 is decomposed too (`floor_logit_delta`) and since 2026-09-11 it is
+    the card's second column — but it is log-odds, never a price factor, and
+    the only per-row quantity it has that does not move with the row's position
+    is the ODDS RATIO `exp(floor_logit_delta)`. A percentage-point step is the
+    logistic's version of the dollar-step trap: the sigmoid is nonlinear, so
+    "+12pp" depends on what the running odds were when the row was applied.
+
+    The two stages' coefficients frequently carry OPPOSITE SIGNS — for F,
+    `floor_coef_log_rank` is +3.006 while `coef_log_rank` is -0.196 — and that
+    is not a contradiction: a deep rank makes a player both more likely to be a
+    floor sale AND cheaper if he is not, which are two mechanisms pointing at
+    the same cheaper player. What the signs do mean is that the two columns
+    cannot share a palette or a direction; measured over the pool, they say
+    different things about the price on 195 of 2361 rows.
+
+    **Neither chain reaches `expected_price`**, which is not a linear function
+    of either stage: sigma depends on log_mu and the clip bounds are
+    per-position. The price chain ends at the MEDIAN and the floor chain at
+    P(floor); E[$] blends them and is stated, never attributed.
     """
     pos_params = params[position]
     feats = build_features(

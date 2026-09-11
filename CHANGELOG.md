@@ -22,6 +22,103 @@ rediscover the same non-problem.
 
 ## [2026-09-11]
 
+### Added
+
+- **The price-driver card grew a second column: what each driver does to the
+  ODDS of a $0.5M floor sale.** `DriverContribution.floor_logit_delta` had been
+  computed for every driver of every decomposition since the card shipped and
+  read by nothing but the test asserting it reconstructs. That mattered more
+  than "an unused field": **490 of 705 pool players clamp up to their position's
+  `min_bid`**, so for most of the pool P(floor) *is* the price story and the
+  median waterfall was explaining a figure nobody pays. Measured before
+  building it, **556 of 705** sit at P(floor) >= 50%, and the mean |stage-1
+  log-odds delta| runs Points 1.589 / Scarcity 1.486 / NHL team 0.421 /
+  Reputation 0.372 / Contract 0.067 — so the column that was missing was
+  routinely the larger of the two.
+
+  **It is an odds ratio, and that is not a presentation preference.** Stage 1 is
+  a logistic, so the intuitive display — "this driver adds 12 percentage points
+  to P(floor)" — is the per-row dollar step in a new costume: the sigmoid is
+  nonlinear, so the step depends on what the running odds were when the row was
+  applied. `exp(floor_logit_delta)` does not move, and the chain reconstructs
+  exactly — `base_odds × PROD(ratios) = player_odds`, maximum relative error
+  **6.8e-13** across all 705 players.
+  `test_the_floor_odds_do_not_depend_on_their_order_either` measures the
+  percentage-point step and the odds ratio through the *same* permutation loop,
+  so the two are compared like for like rather than one being computed from the
+  formula it is meant to be tested against, and a second guard fails if any
+  driver row's effect cell ever prints a `%`.
+
+  **`main._odds_label` is not a `%.2f`, and the reason is measured.** The pool's
+  ratios span **8.6e-08 to 51.6**, so two fixed decimals print `×0.00` on **66
+  rows** — a column reporting "this driver did nothing" about the single largest
+  effect on the card. It shows the reciprocal as `÷`, with precision following
+  magnitude (p50 1.99, p90 14.2, p99 3392) and a `÷1000+` cap, because the
+  measured maximum is 11,691,617 and those digits are not a number an operator
+  uses; the bar carries the magnitude.
+
+  **The two columns get different hues on purpose.** Their coefficients often
+  carry opposite signs — F's `floor_coef_log_rank` is +3.006 against
+  `coef_log_rank` −0.196 — which is not a contradiction (a deep rank makes a
+  player both likelier to be a floor sale *and* cheaper if he is not) but does
+  mean they cannot share green/red, which already mean "dearer" and "cheaper"
+  one column to the left. Measured, the two disagree about what they do to the
+  price on **195 of 2361** rows, and those rows are the reason the column
+  exists. The floor bar is coloured on its own sign.
+
+  Also: the table gained a `<thead>` — it had none, so nothing on screen said
+  what `×6.07` meant — the terminal row is now `This player` rather than `Model
+  median` since it ends both chains, and the collapsed `<summary>` carries the
+  floor percentage, because a closed card reading "Points ×6.07" misleads on the
+  556 players whose sale probably happens at the minimum.
+
+### Fixed
+
+- **Driver rows are hidden on what they PRINT, not on an exactly-zero delta —
+  and the reason the old rule was kept turned out to be false.** `_driver_rows`
+  tested `log_delta != 0.0`, leaving 12 rows across the pool on screen printing
+  `×1.00`, which is the same "the model ignores this" misreading the original
+  hiding change removed for the structural cases. The deferral reason, in the
+  code comment and in `BACKLOG.md`: a dropped `×1.004` row "would leave a gap
+  between the base and the median that nothing on screen explains".
+
+  Measured, **the card already did not reconcile, and by 70x more**. Printed
+  base × printed factors misses the printed unclamped median by more than $0.01M
+  on **312 of 705** players — mean $0.008M, max $0.19M (McDavid: $0.32M ×
+  [6.07, 1.37, 1.79, 2.83, 1.19] = $16.04M against a printed $15.85M) — purely
+  from rounding each factor to 2dp. Dropping every `×1.00` row changes that by
+  **$0.0000M** on every player. The gap is a property of printing rounded
+  factors at all, and no residual row was added: that is the running-dollar
+  column the order-invariance test exists to forbid, wearing a third hat.
+
+  **The rule reads both columns, and shipping it alone would have been a
+  regression.** Measured, **11 of the 12** `×1.00` price rows move the floor
+  odds by something worth seeing, against exactly **1** row inert in both — so
+  hiding on the price column alone would have dropped eleven rows whose entire
+  content is in the column that landed beside it. That is why the two changes
+  are one commit. The honest size of this half, once the column exists: **one
+  row across 705 players.**
+
+  Two tests had to be rebuilt rather than adjusted. `_live_groups` computed the
+  old rule, so `test_it_names_exactly_the_drivers_that_are_in_play` would have
+  gone on asserting set equality against the wrong set. And
+  `test_a_row_that_says_nothing_in_either_column_is_hidden` was first written
+  against a player decomposed against his OWN features, where every delta is
+  *exactly* zero and the old and new rules agree — mutation testing showed the
+  old rule surviving it. Its subject is now NUDGED by an epsilon on one input,
+  which is the only shape that separates the two rules.
+
+- **A bar test that passed while measuring the wrong thing.**
+  `test_the_bars_are_scaled_to_the_effects_they_show` matched
+  `driver-bar[^"]*" ... .*?&times;` across a row. With a second bar in each row
+  that pattern began pairing every FLOOR bar with the NEXT row's price factor —
+  five matches, every assertion green, every pairing wrong. Found by running the
+  suite against the new template, not by reading it. The pattern now anchors on
+  the price bar's exact class and takes the factor from the cell immediately
+  after it: a regex that spans cells is not reading a row. Same commit, a second
+  regex bug in the new test beside it — `<th[^>]*>` also matches `<thead>`, and
+  swallowed the whole header row into one bogus "cell".
+
 ### Changed
 
 - **`BACKLOG.md` re-triaged and cut from 322 lines to 229.** Every one of the

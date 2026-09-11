@@ -2138,6 +2138,39 @@ def _lognormal_pdf_path(
     return curve_d, floor_bar
 
 
+def _is_unit(x: float) -> bool:
+    """Does this multiplier print as 1.00 on the card?
+
+    The card's own precision is what decides whether a row says anything, so
+    the hiding rule reads the RENDERED figure rather than the float behind it.
+    """
+    return f"{x:.2f}" == "1.00"
+
+
+def _odds_label(ratio: float) -> str:
+    """One driver's effect on the ODDS of a floor sale, as it appears on screen.
+
+    Not `%.2f`. Measured over the fresh 705-player pool the stage-1 odds ratios
+    span 8.6e-08 to 51.6, so a fixed two decimals prints `x0.00` on 66 rows —
+    a column saying "this driver did nothing" about the single largest effect
+    on the card. The reciprocal is shown as a division instead, which is the
+    same order-invariant quantity read the other way round, with precision that
+    follows the magnitude: p50 is 1.99, p90 14.2, p99 3392.
+
+    Above a thousandfold the digits stop meaning anything an operator can use —
+    "he does not go at the minimum" is the whole content — so the label caps and
+    the bar carries the magnitude. ~1% of rows reach it.
+    """
+    r, sym = (ratio, "×") if ratio >= 1.0 else (1.0 / ratio, "÷")
+    if r >= 1000:
+        return f"{sym}1000+"
+    if r >= 100:
+        return f"{sym}{r:.0f}"
+    if r >= 10:
+        return f"{sym}{r:.1f}"
+    return f"{sym}{r:.2f}"
+
+
 def _driver_rows(b: PriceBreakdown) -> dict:
     """Template-ready rows for the price-driver breakdown.
 
@@ -2145,11 +2178,21 @@ def _driver_rows(b: PriceBreakdown) -> dict:
     Jinja: the bar needs the largest |log_delta| across rows, and "rank 203"
     needs exp() back out of `log_rank`.
 
-    **Factors, never per-row dollar steps.** A dollar step is
-    exp(running + delta) - exp(running), so it moves with the row's position
-    in the list — measured across all 120 orderings of the five groups,
-    McDavid's Points step runs $1.60M to $13.24M. Only the two ENDS of the
-    chain are quoted in dollars, and both are order-free.
+    **Two chains, and both are multiplicative.** Stage 2 gives a price factor
+    `exp(log_delta)`; stage 1 gives an odds ratio `exp(floor_logit_delta)` on
+    P(floor). Both are order-invariant, which is the whole reason either can be
+    shown per row. Measured, the stage-1 chain reconstructs exactly —
+    base_odds x PROD(odds ratios) lands on the player's own odds to a maximum
+    relative error of 6.8e-13 over the pool.
+
+    **Factors, never per-row dollar steps — and never per-row PERCENTAGE POINTS
+    either.** A dollar step is exp(running + delta) - exp(running), so it moves
+    with the row's position in the list; measured across all 120 orderings of
+    the five groups, McDavid's Points step runs $1.60M to $13.24M. The same
+    trap wearing a different costume is a P(floor) column in percentage points:
+    the sigmoid is nonlinear, so "+12pp" depends on what the running odds were
+    when the row was applied. Only the two ENDS of each chain are quoted in
+    dollars and percent, and both ends are order-free.
     """
     ref, feats = b.reference, b.features
 
@@ -2186,12 +2229,28 @@ def _driver_rows(b: PriceBreakdown) -> dict:
     # the card as "the model ignores this" — true of a goalie's rank, false of
     # reputation, and the row was answering neither question.
     #
-    # EXACTLY zero, never "rounds to 1.00". A x1.004 row dropped from a card
-    # that prints both a base and a median would leave a gap between them that
-    # nothing on screen explains. Exact equality on a continuous feature only
-    # happens structurally, which is precisely the case worth hiding.
-    live = [d for d in b.drivers if d.log_delta != 0.0]
+    # A row is hidden only when BOTH its columns print 1.00, and reading only
+    # the price column would be a real bug rather than a nicety: measured over
+    # the fresh 705-player pool, 11 of the 12 rows that print x1.00 on price
+    # move the floor odds by something worth seeing, against exactly 1 row
+    # inert in both. Hiding on the price column alone would drop eleven rows
+    # whose whole content is in the other one.
+    #
+    # Rounded, not exactly zero. Until 2026-09-11 this tested `log_delta !=
+    # 0.0` and the comment justified it: a dropped x1.004 row "would leave a
+    # gap between the base and the median that nothing on screen explains".
+    # Measured, that gap is already there and is 70x larger — printed base x
+    # printed factors misses the printed unclamped median by more than $0.01M
+    # on 312 of 705 players (max $0.19M, McDavid $16.04M against $15.85M),
+    # purely from rounding each factor to 2dp. Dropping every x1.00 row changes
+    # it by $0.0000M. Rounding is what the reader sees, so rounding is what
+    # decides whether a row said anything.
+    live = [
+        d for d in b.drivers
+        if not (_is_unit(d.factor) and _is_unit(math.exp(d.floor_logit_delta)))
+    ]
     widest = max((abs(d.log_delta) for d in live), default=0.0)
+    floor_widest = max((abs(d.floor_logit_delta) for d in live), default=0.0)
     rows = [
         {
             "group": d.group,
@@ -2200,6 +2259,16 @@ def _driver_rows(b: PriceBreakdown) -> dict:
             "up": d.log_delta >= 0,
             # Sized on the LOG delta, which is the order-invariant quantity.
             "bar_px": round(60.0 * abs(d.log_delta) / widest) if widest else 0,
+            "floor_factor": math.exp(d.floor_logit_delta),
+            "floor_label": _odds_label(math.exp(d.floor_logit_delta)),
+            # Its OWN direction, never the price column's. Measured, the two
+            # disagree about what they do to the price on 195 of 2361 rows —
+            # dearer if he clears the floor AND likelier to sell at it — and
+            # colouring both by one "pushes the price up" reading would paint
+            # over exactly the rows worth looking at.
+            "floor_up": d.floor_logit_delta >= 0,
+            "floor_bar_px": (round(60.0 * abs(d.floor_logit_delta) / floor_widest)
+                             if floor_widest else 0),
         }
         for d in live
     ]

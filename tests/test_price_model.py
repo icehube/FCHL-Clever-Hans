@@ -351,7 +351,9 @@ class TestPriceBreakdown:
     def test_floor_contributions_reconstruct_the_logit(
         self, params, refs, position, pts, prob, rfa, lag, rank, wins
     ):
-        """Stage 1 too — nothing on screen exercises it, so nothing else would."""
+        """Stage 1 too — and since 2026-09-11 the card's second column IS this
+        chain, so a break here is a wrong number on screen rather than a
+        dormant field."""
         import math
 
         b = decompose_price(
@@ -414,6 +416,55 @@ class TestPriceBreakdown:
         for g, f in factors.items():
             assert math.exp(deltas[g]) == pytest.approx(f, rel=1e-12), (
                 f"{g}'s factor is not exp of its log delta"
+            )
+
+    def test_the_floor_odds_do_not_depend_on_their_order_either(self, params, refs):
+        """The same argument, for the column that landed 2026-09-11.
+
+        Stage 1 is a logistic, so the intuitive display — "this driver adds
+        12 percentage points to P(floor)" — is the dollar-step trap wearing a
+        different hat: the sigmoid is nonlinear, so a percentage-point step
+        depends on what the running odds were when the row was applied. The
+        ODDS RATIO does not, and it is what the card prints.
+        """
+        import itertools
+        import math
+
+        b = decompose_price("F", 132, 11.0, True, params, refs["F"],
+                            last_salary=11.4, pos_rank=1)
+        deltas = {d.group: d.floor_logit_delta for d in b.drivers}
+        base_logit = math.log(b.base_p_floor / (1.0 - b.base_p_floor))
+
+        # Both quantities measured the SAME way — through the running chain,
+        # once per ordering — so the comparison is like for like and neither
+        # is computed by the formula it is supposed to be tested against.
+        pp_steps = {g: set() for g in deltas}
+        odds_ratios = {g: set() for g in deltas}
+        for order in itertools.permutations(deltas):
+            running = base_logit
+            for g in order:
+                before = 1.0 / (1.0 + math.exp(-running))
+                after = 1.0 / (1.0 + math.exp(-(running + deltas[g])))
+                pp_steps[g].add(round((after - before) * 100, 4))
+                # Raw, compared RELATIVELY below. Rounding to a fixed number
+                # of decimals collapses the small ratios — the largest driver
+                # here is 2.7e-06 — and would pass on any of them.
+                odds_ratios[g].add(
+                    (after / (1.0 - after)) / (before / (1.0 - before))
+                )
+                running += deltas[g]
+
+        assert any(len(v) > 1 for v in pp_steps.values()), (
+            "no group's percentage-point step moved with the ordering, so "
+            "this test is not exercising the hazard it exists for"
+        )
+        for g, seen in odds_ratios.items():
+            assert max(seen) / min(seen) - 1.0 < 1e-9, (
+                f"{g}'s odds ratio moved with the ordering: "
+                f"{min(seen):.6g} to {max(seen):.6g}"
+            )
+            assert min(seen) == pytest.approx(math.exp(deltas[g]), rel=1e-9), (
+                f"{g}'s odds ratio is not exp of its floor logit delta"
             )
 
     def test_a_player_against_his_own_features_has_no_drivers(self, params):

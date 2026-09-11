@@ -349,6 +349,14 @@ summary::-webkit-details-marker { display: none; }
 }
 .driver-bar.up { background: var(--green); }
 .driver-bar.down { background: var(--red); }
+/* The floor-odds column gets its OWN hues, deliberately not green/red. Those
+   two already mean "dearer" and "cheaper" one column to the left, and a driver
+   can raise the price while also making a $0.5M sale likelier -- measured, on
+   195 of 2361 rows. Reusing the palette would invite reading across and would
+   make those rows look self-contradictory rather than informative. Three
+   classes beats .driver-bar.up on specificity, so source order does not matter. */
+.driver-bar.odds.up { background: var(--accent-secondary); }
+.driver-bar.odds.down { background: var(--blue); }
 .driver-note {
     font-size: 0.6875rem; color: var(--text-muted); margin-top: 4px;
 }

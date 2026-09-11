@@ -4684,6 +4684,88 @@ class TestOneLogoPathForTheWholeApp:
         assert rendered.render(code=None) == "[]"
         assert "<img" in rendered.render(code="BOS")
 
+    def test_the_badge_labels_the_club_it_actually_drew(self, client):
+        """`alt`/`title` resolve the alias, same as `src`.
+
+        Until 2026-09-11 only the image did, so a badge pointing at UTA.svg
+        announced itself as `UTH` -- a tricode no NHL club has -- on the pool
+        the draft is actually run from.
+        """
+        import main
+
+        env = main.templates.env
+        rendered = env.from_string(
+            '{% from "macros/nhl.html" import nhl_logo %}{{ nhl_logo(code) }}'
+        )
+        alias = next(iter(NHL_TEAM_ALIASES))
+        canonical = NHL_TEAM_ALIASES[alias]
+        html = rendered.render(code=alias)
+        assert f'alt="{canonical}"' in html and f'title="{canonical}"' in html, (
+            f"the badge for {alias} labels itself {alias}: {html}"
+        )
+        assert f'>{alias}<' not in html and f'"{alias}"' not in html
+
+    def test_a_clubs_label_does_not_depend_on_which_pool_is_loaded(self):
+        """The invariant, rather than a spelling check on one club.
+
+        `players.csv` spells Utah `UTH` on 78 rows and `players-25.csv` spells
+        it `UTA` on 30, so before the canonical filter the same club read two
+        different ways depending on the file -- and the operator has no way to
+        know which is "right" from the screen.
+
+        Swept over every pool, so a refresh that introduces a new FCHL spelling
+        fails here rather than on draft night.
+        """
+        import csv
+
+        import main
+
+        aliases = set(NHL_TEAM_ALIASES)
+        assert aliases, "no aliases declared, so this sweep proves nothing"
+
+        checked = 0
+        for path in sorted((REPO / "data").glob("players*.csv")):
+            with path.open(newline="", encoding="utf-8-sig") as fh:
+                rows = list(csv.DictReader(fh))
+            if not rows or "NHL TEAM" not in rows[0]:
+                continue  # the legacy schema has no club column at all
+            for row in rows:
+                code = (row["NHL TEAM"] or "").strip()
+                if not code:
+                    continue
+                checked += 1
+                assert main._nhl_canonical(code) not in aliases, (
+                    f"{path.name}: {code} canonicalises to another alias"
+                )
+                if code in aliases:
+                    assert main._nhl_canonical(code) == NHL_TEAM_ALIASES[code]
+        assert checked > 100, f"only {checked} club codes swept; the glob missed"
+
+    def test_the_player_search_prints_the_canonical_code_too(self, client):
+        """The one place in the app a club code is TEXT rather than an image.
+
+        Derived by role -- a pool player whose club is an alias key -- because
+        players.csv is replaced before every draft.
+        """
+        import main
+
+        subject = next(
+            (p for p in main.auction_state.available_players.values()
+             if p.nhl_team in NHL_TEAM_ALIASES),
+            None,
+        )
+        assert subject, (
+            "no pool player carries an aliased club code, so this test cannot "
+            "fail and must be re-derived"
+        )
+        canonical = NHL_TEAM_ALIASES[subject.nhl_team]
+        html = client.get("/find-player", params={"q": subject.name}).text
+        assert f"· {canonical}<" in html, (
+            f"the search row for {subject.name} does not name {canonical}: "
+            f"{html[:400]}"
+        )
+        assert f"· {subject.nhl_team}<" not in html
+
 
 class TestFilterGroupsAreDistinguishable:
     """Two filter groups, and both start with a button reading "All".

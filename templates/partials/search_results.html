@@ -43,7 +43,10 @@
          hx-trigger="click, keyup[key=='Enter']"{% endif %}>
         <div class="search-row-main">
             <span class="search-name">{{ r.name }}</span>
-            <span class="search-meta">{{ r.position }}{% if r.nhl_team %} · {{ r.nhl_team }}{% endif %}</span>
+            {# The canonical tricode, same rule as the badge macro: this is the one
+               place in the app a club code is printed as TEXT rather than drawn,
+               and it must not read differently depending on the pool. #}
+            <span class="search-meta">{{ r.position }}{% if r.nhl_team %} · {{ r.nhl_team|nhl_canonical }}{% endif %}</span>
         </div>
         <div class="search-row-where">
             {% if r.team_code %}

@@ -7,10 +7,16 @@
    tests that assert on a rendered badge can call the same function instead of
    rebuilding the string -- the `_dom_id` rule.
 
+   `alt`/`title` go through `nhl_canonical`, not the raw code. The image
+   already resolved the alias and the label did not, so the same club read
+   `UTH` on players.csv and `UTA` on players-25.csv -- and `UTH` is not a
+   tricode any NHL club has. A label is a fact about the club, not about which
+   CSV is loaded.
+
    Guarded because the column can legitimately be blank: 3 rows of
    data/players-25.csv and 7 of data/players-23-converted.csv carry no NHL TEAM,
    and a record written before the field existed keeps "" through
    _backfill_nhl_teams. Draw nothing rather than an image that cannot load. #}
 {% macro nhl_logo(code) -%}
-{%- if code %}<img src="{{ code|nhl_logo_src }}" alt="{{ code }}" class="h-5 inline object-contain" title="{{ code }}">{% endif -%}
+{%- if code %}<img src="{{ code|nhl_logo_src }}" alt="{{ code|nhl_canonical }}" class="h-5 inline object-contain" title="{{ code|nhl_canonical }}">{% endif -%}
 {%- endmacro %}

@@ -22,6 +22,28 @@ rediscover the same non-problem.
 
 ## [2026-09-11]
 
+### Fixed
+
+- **An NHL badge now labels the club it actually drew.** `src` resolved the
+  alias and `alt`/`title` did not, so a badge pointing at `UTA.svg` announced
+  itself as `UTH` — a tricode no NHL club has — on `players.csv`, the pool the
+  draft is run from, while the same club read `UTA` on `players-25.csv`. The
+  player search's meta line printed the raw code for the same reason, and it is
+  the only place in the app a club code reaches the screen as text rather than
+  as an image.
+
+  Owner decision 2026-09-11: the canonical tricode everywhere. A label is a
+  fact about the club, not about which CSV is loaded. `main._nhl_canonical` is
+  the single resolver and `_nhl_logo_src` is now built on it, so the image and
+  its label cannot drift — the `_dom_id` rule, applied to the second half of a
+  string that already had it applied to the first.
+
+  The guard is the invariant rather than a spelling check on one club: swept
+  over every `data/players*.csv`, no rendered club label is an alias KEY. A
+  refresh that introduces a new FCHL spelling fails at pytest instead of on
+  draft night. All four mutants die, including the one that makes
+  `_nhl_canonical` the identity function.
+
 ### Added
 
 - **The price-driver card grew a second column: what each driver does to the
@@ -2168,7 +2190,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1436 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1437 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -2273,7 +2295,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1417 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1437 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

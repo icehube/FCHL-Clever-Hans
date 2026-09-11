@@ -493,6 +493,30 @@ def _dom_id(name: str) -> str:
 templates.env.filters["dom_id"] = _dom_id
 
 
+def _nhl_canonical(code: str) -> str:
+    """The one spelling of an NHL club this app shows anywhere.
+
+    The pool CSVs disagree with each other: data/players.csv spells Utah `UTH`
+    on 78 rows and data/players-25.csv spells it `UTA` on 30. `UTH` is not a
+    tricode any NHL club has -- it is the FCHL's own spelling, and
+    NHL_TEAM_ALIASES declares `UTA` canonical, matching team_odds.json and the
+    league itself.
+
+    Until 2026-09-11 only the IMAGE path resolved the alias while the badge's
+    `alt`/`title` and the player search's meta line printed the raw column
+    value, so which file the operator loaded decided whether the same club read
+    `UTH` or `UTA` on screen. A label is a fact about the club, not about the
+    CSV, so it does not get to vary with the pool.
+
+    An unknown code passes through unchanged -- see `_nhl_logo_src`, which is
+    built on this and needs the same property.
+    """
+    return NHL_TEAM_ALIASES.get(code, code)
+
+
+templates.env.filters["nhl_canonical"] = _nhl_canonical
+
+
 def _nhl_logo_src(code: str) -> str:
     """The URL for one NHL club badge, resolving the alias BEFORE naming a file.
 
@@ -512,7 +536,7 @@ def _nhl_logo_src(code: str) -> str:
     the pre-auction runbook's logo sweep are there to catch, and a silent
     fallback would hide both.
     """
-    return f"/nhl_logos/{NHL_TEAM_ALIASES.get(code, code)}.svg"
+    return f"/nhl_logos/{_nhl_canonical(code)}.svg"
 
 
 templates.env.filters["nhl_logo_src"] = _nhl_logo_src

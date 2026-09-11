@@ -385,9 +385,12 @@ rediscover the same non-problem.
   Nothing clears `is-stale` in JS — the next evaluate brings a fresh verdict
   div — so the browser test re-evaluates and requires the note gone and the
   button live again. That half is not decoration either: putting the marker on
-  `#trade-panel` instead of on the verdict (and scoping the CSS to match) leaves
-  the operator with a permanently dead Execute button and no way back, and it
-  fails there.
+  `#trade-panel` instead of on the verdict (and scoping the CSS to match) makes
+  it survive the swap, so a freshly evaluated verdict keeps a warning saying it
+  is out of date. Measured — that mutant fails on the note, not on the button:
+  the disable still runs against the verdict, so the new button comes back
+  enabled and only the warning is wrong. A permanent false warning on the one
+  control that commits a trade is the failure worth catching.
 
   Measured against the unfixed build to confirm the browser tests are the proof
   and not decoration: restoring the old target + handler pair fails

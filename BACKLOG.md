@@ -16,6 +16,30 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
+- [2026-09-11] [grill] `main.py:1738 (trade_execute)` — **a trade whose form
+  has been edited since the evaluate is still executable if JavaScript does not
+  run.** `/trade-execute` posts only `trade_id` and acts on the server's
+  `last_trade_eval`, so the *only* thing standing between a modified selection
+  and executing the trade you evaluated is `markTradeEvalStale` disabling the
+  button. That guard shipped with the 2026-09-10 fix that made the hazard
+  reachable, and it is enough in practice — every panel in this app is an htmx
+  request, so a browser with broken JS has no working UI to reach this from.
+  Deferred rather than closed because the server-side version is not free: it
+  means posting the give/receive lists to `/trade-execute` and comparing them to
+  `last_trade_eval`, which is a second serialisation of the receive side (JSON
+  blobs) purely to re-derive something the server already knows.
+
+- [2026-09-11] [grill] `templates/macros/nhl.html:15 (nhl_logo_src)` — **the
+  badge's `alt` and `title` show the pool's raw spelling while the `src` shows
+  the canonical one**, so the same club reads `UTH` on `players.csv` and `UTA`
+  on `players-25.csv` — and `UTH` is not a tricode any NHL team has.
+  `search_results.html` prints the raw code as text for the same reason.
+  Pre-existing (the raw value was always what got displayed) and cosmetic, but
+  it is now the one place the alias is deliberately NOT resolved. Deferred
+  because fixing it consistently means deciding what the visible label *is* —
+  the club's real code, or what the file says — and changing the search meta
+  line with it, which is a judgment call rather than a bug.
+
 - [2026-09-10] [owner-question] `main.py:1417 (bid_check)` — **the
   `highest_bidder` form field is dead and looks load-bearing.** Surfaced while
   answering "does it matter whose turn it is to bid": no JavaScript ever writes
@@ -284,7 +308,7 @@ class of thing from the 157px the old select clipped silently.
 
 ### Performance
 
-- ~~**Interaction budget: every UI interaction < 500ms.**~~ Met. Measured 2026-08-06 on a fresh state (BOT 12 rostered, 704-player pool): warm `/bid-check` **9ms**, `/assign` **150ms**, `/nominate` **130ms**, `/undo` **127ms**, `GET /` **20ms**, `/explain` **215ms** cold and **9ms** warm once cached. Nothing is over budget, so the entry is closed on measurement rather than on more work. Two things stay true and are not defects: the *first* bid check on a new player is still ~1000ms (~10 MILP solves in the marginal — the lever there is a cheaper solve, not fewer solves — but **not pool pruning**, which was measured unsafe 2026-08-20; see the `main.py (bid_check)` open finding for the numbers), and `/trade-evaluate` is still unmeasured because it needs a built-up trade form. Where a regression would actually hurt, the guard is a solve count rather than wall-clock (`tests/test_bid_cache.py`, `tests/test_counterfactual_cache.py`) — timing assertions go flaky under load and the solve count is the cause anyway.
+- ~~**Interaction budget: every UI interaction < 500ms.**~~ Met. Measured 2026-08-06 on a fresh state (BOT 12 rostered, 704-player pool): warm `/bid-check` **9ms**, `/assign` **150ms**, `/nominate` **130ms**, `/undo` **127ms**, `GET /` **20ms**, `/explain` **215ms** cold and **9ms** warm once cached. Nothing is over budget, so the entry is closed on measurement rather than on more work. Two things stay true and are not defects: the *first* bid check on a new player is still ~1000ms (~10 MILP solves in the marginal — the lever there is a cheaper solve, not fewer solves — but **not pool pruning**, which was measured unsafe 2026-08-20; see the `main.py (bid_check)` open finding for the numbers), and `/trade-evaluate` is **345ms** (measured 2026-09-11, median of 5 warm, one give plus one receive) — it needed a built-up trade form, which the verdict-fragment split made trivial to assemble. Well inside budget, and dominated by the scenario MILP solves: the `_context` the response no longer uses is ~8.5ms of it, 2.5%, so narrowing it is not worth a second code path. Where a regression would actually hurt, the guard is a solve count rather than wall-clock (`tests/test_bid_cache.py`, `tests/test_counterfactual_cache.py`) — timing assertions go flaky under load and the solve count is the cause anyway.
 
 ---
 

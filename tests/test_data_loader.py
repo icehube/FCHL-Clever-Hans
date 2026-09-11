@@ -37,6 +37,13 @@ from data_loader import (
 
 SAMPLE_CSV = str(Path(__file__).parent / "fixtures" / "players_sample.csv")
 LOGO_DIR = Path(__file__).parent.parent / "nhl_logos"
+
+# Resolved at import so the assert below can fire. A parametrize over an empty
+# sequence contributes zero cases and reports GREEN, which is the one failure
+# mode a data sweep must not have -- renaming the pools would silently retire
+# the guard rather than fail it.
+POOL_CSVS = sorted((Path(__file__).parent.parent / "data").glob("players*.csv"))
+assert POOL_CSVS, "no data/players*.csv found — the pool sweep would test nothing"
 FINGERPRINT = Path(__file__).parent / "fixtures" / "data_fingerprint.json"
 
 # Enough for the fixture's aliases without reading the live odds file — a rules
@@ -367,9 +374,7 @@ class TestLiveDataInvariants:
     # spells Utah with the ALIAS (`UTH`), which happened to match the filename
     # on disk, so the live pool was fine while data/players-25.csv — spelling it
     # canonically — 404'd on 30 players.
-    @pytest.mark.parametrize("pool", sorted(
-        p for p in (Path(__file__).parent.parent / "data").glob("players*.csv")
-    ), ids=lambda p: p.name)
+    @pytest.mark.parametrize("pool", POOL_CSVS, ids=lambda p: p.name)
     def test_every_nhl_club_in_every_pool_has_a_logo(self, pool):
         """A club code that names no SVG is 30 broken images and 30 404s.
 

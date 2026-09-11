@@ -1989,10 +1989,17 @@ class TestTradeChoiceLists:
             "JS-built half was rebuilt or destroyed by the swap"
         )
 
+        # Exact, and in order: "I Give" then "I Receive". A membership test
+        # over both prefixes passes with the two counters swapped, or with the
+        # give list down to one tick -- the states this is supposed to catch.
         summaries = page.eval_on_selector_all(
             "#trade-panel .choice-summary", "els => els.map(e => e.textContent.trim())")
-        assert all(t.startswith(("2 selected", "1 selected")) for t in summaries), (
-            f"the running counters reset: {summaries}"
+        assert len(summaries) == 2, f"expected two counters, got {summaries}"
+        assert summaries[0].startswith("2 selected"), (
+            f"the give counter reads {summaries[0]!r}, not 2 selected"
+        )
+        assert summaries[1].startswith("1 selected"), (
+            f"the receive counter reads {summaries[1]!r}, not 1 selected"
         )
 
     def test_changing_the_selection_marks_the_verdict_stale(self, page, live_server):

@@ -4312,6 +4312,22 @@ class TestOneLogoPathForTheWholeApp:
             f"the nhl_logo macro: {hand_rolled}"
         )
 
+    def test_no_script_builds_the_path_either(self):
+        """`loadTradeChoices` already builds player rows in JS, so that is where
+        the next hand-rolled badge would go -- and the attribute regex above
+        cannot see `el.src = '/nhl_logos/' + code`. A bare literal is the right
+        test here: shortcuts.js has no legitimate reason to name the directory.
+        """
+        named = {
+            f.relative_to(REPO).as_posix()
+            for f in sorted((REPO / "static").glob("*.js"))
+            if "nhl_logos" in f.read_text()
+        }
+        assert not named, (
+            f"{named} names the logo directory; the path belongs to "
+            "main._nhl_logo_src and the nhl_logo macro"
+        )
+
     def test_a_player_with_no_club_gets_no_image(self, client):
         """3 rows of players-25.csv and 7 of players-23-converted.csv carry no
         NHL TEAM. Unguarded that rendered `/nhl_logos/.svg` -- a broken image

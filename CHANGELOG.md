@@ -22,6 +22,30 @@ rediscover the same non-problem.
 
 ## [2026-09-11]
 
+### Investigated
+
+- **Tailwind's Play CDN stays; a real build is not worth its cost here.** Open
+  since 2026-08-06 on the reasoning that the bundle JITs utility classes in the
+  browser on every page load and a real build would ship a fraction of the CSS.
+  That reasoning was never wrong, only uncosted — and `static/vendor/README.md`
+  already argued the case qualitatively, which is precisely why the entry kept
+  getting re-opened.
+
+  Measured 2026-09-11 in Chrome at 1280px against the local server, median of
+  five loads: **613ms with the bundle, 362ms with it blocked — ~250ms, paid
+  once per session.** Every interaction after the first `GET /` is an htmx swap
+  with no reload, so 250ms is the entire cost for a four-hour draft. node and
+  npm turned out to be installed (v22.22.1 / 9.2.0), so the toolchain was
+  available and still is not the deciding factor: a build needs a rebuild on
+  every template edit, and its one failure mode — `shortcuts.js` composes
+  `'alert-' + type` at runtime, which a source-scanning build cannot see, and
+  which survives today only because DaisyUI's prebuilt CSS carries every
+  `alert-*` variant — would surface on draft night rather than in a test.
+
+  Owner decision 2026-09-11: closed, no code change. The number is now in the
+  README's "Why the Tailwind *Play* CDN and not a real build" section, so the
+  next person re-litigating it has something to argue against.
+
 ### Fixed
 
 - **An NHL badge now labels the club it actually drew.** `src` resolved the

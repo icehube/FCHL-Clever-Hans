@@ -67,6 +67,15 @@ The Play bundle compiles utility classes in the browser. Tailwind's docs call it
 dev-only — that warning is about public production sites (payload, flash of
 unstyled content), not a single-user localhost tool.
 
+**Measured 2026-09-11, because this section argued qualitatively and that is
+what kept inviting the question.** Chrome at 1280px against the local server,
+median of five loads: **613ms with the bundle, 362ms with it blocked — ~250ms,
+paid once.** Every interaction after the first `GET /` is an htmx swap with no
+reload, so that is the whole cost for a four-hour draft. node and npm are
+installed on this machine (v22.22.1 / 9.2.0), so the toolchain was available
+and is still not the deciding factor. Reopen this if the number changes, not
+because the bundle is large.
+
 A real Tailwind build would ship far less CSS, but it needs node + npm + the
 daisyui plugin and a rebuild on every template edit, and it is *riskier here*: a
 static build resolves classes by scanning source, while `static/shortcuts.js`

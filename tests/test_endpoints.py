@@ -5329,10 +5329,18 @@ class TestExactStandingsOnDemand:
         375-char bubble passed it for a month.
         """
         page = section_of(client.get("/").text, "league-state")
-        assert "data-tip" not in page, (
-            "a DaisyUI bubble is back inside the league table — it lives in a "
-            "horizontal scroller too narrow for one, and the browser tooltip "
-            "suite measures unscrolled, so nothing else will catch this"
+        # Scoped to the SCROLLER, not to the panel. The measured problem is a
+        # bubble anchored inside `.table-scroll-x`; the panel header above it —
+        # where Solve Standings lives — is outside that box and a bubble there
+        # is fine. An assertion over the whole section would fail a legitimate
+        # change while giving a reason that does not apply to it.
+        start = page.index('class="table-scroll-x"')
+        scroller = page[start:page.index("</table>", start)]
+        assert "data-tip" not in scroller, (
+            "a DaisyUI bubble is back inside the league TABLE, which scrolls "
+            "horizontally and is too narrow for one at every width measured. "
+            "The browser tooltip suite measures unscrolled, so nothing else "
+            "will catch this"
         )
 
     def test_the_scan_solves_live_opponents_only(self, monkeypatch, client):
@@ -5987,6 +5995,36 @@ class TestNominationIsNeverGatedByATurn:
         assert r.status_code == 200
         assert 'id="nomination-clear"' in r.text, (
             "recommendations came back with no way to dismiss them"
+        )
+
+    def test_the_clear_control_survives_a_lone_recommendation(self, client):
+        """The `or` in the gate, which the both-cards tests cannot reach.
+
+        Late in a draft the RFA half runs out and `/nominate` answers with a UFA
+        pick alone. Flipping that `or` to `and` passes every other test in this
+        batch — measured — and the x would silently stop appearing exactly when
+        the panel is at its least useful. The pool carries 22 scoring RFAs, so
+        emptying it is the only way to reach the state.
+        """
+        import main
+
+        rfas = [p.name for p in main.auction_state.available_players.values()
+                if p.is_rfa and p.projected_points > 0]
+        assert rfas, "no RFAs in the pool, so this test proves nothing"
+        buyer = next(c for c in main.auction_state.nomination_order if c != "BOT")
+        for name in rfas:
+            assign(client, name, buyer, 0.5)
+
+        r = client.get("/nominate")
+        assert r.status_code == 200
+        assert "RFA Pick" not in r.text, (
+            "an RFA recommendation survived the pool being emptied of RFAs, so "
+            "this is still the two-card case and the `or` is untested"
+        )
+        assert "UFA Pick" in r.text, "precondition: a UFA half to clear"
+        assert 'id="nomination-clear"' in r.text, (
+            "one recommendation on screen and no way to dismiss it — the gate "
+            "wants BOTH halves rather than either"
         )
 
     def test_the_override_endpoint_is_gone(self, client):

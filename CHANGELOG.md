@@ -22,6 +22,23 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Fixed
+
+- **Two grill findings on the same day's batch.** The MILP headline rendered
+  two consecutive parentheticals — "Optimal Projected Points: 1230 (your Proj
+  in League State) (Cost: $26.5M)" — because the new cross-reference was
+  inserted before the cost rather than after it. Moved, and it now reads
+  "... 1230 (Cost: $26.5M) — your Proj in League State".
+
+  And the bench cap had no test for the shape it deliberately does not
+  enforce: `is_bench` has been serialized since long before the cap, so a state
+  file from any earlier build can hold more than `BENCH_SIZE` benched. The cap
+  gates transitions only — a tool that refuses to render four hours into a live
+  auction is worse than one showing an illegal roster — so an over-cap state
+  loads, renders, greys only the Bench buttons, and recovers by activating.
+  Verified by hand and now pinned, including the JSON round trip, without which
+  the recovery would be undone by the next save.
+
 ### Added
 
 - **Solve Standings now runs itself after every pick.** Asked for directly: "is

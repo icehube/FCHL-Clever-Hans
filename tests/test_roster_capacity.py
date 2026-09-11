@@ -494,6 +494,49 @@ class TestBenchCapacity:
                 assert "disabled" not in row, "Activate is the way out"
 
 
+class TestALegacyStateOverTheCapStillWorks:
+    """The cap gates TRANSITIONS, not existing state, and it has to.
+
+    `is_bench` has been serialized since long before the cap, so a state file
+    written by any earlier build can hold more than BENCH_SIZE benched — and a
+    tool that refuses to render four hours into a live auction is worse than
+    one showing an illegal roster. Verified by hand 2026-09-10 and pinned here
+    because "state files on disk must still load" is a standing rule and
+    nothing else in the suite covers this shape.
+    """
+
+    def test_it_renders_and_can_be_recovered(self, client):
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        for p in bot.roster_players[:BENCH_SIZE + 3]:
+            p.is_bench = True                      # bypass set_bench, as a load does
+        assert bot.bench_count == BENCH_SIZE + 3
+
+        r = client.get(f"/team-view/{MY_TEAM}")
+        assert r.status_code == 200
+
+        # Activating is the way back down, and must not be gated by a state
+        # that is already over.
+        client.post("/toggle-bench", data={
+            "team_code": MY_TEAM, "player_name": bot.roster_players[0].name,
+        })
+        assert main.auction_state.teams[MY_TEAM].bench_count == BENCH_SIZE + 2
+
+    def test_the_flag_survives_a_json_round_trip(self, client):
+        """Otherwise the recovery above is undone by the next save."""
+        import main
+        from state import AuctionState
+
+        bot = main.auction_state.teams[MY_TEAM]
+        for p in bot.roster_players[:BENCH_SIZE + 3]:
+            p.is_bench = True
+
+        back = AuctionState.from_json(main.auction_state.to_json())
+
+        assert back.teams[MY_TEAM].bench_count == BENCH_SIZE + 3
+
+
 class TestRecallRespectsTheBench:
     """The second bench-adding path, and the one a cap on /toggle-bench alone
     leaves wide open: recall_from_minors never resets is_bench, and

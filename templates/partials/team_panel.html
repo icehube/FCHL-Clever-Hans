@@ -83,8 +83,11 @@
            them back dies in no test. The parenthetical is the part that earns
            its place: it tells the operator these two figures are one number. #}
         <strong>Optimal Projected Points: {{ milp.total_points|int }}</strong>
-        <span class="opacity-70">(your <em>Proj</em> in League State)</span>
         (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
+        {# After the cost, not before it: between the headline and "(Cost: …)"
+           this rendered as two consecutive parentheticals — "1230 (your Proj in
+           League State) (Cost: $26.5M)". #}
+        <span class="opacity-70">— your <em>Proj</em> in League State</span>
     </div>
     {# An EMPTY STATE, not a second warning. A failed MILP takes both the
        headline above and every target row out of the table below (measured

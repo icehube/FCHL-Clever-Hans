@@ -92,30 +92,31 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
   matching only, and deliberately does not rewrite the file.
 
 
-Last triaged 2026-08-13, walking every entry to pick the next piece of work. The
-outcome is worth recording, because most of what is below is parked for a
-**reason that has to expire before the entry is actionable**: the Proj heuristic
-and the stale counterfactual both need a real draft to re-measure, the
-short-roster MILP path is measured currently unreachable, the opponent-edit
-exposure needs an actual accidental edit to justify a gate, and the stable
-player-id refactor touches the assign and bidding paths. So a quiet backlog here
-does not mean a healthy one — it means the cheap items are gone. Two new entries
-were filed the same day from a second grill pass over the layout batch.
+**Last triaged 2026-09-11**, walking every entry and re-checking the mechanism
+rather than the prose. Nothing was closed by the walk — all nineteen findings
+reproduce — but four claims had drifted and were corrected: `.table-scroll-x` is
+four regions now, not three; `bid_limits` is 705 rows, not 704; the exact
+standings entry under **Ideas** described a button-only feature that had
+auto-solved on every pick since 2026-09-10; and the previous triage note ended
+"No entries are waiting on a manual check", which has not been true since the
+draft-day items were filed.
 
-2026-08-11 closed the `main.py (undo)` view finding together with the
-opponent-pick view swap from the testing-pass section below (see
-[CHANGELOG.md](CHANGELOG.md)); 2026-08-07 swept three entries and a live testing
-pass added the `[owner-testing]` entries — each of those was reproduced against
-the running app before being written down, so they record a mechanism rather than
-a symptom. No entries are waiting on a manual check.
+**What the shape of this list means.** Most of what is below is parked on a
+**reason that has to expire before the entry is actionable**, and the reason is
+usually *a real draft*: the planning ceiling, the stale counterfactual, the
+opponent-edit exposure and the cold-`/bid-check` stall all need auction-day
+behaviour to decide, not more analysis. Two more are parked on the next
+`players.csv` refresh. So a quiet backlog here does not mean a healthy one — it
+means the cheap items are gone and what is left is waiting on events.
 
-**Two of the entries below carry a deferral reason that has already been
-disproved once.** The 2026-08-11 pair were both deferred on a diagnosis that
-turned out to be wrong — one claimed a `state.py` change was needed when the
-information was already local to the endpoint, the other claimed `/assign`
-needed an out-of-band response when it has always returned `all_panels.html` by
-design. Re-check the mechanism before trusting "deferred because X" here; the
-prose is a hypothesis, not a measurement, unless it says what was measured.
+**Trust the measurements, not the deferral reasons.** Three entries have now been
+found deferred on a diagnosis that was wrong rather than merely stale: one
+claimed a `state.py` change was needed when the information was already local to
+the endpoint, one claimed `/assign` needed an out-of-band response when it had
+always returned `all_panels.html` by design, and the trade form's called the fix
+"re-ticking the boxes" when the actual fix was to stop destroying them. Re-check
+the mechanism before trusting "deferred because X" here; the prose is a
+hypothesis unless it says what was measured.
 
 ### engine/market
 
@@ -126,7 +127,7 @@ prose is a hypothesis, not a measurement, unless it says what was measured.
 
 ### frontend/UX
 
-- [2026-08-13] [grill] templates/partials/league_state.html:59 (table-scroll-x) — **the three `.table-scroll-x` regions cannot be scrolled by keyboard** (no `tabindex`, so they are not focusable; WCAG 2.1.1). Introduced 2026-08-11 with the grid fix, which made the League State and roster tables scroll inside their own panels rather than paint across the next one — so their right-hand columns are now reachable only with a pointer or a trackpad gesture. Deferred deliberately rather than overlooked: `tabindex="0"` on three wrappers adds three tab stops to the panels you tab through while a bid is live, and the draft is a single operator on a mouse. The content is not lost, it is one drag away. Revisit if the draft is ever run from the keyboard, or if a screen reader is ever in play — at which point the fix is `tabindex="0"` plus `role="region"` and an `aria-label` naming the table, not tabindex alone
+- [2026-08-13] [grill] templates/partials/league_state.html:59 (table-scroll-x) — **the four `.table-scroll-x` regions cannot be scrolled by keyboard** (no `tabindex`, so they are not focusable; WCAG 2.1.1). Introduced 2026-08-11 with the grid fix, which made the League State and roster tables scroll inside their own panels rather than paint across the next one — so their right-hand columns are now reachable only with a pointer or a trackpad gesture. Deferred deliberately rather than overlooked: `tabindex="0"` on four wrappers adds four tab stops to the panels you tab through while a bid is live, and the draft is a single operator on a mouse. The content is not lost, it is one drag away. Revisit if the draft is ever run from the keyboard, or if a screen reader is ever in play — at which point the fix is `tabindex="0"` plus `role="region"` and an `aria-label` naming the table, not tabindex alone
 - [2026-08-11] [grill] templates/partials/team_panel.html:203 (not p.is_target and p.can_be_bought_out) — **an opponent's pick now auto-presents their EDITABLE panel, which used to require a deliberate click.** The roster-edit forms are not gated on `is_my_team` by design (auditing a rival is the point), but before 2026-08-11 `/assign` always came home to BOT, so a rival's Bench / `$` / ↓ Minors / Recall controls only appeared when you asked for them. Now a sale puts them on screen at the highest-tempo moment of the draft. Measured, and this is why it is filed rather than fixed: the salary box is `templates/partials/team_panel.html:246 (hx-trigger="change")`, so it needs a typed value plus a blur, and every other control is a discrete small button — a stray click cannot fire one. No test or gate added: gating them on `is_my_team` would remove the working feature the 2026-08-07 view work exists to provide. Revisit only if a real draft produces an accidental edit; the fix would be a confirm on opponent edits, not a gate
 - [2026-08-08] [review] main.py:162 (_backfill_keeper_flags) — **the backfill repairs the live state but not the undo chain**, so after booting a pre-`is_keeper` save file, undoing back past everything done this session restores minors with no provenance and the next recall of one colours him as a purchase again. `AuctionState._snapshots` is a list of whole JSON documents rather than of dicts, so repairing them from `main.py` means hard-coding a second copy of the state's JSON key names — a wrong key would silently do nothing, which is worse than the bug. Deferred as narrow and cosmetic: it needs a legacy file, an undo past the whole session, and it costs a row colour. If it ever matters, the fix belongs in `state.py` as a `from_json` hook, not here
 - [2026-08-08] [grill] templates/partials/bid_limits.html:64 (tooltip-left) — **8 of the 20 `data-tip` tooltips are never placement-checked**, so the 2026-08-08 CSS block's guarantee is narrower than it reads. `TestTooltipsStayInsideTheirPanel` measures whatever the page renders in one state (fresh reset + live bid) and that is ~12: the five `stop_status` branches are mutually exclusive so only one is ever on screen, the Penalty tile needs `penalties > 0`, and this line — the only `tooltip-left` in the app — renders only when the market ceiling caps a model price, which never happens on a fresh state because every team starts at `MAX_SALARY`. **Not a regression risk from that change**: the global rule is `max-width`, which can only make a bubble narrower and therefore reduce horizontal overflow. The one real exposure is vertical — narrower means taller, and this tooltip is the only one living inside a `.scroll-container` with `overflow-y: auto` — `templates/partials/bid_limits.html:30 (scroll-container)` — which clips. **Partly closed 2026-08-13**: `POST /load-scenario` grew `endgame-ceiling-binds`, and `TestTooltipsStayInsideTheirPanel` now runs against it at 375/1024/1280 with the capped tip required BY NAME, so the `tooltip-left` is placement-checked on the horizontal axis for the first time and passes. The **vertical** exposure this entry predicted is real but bounded, and was measured rather than asserted: the bubble is 99px tall against ~64px rows, so on the last row visible inside the 405px `.scroll-container` it overhangs the bottom edge by **~25px** — and scrolling one row cures it, which is why no assertion was added (a naive check flags every row below the fold as clipped, since an unscrolled row is trivially outside the client box). Still open for the remaining tips: the five `stop_status` branches are mutually exclusive and the Penalty tile needs `penalties > 0`, so ~4 are still never measured. Deferred: each needs its own page state for a cosmetic property
@@ -136,7 +137,7 @@ prose is a hypothesis, not a measurement, unless it says what was measured.
 ### code quality
 
 - [2026-08-19] [grill] main.py:1417 (bid_check) — **`/bid-check` and `/explain` are still `async def` wrapped around synchronous MILP work, so a cold one holds the event loop for its whole duration.** *Partly closed 2026-08-19*: the two multi-solve SCANS now hand their solve loops to a worker thread and publish only if the state has not moved underneath (see `CHANGELOG.md`), which took a warm `/bid-check` during a roster scan from **1682ms back to 3ms** and `/state` from 1564ms to 12ms. What is left is the two endpoints on the bidding path itself — measured 2026-08-19, a **cold** `/bid-check` is 935ms (a binary search over MILP solves) and `/explain` 165ms — and neither is the same cheap change. (1) `/explain`'s serialisation is load-bearing: `tests/test_counterfactual_cache.py::TestResponsesCannotOvertakeEachOther` exists because FIFO ordering is the only thing stopping a late counterfactual landing in a mount that now shows a different player, and its docstring already names the prerequisite — `hx-sync="#app:replace"` on the mount in `bid_panel.html` — so this needs a template change and a browser check rather than a keyword. (2) The remaining stall is self-inflicted rather than cross-request: the operator is one person, and the request that queues behind a cold `/bid-check` is their own next keystroke on the same player, which the marginal cache then answers in 9ms. Revisit if a draft-day stall on the FIRST bid of a player is actually felt; the lever there is a cheaper solve — and **pool pruning, the one this entry used to name, is measured unsafe.** Cold `/bid-check` is 988–1030ms across 10 solves, so the solve really is the whole cost. (This used to say **98–99% inside CBC**; re-measured 2026-08-21 the aggregate is **89.5–89.8%** and the per-subject range is **65–92%** — see below. The conclusion the figure was supporting still holds on the states that cost a second, which is why it was never caught.) Keeping the top 50 by points per position (705 → 150) gives a **byte-identical answer on all 7 pinned states** (the six in `scenarios.SCENARIOS` plus the fresh pool — "7 scenarios" was loose, there are 6) and a 2–3.7x faster solve, which is exactly the trap: every scenario sits at $1.9M+ of BOT budget per open spot. Squeeze the budget toward the reserve floor and it goes **silently wrong** — at $1.00M/spot it returns 1069 against a true 1076, status still `Optimal`; at $0.70M and $0.60M it returns **Infeasible** where the true answers are 999 and 961. Adding "plus the K cheapest per position" does not rescue it (912 against 999), because which players matter depends on the budget *interaction*, not on points or price separately. A wrong `Optimal` wearing a confident number is the `keepFiles=True` failure class `TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow` exists for, and the tight-budget regime is reachable **through play** — buyout penalties, `/trade-between` and `/adjust-salary` all warn rather than refuse, as the `optimizer.py (solve_optimal_roster)` entry above records ($20.5M of penalties on a fresh BOT reaches it). **Measured 2026-08-21, and the three surviving candidates now have numbers** — `tests/measure_marginal.py`, which stays as the harness. Two of this entry's own figures were wrong: the CBC share is **89.5–89.8%** in aggregate, not 98-99% (the rest is a flat ~9.2ms per solve of model build and extraction, paid ten times over for ten models that differ in one number) — and per subject it runs **65–92%**, because that ~9.2ms is charged per *solve* so its share tracks how expensive each solve is. "The solve is the whole cost" holds on the big-pool states and not on the cheap ones, which is C2's regression below seen from the other side. The solve count is not ~10 and not bimodal either: over the 28 scenario subjects it is **2, 3, 9 or 10** (×4/×8/×8/×8) — two for a floor player, three for a must-have, nine or ten for the full search depending on where `physical_max_bid` puts the bracket. On the candidates: model reuse alone is **1.06x**, reuse plus `warmStart=True` **1.14x**, and the best is one the entry did not name — the probe search is a sequence over a single budget RHS, so it has a single-solve dual, "cheapest roster containing him that still beats the without-him total", giving **1.55-1.60x on the big-pool states, 1.45x overall, and ~0.8x on `endgame-sole-bidder`** where the reference already short-circuits. Worst single subject 1511ms → 772ms. All three reproduce the reference's marginal byte-for-byte on **168 subjects** (28 scenario + 140 swept to $0.60M/spot) — which is the whole recommendation, since `compute_bid_recommendation` takes `marginal_value` as an argument and that float is a candidate's only channel to the five fields the panel renders, so comparing those too would be a check that cannot fail. **Not shipped, deliberately**: 1.6x on the slow cases does not buy a second MILP formulation plus a confirm loop plus two float-epsilon subtleties on the hottest path in the app, each of which took a wrong draft to find — one an increment high from smoothing solver tolerance, the other an increment low from `1.9 / 0.1 == 18.999999999999996`, and both invisible on the scenario set. `warmStart` is at least cleared as safe: its `.mst` comes from the same `create_tmp_files` call as the `.lp`, so it carries the per-solve `uuid4().hex` and is nothing like `keepFiles=True`. Trigger unchanged — a draft-day stall on the first bid actually felt — but the answer is now costed rather than open, and re-running is `--sweep`
-- [2026-08-06] [grill] main.py:1121 (_context) — every endpoint builds the full context (~8.5ms, including a 704-row `bid_limits` list for the available-players table) regardless of how small a fragment it renders. `/bid-check`, `/nominate` and now `/explain?inline=1` reference a handful of its 16 keys and none touches `bid_limits`. `/explain` made this sharper on 2026-08-06: it fires on every bidder toggle and its warm response is ~9ms, essentially all of it this context build for a fragment that uses three keys. Pre-existing — the old whole-panel `auction_control.html` didn't use it either — but the 2026-08-06 panel split made fragments narrower and the waste correspondingly larger. Deferred: small next to the binary search over MILP solves that dominates `/bid-check`, and fixing it properly means a per-panel context builder, which is a cross-endpoint refactor
+- [2026-08-06] [grill] main.py:1121 (_context) — every endpoint builds the full context (~8.5ms, including a `bid_limits` list of the whole pool — 705 rows today — for the available-players table) regardless of how small a fragment it renders. `/bid-check`, `/nominate` and now `/explain?inline=1` reference a handful of its 16 keys and none touches `bid_limits`. `/explain` made this sharper on 2026-08-06: it fires on every bidder toggle and its warm response is ~9ms, essentially all of it this context build for a fragment that uses three keys. Pre-existing — the old whole-panel `auction_control.html` didn't use it either — but the 2026-08-06 panel split made fragments narrower and the waste correspondingly larger. Deferred: small next to the binary search over MILP solves that dominates `/bid-check`, and fixing it properly means a per-panel context builder, which is a cross-endpoint refactor
 
 
 ### test infrastructure
@@ -163,152 +164,58 @@ Track these; don't implement upfront. The market layer (Layer 2) already compens
 
 From live debugging and testing, 2026-08-05. These are cockpit-ergonomics items — the engine is right, the interface makes it hard to act on.
 
-- ~~**Buyout Analyzer: Scan button + dropdown of my roster → select → "Execute Buyout".**~~ Closed 2026-08-06 as **already built** — `buyout_panel.html` has the Scan button plus a row of one-click per-player buttons (better than a dropdown: no open-then-select), the verdict block, and Execute Buyout. Nothing is typed. The entry described a flow that had already been replaced; the only real gap left there is the minors-have-no-dots finding under frontend/UX. **The dropdown half was reopened and decided the other way on 2026-08-08** — see the testing-pass section below. Don't read the parenthetical above as still standing: it was right about the interaction and wrong about the length.
-- **Make the exact standings automatic rather than a button.** `GET /solve-standings`
-  (2026-08-17) answers the Proj column exactly and the operator has to remember to
-  press it — the default on screen is still the estimate, now labelled. The want is
-  real; **the mechanism this entry proposed until 2026-08-19 is dead, measured.** It
-  said the cheap path was a per-team cache invalidated only when THAT team's roster
-  or budget changes, because "the pool losing one player rarely moves an opponent's
-  optimum". Rarely was doing far too much work: over five picks on a fresh league,
-  **28 of 45 cached rows (62%) would have been stale**, single-pick swings reached
-  **−26 points**, and one pick moved **9 of 9** other opponents twice in five. Every
-  one of those figures renders as exact and BOT's carries a rank badge, so this is
-  the same class of error as the done-team projection bug (`#2` when BOT was `#1`).
-  The whole-column invalidation `_recompute()` already does is correct. So the only
-  honest route is a cheaper solve, and the parallel scan work (2026-08-19f) took the
-  fresh-league cost **1294ms → 384ms** — still far too much for an action path,
-  where it would sit on top of `/assign`'s 150ms against a 500ms budget. What is
-  left is not a cache: it is either a cheaper solve still, or an out-of-band refresh
-  that lets the column arrive a beat after the pick (which needs a polling or SSE
-  channel the app does not have). Revisit if draft-day use shows the button being
-  forgotten — and do **not** re-propose the per-team cache without re-measuring the
-  62%.
+- **The exact standings still degrade to estimates on every mutation except a
+  pick.** The original want — "make the exact standings automatic rather than a
+  button" — **shipped on 2026-09-10**: `POST /assign` fires
+  `HX-Trigger-After-Settle: {"solveStandings": true}` and `shortcuts.js` answers
+  with a coalesced `htmx.ajax('GET', '/solve-standings')`, so the column
+  re-solves itself after every pick without anyone pressing anything. Do not
+  read the rest of this entry as saying the button is still the only way.
+
+  What is left is narrower and was an explicit owner decision: **only `/assign`
+  asks.** Every other mutation — a bench toggle, a salary edit, a trade, a
+  buyout, an undo — still calls `_recompute()`, still clears
+  `exact_projections`, and still drops the column back to estimates, and the
+  manual button is the only way back from those. `#proj-basis` says which basis
+  is on screen, so it is honest rather than silent, and the estimate is not
+  small: +68 mean / +193 worst, moving 9 of 10 teams in rank order.
+
+  **Two measured things that must survive any follow-up.** Do not re-propose a
+  per-team cache invalidated only when that team's roster or budget changes: over
+  five picks on a fresh league **28 of 45 cached rows (62%) would have been
+  stale**, single-pick swings reached **−26 points**, and one pick moved 9 of 9
+  opponents twice in five. And do not put a synchronous solve on the other action
+  paths — the parallel scan is **384ms** fresh, which is why the one that does
+  fire is out-of-band and after-settle rather than inline. The honest routes left
+  are a cheaper solve, or extending the same after-settle trigger to the other
+  mutations and accepting the cost, which is a call to make with draft-day feel
+  rather than in advance.
+
 - **Save State button that jumps between live state and a scenario**, so testing a what-if doesn't cost the real draft state. Interacts with the scenario loader (`POST /load-scenario`) and the undo snapshot chain — check that switching can't strand a snapshot.
 
 ### From the 2026-08-07 testing pass
 
-Cockpit ergonomics from a live run-through, source tag `[owner-testing]`. These
-are wants, not defects — the things that were actually *broken* are under
-**Open findings** above, and they should be fixed first. No `file:line` here,
-because nothing is wrong at one; the file names are orientation only. (This said
-"the five things" until 2026-08-11; a count in prose goes stale on the first
-entry that closes, and one had already closed by then.)
+Every item from that live run-through has landed. The corrections the closed
+entries were carrying — what each want got wrong, and why the next one will hit
+the same thing — moved to `CHANGELOG.md` on 2026-09-11 under "Notes kept from
+closed wants", because this file holds open work and that was a hundred lines of
+finished work sitting on top of it.
 
-**Nomination panel**
+Two things in that batch were deliberately **not** built and are still open:
 
-Landed 2026-08-18 (see `CHANGELOG.md`). Two corrections worth keeping. The entry
-called it an additional **column** — the panel is two cards, not a table, so it is
-a second labelled figure on the existing line (`Expected: ~$2.8M ▼ · Model
-$9.5M`), which is what let it reuse `bid_limits.html`'s struck-model grammar
-rather than invent one. And it assumed the pair would routinely differ: measured,
-the UFA half's drain ranking breaks ties toward **least surplus**, so it actively
-selects the candidate whose two figures agree — a $2.51M model against a $2.50M
-market is that half's normal case, and the divergence the want is about shows up
-on the **RFA half and on target picks**. That is also why `capped` is quantized to
-one decimal: a cent of gap would otherwise strike through a figure identical to
-the one beside it.
-
-**Buyout Analyzer**
-
-Landed 2026-08-15 (see `CHANGELOG.md`). Two corrections worth keeping, because
-both are the kind of thing the next want will hit. The entry said the buyout
-**dots** would "need somewhere to live" if the list collapsed to a `<select>`;
-they never lived in the Analyzer at all — they are in `team_panel.html`'s two
-roster tables, and duplicating them into a picker would collide on `_dom_id`.
-And it did not mention what turned out to be the only real defect in there:
-`hx-get="/buyout-check/{{ p.name }}"` was the one place in the app a raw player
-name went into a URL unencoded.
-
-One thing was deliberately **not** built, and would be the follow-up if the
-picker ever reads as thin: each option showing its scan verdict.
-`buyout_indicators` is already in the template context, but
-`/buyout-indicators` returns only the OOB dot spans with `hx-swap="none"` — so
-the labels would be right on page load and silently stale the moment you scan,
-which is worse than absent. Making them live means the picker joins the scan's
-out-of-band response, and it would then re-render mid-scan and drop whatever
-the operator had selected. The roster table's dots answer "who"; the picker
-answers "what would it cost".
-
-**Logs**
-
-All three original items landed 2026-08-15 (see `CHANGELOG.md`). One correction
-worth keeping, because it is the kind of thing the next want will hit too: "NHL
-team logos in **both** logs" was not buildable as written. `ChangeRecord` holds
-`timestamp`/`kind`/`team_code`/`description` and no player at all, so an NHL
-club logo has nothing to resolve from there. Both logs carry an FCHL team logo;
-only the transaction side carries an NHL one.
-
-**League State table**
-
-Both original items — three-letter codes only, and Done as an X — landed
-2026-08-13. What they bought is worth recording, because the premise under them
-was wrong and the same premise would sink the follow-up:
-
-- **Shorter column headers are the only lever left, and it is a real trade.**
-  Removing the full team name and the "Stopped Drafting" label took min-content
-  from **955px to 868px** — only 87px, because min-content is each column's
-  longest *word*, not its longest string, so a two-word name never cost more
-  than "Johannesburg" and the wrapped button never more than "Drafting".
-  Measured per column afterwards, **all 12 columns were floored by their own
-  header text** and they summed to exactly the 868: Remaining 102, Spendable 100,
-  Cap Used 92, Max Bid 83, Penalty 81, Roster 73, Needs 72, Team 66, Proj 57,
-  Done 53, Pts 51, logo 38. **That decomposition no longer predicts the total.**
-  The Spendable column was removed on 2026-09-07 and min-content went to 815px
-  on a fresh state, not the ~768 subtracting its 100px implies — so treat the
-  per-column figures as an explanation of WHY the headers are the floor, not as
-  an additive model. Re-measure with `tests/measure_layout.py`. Nothing in the
-  table *body* can narrow this
-  further — `Rem` / `Spend` / `Cap` / `Max` / `Pen` would, by roughly 200px, and
-  that is abbreviating the labels on a dense grid of money figures that all look
-  alike. Not filed as a want because it was not asked for and the legibility
-  cost is real; filed as the measurement so the next person does not re-derive
-  it or reach for the body again. The table still overflows its column at every
-  width including 1920, so `.table-scroll-x` stays load-bearing either way.
-
-**Available Players**
-
-All three items in this section and the one below closed 2026-08-16 (see
-`CHANGELOG.md`). The RFA filter was built; **both bid-panel tooltips already
-existed** and are recorded here rather than deleted, because this is the second
-time a want in this list turned out to be built already (the Buyout Analyzer,
-2026-08-06) and the cost each time is a re-investigation:
-
-- Sigma — `player_chart.html`, on the chart's meta line, and already required
-  BY NAME in `TestTooltipsStayInsideTheirPanel`.
-- Marginal value — `bid_panel.html`, in the `.bid-details` row.
-
-Check the template before filing a tooltip want.
-
-**Trade form**
-
-Landed 2026-08-15 (see `CHANGELOG.md`). "Cramped" turned out to understate it —
-measured at 1280, the four controls rendered 120–183px against labels wanting
-229–316px, so the salary and points were off the edge on every row. Both forms
-are now stacked one-column `.choice-list` checkbox blocks.
-
-One thing deliberately **not** built: **a search box over the 49 rows**. The
-height cap plus full-width labels is the measured fix; revisit only if scrolling
-still bites in a real break.
-
-The other deferral here — **re-ticking the boxes after an evaluate** — was
-resolved on 2026-09-10 and is written up in `CHANGELOG.md`. Worth knowing why
-it sat: this entry framed it as "restoring" the selection, which does mean
-re-fetching and re-ticking the JS-built half, and that is real work. The actual
-fix was to stop destroying it — `/trade-evaluate` now swaps the verdict alone.
-It also said "there is no control contradicting the answer beside it", which
-became false the moment the form survived; the staleness marker shipped with the
-fix for exactly that reason.
-
-One accepted rough edge, measured rather than assumed: at **1024px** the widest
-Give row wants 305px against a 293px list and scrolls 12px inside it. The draft
-runs at 1280–1600, where everything fits, and scrolling 12px is a different
-class of thing from the 157px the old select clipped silently.
-
-
-### Performance
-
-- ~~**Interaction budget: every UI interaction < 500ms.**~~ Met. Measured 2026-08-06 on a fresh state (BOT 12 rostered, 704-player pool): warm `/bid-check` **9ms**, `/assign` **150ms**, `/nominate` **130ms**, `/undo` **127ms**, `GET /` **20ms**, `/explain` **215ms** cold and **9ms** warm once cached. Nothing is over budget, so the entry is closed on measurement rather than on more work. Two things stay true and are not defects: the *first* bid check on a new player is still ~1000ms (~10 MILP solves in the marginal — the lever there is a cheaper solve, not fewer solves — but **not pool pruning**, which was measured unsafe 2026-08-20; see the `main.py (bid_check)` open finding for the numbers), and `/trade-evaluate` is **345ms** (measured 2026-09-11, median of 5 warm, one give plus one receive) — it needed a built-up trade form, which the verdict-fragment split made trivial to assemble. Well inside budget, and dominated by the scenario MILP solves: the `_context` the response no longer uses is ~8.5ms of it, 2.5%, so narrowing it is not worth a second code path. Where a regression would actually hurt, the guard is a solve count rather than wall-clock (`tests/test_bid_cache.py`, `tests/test_counterfactual_cache.py`) — timing assertions go flaky under load and the solve count is the cause anyway.
+- **The buyout picker showing each option's scan verdict.** `buyout_indicators`
+  is already in the template context, but `/buyout-indicators` returns only the
+  out-of-band dot spans with `hx-swap="none"` — so labels would be right on page
+  load and silently stale the moment you scan, which is worse than absent. Making
+  them live means the picker joins the scan's OOB response, and it would then
+  re-render mid-scan and drop whatever the operator had selected. The roster
+  table's dots answer "who"; the picker answers "what would it cost". Follow-up
+  only if the picker ever reads as thin.
+- **A search box over the trade form's 49 give rows.** The height cap plus
+  full-width labels is the measured fix; revisit only if scrolling still bites in
+  a real break. One accepted rough edge, measured rather than assumed: at 1024px
+  the widest Give row wants 305px against a 293px list and scrolls 12px inside
+  it. The draft runs at 1280–1600, where everything fits.
 
 ---
 

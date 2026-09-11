@@ -20,6 +20,116 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-11]
+
+### Changed
+
+- **`BACKLOG.md` re-triaged and cut from 322 lines to 229.** Every one of the
+  nineteen open findings was re-checked against the code rather than re-read —
+  all nineteen still reproduce, so nothing closed on the walk — and four claims
+  that had drifted were corrected: `.table-scroll-x` is four regions now and the
+  keyboard entry said three; `bid_limits` is 705 rows and the `_context` entry
+  said 704; the previous triage note ended "No entries are waiting on a manual
+  check", which stopped being true when the draft-day items were filed.
+
+  **The fourth was the one worth finding.** The idea *"make the exact standings
+  automatic rather than a button"* still read "the operator has to remember to
+  press it … revisit if draft-day use shows the button being forgotten" — a
+  description of the state of things before **2026-09-10**, when `POST /assign`
+  started firing `HX-Trigger-After-Settle: {"solveStandings": true}` and the
+  column began re-solving itself after every pick. A backlog entry asking for
+  something that shipped the day before is worse than no entry: it invites the
+  work to be done twice. Rewritten to the honest residue — only `/assign` asks,
+  so every other mutation still drops the column to estimates and the manual
+  button is still the only way back from those — and carrying forward the two
+  measurements any follow-up has to respect (the per-team cache would have
+  served **28 of 45 rows stale** over five picks; the parallel scan is 384ms
+  fresh, which is why the one trigger that exists is out-of-band).
+
+### Notes kept from closed wants
+
+The 2026-08-07 testing pass has fully landed, and its entries had accumulated a
+hundred lines of *what the want got wrong* on top of `BACKLOG.md`. That is
+finished work, so it moves here under the documented split. Each of these is a
+correction the next want in the same area will hit.
+
+- **Nomination panel** (landed 2026-08-18). The entry called it an additional
+  **column**; the panel is two cards, not a table, so it is a second labelled
+  figure on the existing line (`Expected: ~$2.8M ▼ · Model $9.5M`), which is what
+  let it reuse the struck-model grammar from the Available Players price column
+  rather than invent one. It also assumed the two figures would routinely differ.
+  Measured, they do not: the UFA drain ranking breaks ties toward **least
+  surplus**, so it actively selects the candidate whose model and market prices
+  agree — $2.51M against $2.50M is that half's normal case, and the divergence
+  the want was about shows up on the **RFA half and on target picks**. That is
+  also why `is_capped` is quantized to one decimal; a cent of gap would strike
+  through a figure identical to the one beside it.
+
+- **Buyout Analyzer** (landed 2026-08-15, after a 2026-08-06 entry closed it as
+  "already built" and a 2026-08-08 decision reopened the dropdown half the other
+  way). Two corrections. The entry said the buyout **dots** would "need somewhere
+  to live" if the list collapsed to a `<select>` — they never lived in the
+  Analyzer at all; they are in `team_panel.html`'s two roster tables, and
+  duplicating them into a picker would collide on `_dom_id`. And it did not
+  mention the only real defect in there: `hx-get="/buyout-check/{{ p.name }}"`
+  was the one place in the app a raw player name went into a URL unencoded.
+
+- **Logs** (landed 2026-08-15). "NHL team logos in **both** logs" was not
+  buildable as written. `ChangeRecord` holds `timestamp`/`kind`/`team_code`/
+  `description` and no player at all, so an NHL club badge has nothing to resolve
+  from there. Both logs carry an FCHL team logo; only the transaction side can
+  carry an NHL one.
+
+- **League State table** (landed 2026-08-13). Shorter column headers are the only
+  lever left on that table's width, and the premise under the original want was
+  wrong in a way that would sink the follow-up. Removing the full team name and
+  the "Stopped Drafting" label took min-content from **955px to 868px** — only
+  87px, because min-content is each column's longest *word*, not its longest
+  string, so a two-word name never cost more than "Johannesburg". Measured
+  afterwards, **all 12 columns were floored by their own header text** and summed
+  to exactly the 868: Remaining 102, Spendable 100, Cap Used 92, Max Bid 83,
+  Penalty 81, Roster 73, Needs 72, Team 66, Proj 57, Done 53, Pts 51, logo 38.
+  **That decomposition no longer predicts the total** — the Spendable column came
+  out on 2026-09-07 and min-content went to 815px, not the ~768 that subtracting
+  its 100px implies, so read the per-column figures as an explanation of *why*
+  the headers are the floor, not as an additive model; re-measure with
+  `tests/measure_layout.py`. Nothing in the table *body* can narrow it further.
+  `Rem`/`Spend`/`Cap`/`Max`/`Pen` would, by roughly 200px, and that is
+  abbreviating the labels on a dense grid of money figures that all look alike —
+  not built, because it was not asked for and the legibility cost is real. The
+  table still overflows its column at every width including 1920, so
+  `.table-scroll-x` stays load-bearing either way.
+
+- **Available Players** (landed 2026-08-16). The RFA filter was built; **both
+  bid-panel tooltips already existed** — sigma on the chart's meta line, where
+  `TestTooltipsStayInsideTheirPanel` already required it by name, and marginal
+  value in the `.bid-details` row. Recorded rather than deleted because that was
+  the second time a want in this list turned out to be built already (the Buyout
+  Analyzer, 2026-08-06) and the cost each time is a re-investigation. **Check the
+  template before filing a tooltip want.**
+
+- **Trade form** (landed 2026-08-15). "Cramped" understated it: measured at
+  1280, the four controls rendered 120–183px against labels wanting 229–316px, so
+  the salary and points were off the edge on every row. Both forms are stacked
+  one-column `.choice-list` checkbox blocks now.
+
+- **Interaction budget: every UI interaction < 500ms.** Met, and closed on
+  measurement rather than on more work. Measured 2026-08-06 on a fresh state:
+  warm `/bid-check` **9ms**, `/assign` **150ms**, `/nominate` **130ms**, `/undo`
+  **127ms**, `GET /` **20ms**, `/explain` **215ms** cold and **9ms** warm.
+  `/trade-evaluate` was the one hole — it needed a built-up trade form — and the
+  2026-09-10 verdict-fragment split made it trivial to assemble: **345ms**
+  (measured 2026-09-11, median of 5 warm, one give plus one receive), dominated
+  by the scenario MILP solves, with the `_context` the response no longer uses
+  accounting for ~8.5ms of it, 2.5%. Two things stay true and are not defects:
+  the *first* bid check on a new player is still ~1000ms, and the lever there is
+  a cheaper solve rather than fewer solves — **not** pool pruning, which was
+  measured unsafe on 2026-08-20. Where a regression would actually hurt, the
+  guard is a solve count rather than wall-clock (`tests/test_bid_cache.py`,
+  `tests/test_counterfactual_cache.py`): timing assertions go flaky under load
+  and the solve count is the cause anyway.
+
+
 ## [2026-09-10]
 
 ### Removed

@@ -813,4 +813,4 @@ class TestTheLogsNhlClubSurvivesAnOldStateFile:
 
         with TestClient(main.app) as c:
             panel = section_of(c.get("/").text, "logs-panel")
-        assert f'src="/nhl_logos/{club}.svg"' in panel
+        assert f'src="{main._nhl_logo_src(club)}"' in panel

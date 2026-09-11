@@ -1,3 +1,4 @@
+{% from "macros/nhl.html" import nhl_logo %}
 <section class="card bg-base-200 shadow-md p-4" id="bid-limits">
     <h2 class="card-title text-accent text-base mb-1">Available Players ({{ bid_limits|length }})</h2>
     {# flex-wrap because this bar gained a second button group: without it the
@@ -56,7 +57,7 @@
                 <td class="opacity-60">{{ loop.index }}</td>
                 <td>{{ p.position }}</td>
                 <td><a hx-get="/player-chart/{{ p.name|urlencode }}" hx-target="#player-chart-container" hx-swap="innerHTML" class="link link-info text-sm">{{ p.name }}</a></td>
-                <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
+                <td>{{ nhl_logo(p.nhl_team) }}</td>
                 <td>{{ p.projected_points }}</td>
                 <td>
                     {% if p.capped %}

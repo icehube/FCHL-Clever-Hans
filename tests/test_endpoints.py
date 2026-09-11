@@ -5,10 +5,17 @@ import json
 import math
 import re
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
-from config import MIN_SALARY, MINOR_CAP_GROUPS, MY_TEAM, SALARY_CAP
+from config import (
+    MIN_SALARY,
+    MINOR_CAP_GROUPS,
+    MY_TEAM,
+    NHL_TEAM_ALIASES,
+    SALARY_CAP,
+)
 from tests.helpers import (
     a_buyout_candidate,
     a_roster_player,
@@ -21,6 +28,9 @@ from tests.helpers import (
     squeeze,
     toast_of,
 )
+
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 @contextmanager
@@ -4085,7 +4095,7 @@ class TestTheLogsPanel:
         assert record.nhl_team == p.nhl_team, (
             f"the log recorded {record.nhl_team!r} for {p.name}, not {p.nhl_team!r}"
         )
-        assert f'src="/nhl_logos/{p.nhl_team}.svg"' in self._panel(client)
+        assert f'src="{main._nhl_logo_src(p.nhl_team)}"' in self._panel(client)
 
     def test_the_nhl_club_outlives_the_roster(self, client):
         """Why `nhl_team` is stored on the record instead of looked up.
@@ -4110,9 +4120,72 @@ class TestTheLogsPanel:
         )
 
         panel = self._panel(client)
-        assert f'src="/nhl_logos/{club}.svg"' in panel, (
+        assert f'src="{main._nhl_logo_src(club)}"' in panel, (
             f"{victim.name}'s {club} badge is missing after the buyout"
         )
+
+
+class TestOneLogoPathForTheWholeApp:
+    """Every NHL badge resolves through `main._nhl_logo_src`, and only that.
+
+    Six templates pasted `/nhl_logos/{{ raw }}.svg` by hand until 2026-09-10,
+    which is how the asset could be named after the ALIAS (`UTH.svg`) while the
+    canonical spelling a different pool uses (`UTA`) rendered 30 broken images.
+    The path is now built in one Python function, so the render sites and the
+    tests asserting on them cannot drift apart -- the `_dom_id` rule.
+    """
+
+    def test_the_alias_and_the_canonical_code_reach_the_same_file(self):
+        import main
+
+        canonical, alias = "UTA", "UTH"
+        assert NHL_TEAM_ALIASES[alias] == canonical, (
+            "this test is written against the Utah alias; update it with the map"
+        )
+        assert main._nhl_logo_src(alias) == main._nhl_logo_src(canonical)
+        assert main._nhl_logo_src(canonical).endswith(f"/{canonical}.svg")
+
+    def test_an_unknown_code_passes_through(self):
+        """No silent fallback: a missing logo must stay visibly missing, which
+        is what the data invariant and the pre-auction runbook are there to
+        catch. A default would hide both."""
+        import main
+
+        assert main._nhl_logo_src("ZZZ") == "/nhl_logos/ZZZ.svg"
+
+    def test_no_template_builds_the_path_itself(self):
+        """The regression is one template at a time, so guard it statically.
+
+        Scoped to an attribute so the macro's own explanatory comment -- which
+        names the directory -- is not a false positive, the same construction
+        `tests/test_offline_assets.py` uses for cross-origin URLs.
+        """
+        hand_rolled = {
+            f.relative_to(REPO).as_posix(): m.group(0)
+            for f in sorted((REPO / "templates").rglob("*.html"))
+            for m in [re.search(r"""(?:src|href)\s*=\s*["'][^"']*nhl_logos""",
+                                f.read_text())]
+            if m
+        }
+        assert not hand_rolled, (
+            "these templates build the logo path themselves instead of calling "
+            f"the nhl_logo macro: {hand_rolled}"
+        )
+
+    def test_a_player_with_no_club_gets_no_image(self, client):
+        """3 rows of players-25.csv and 7 of players-23-converted.csv carry no
+        NHL TEAM. Unguarded that rendered `/nhl_logos/.svg` -- a broken image
+        and a 404 per row. Only `_log_nhl_logo.html` guarded it before the macro.
+        """
+        import main
+
+        env = main.templates.env
+        rendered = env.from_string(
+            '{% from "macros/nhl.html" import nhl_logo %}[{{ nhl_logo(code) }}]'
+        )
+        assert rendered.render(code="") == "[]"
+        assert rendered.render(code=None) == "[]"
+        assert "<img" in rendered.render(code="BOS")
 
 
 class TestFilterGroupsAreDistinguishable:

@@ -287,6 +287,56 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Utah's logo was missing on the 2025 pool, because the asset is named after
+  the alias.** Reported as "the UTA Logo is missing". `config.NHL_TEAM_ALIASES`
+  declares `{"UTH": "UTA"}` — so `UTA` is the canonical tricode, matching
+  `team_odds.json` and the NHL itself — but the file on disk was
+  `nhl_logos/UTH.svg`, named after the *alias*, and six templates pasted the raw
+  CSV value straight into `/nhl_logos/{{ code }}.svg` with nothing resolving
+  between the two.
+
+  So which pool you load decided whether Utah had a badge. Measured across the
+  three pools carrying an `NHL TEAM` column: `data/players.csv` spells it `UTH`
+  on **78** rows and worked by accident; `data/players-25.csv` spells it `UTA`
+  on **30** rows and 404'd on every one; `data/players-23-converted.csv` spells
+  it `UTH` on 27 and worked. Nothing was wrong with the image — the app was
+  asking for a filename that did not exist.
+
+  Fixed by making the canonical spelling the one on disk (`UTH.svg` → `UTA.svg`)
+  and putting the resolution in one function, `main._nhl_logo_src`, registered
+  as the `nhl_logo_src` Jinja filter and wrapped by a new
+  `templates/macros/nhl.html`. That is the `_dom_id` rule applied to a second
+  derived string: **no template and no test builds this path any more**, and
+  `TestOneLogoPathForTheWholeApp::test_no_template_builds_the_path_itself`
+  keeps it that way, because the regression is one template at a time.
+
+  The macro also generalises a guard only `_log_nhl_logo.html` had. A blank
+  `NHL TEAM` is real — **3** rows of `players-25.csv` and **7** of
+  `players-23-converted.csv`, plus any log record written before the field
+  existed — and the other five sites rendered `/nhl_logos/.svg` for it: a broken
+  image and one more 404. They now draw nothing, which is what the log fragment
+  had always documented as the right answer.
+
+  Two things that look like cruft and are not: `UFA.svg` is the FCHL placeholder
+  `players.csv` puts in the NHL TEAM column on 9 rows, and `ARI.svg` is a retired
+  club (`convert_legacy_players.py` already renames `ARI`→`UTH` upstream, so
+  nothing reaches it) kept because deleting an asset buys nothing.
+
+  The guard that should have caught this could not: `.claude/agents/pre-auction-check.md`'s
+  logo sweep hardcoded `data/players.csv`, so it was structurally unable to see
+  an alternate pool, and it compared the CSV's spelling to the filenames
+  directly, which is the same mistake the templates were making. It now reads
+  `data_loader.PLAYERS_CSV` (honouring `FCHL_PLAYERS_CSV`), resolves through
+  `NHL_TEAM_ALIASES`, and skips the legacy schema cleanly. Run against all three
+  pools after the change: `OK` for 33, `OK` for 32, `SKIP` for `players-23.csv`.
+
+  The real enforcement is a data invariant rather than the runbook:
+  `TestLiveDataInvariants::test_every_nhl_club_in_every_pool_has_a_logo` is
+  parametrized over **every** `data/players*.csv` with an `NHL TEAM` column, so
+  a refresh that changes a club's spelling fails at `pytest` rather than on
+  screen. Verified it can fail by moving `UTA.svg` aside: three pools red,
+  naming the file and the code.
+
 - **Two grill findings on the same day's batch.** The MILP headline rendered
   two consecutive parentheticals — "Optimal Projected Points: 1230 (your Proj
   in League State) (Cost: $26.5M)" — because the new cross-reference was
@@ -1051,11 +1101,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:76 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:77 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
   to remember; `FCHL_STATE_DIR` overrides it explicitly.
-  `main.py:137 (_backfill_nhl_teams)` and
-  `main.py:161 (_backfill_keeper_flags)` follow the
+  `main.py:138 (_backfill_nhl_teams)` and
+  `main.py:162 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -1249,7 +1299,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:314 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:315 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup
@@ -1797,7 +1847,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1411 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1436 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -1902,7 +1952,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1392 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1417 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.
@@ -2503,7 +2553,7 @@ about the change being *undefended* rather than wrong.
 
 ### Investigated
 
-- **A grill pass found two things in the new panel and one pre-existing bug behind them.** Fixed here: the NHL column's header was clickable and inert (`sortTable` reads `textContent`, the cell holds only an `<img>`, so every row tied and the order never moved — measured in Chrome), now non-sortable and pinned by `test_no_header_offers_a_sort_that_cannot_work`, which states the general rule so a future icon column is caught too; and the two row fragments had drifted into two contracts, `_log_team_link.html` taking an explicit `row` while `_log_nhl_logo.html` read the loop variable `t` by name — both now take `row`. The pre-existing half is `bid_limits.html:36 (data-sort-col="3")`, which has the same dud sort on its own NHL column, filed rather than fixed because the right answer there is an `img[alt]` fallback in shared JS, not removing the affordance.
+- **A grill pass found two things in the new panel and one pre-existing bug behind them.** Fixed here: the NHL column's header was clickable and inert (`sortTable` reads `textContent`, the cell holds only an `<img>`, so every row tied and the order never moved — measured in Chrome), now non-sortable and pinned by `test_no_header_offers_a_sort_that_cannot_work`, which states the general rule so a future icon column is caught too; and the two row fragments had drifted into two contracts, `_log_team_link.html` taking an explicit `row` while `_log_nhl_logo.html` read the loop variable `t` by name — both now take `row`. The pre-existing half is `bid_limits.html:37 (data-sort-col="3")`, which has the same dud sort on its own NHL column, filed rather than fixed because the right answer there is an `img[alt]` fallback in shared JS, not removing the affordance.
 
 - **Two claims in the panel were checked in Chrome rather than read off the CSS.** The trimmed DaisyUI build does carry `.tab:is(input[type=radio]):after{content:attr(aria-label)}`, so the labels render as real text — confirmed as "Auction (6)" / "Transaction (2)" / "Change (0)" at 27px tall, clearing WCAG 2.5.8's 24px. And the grid stays contained at 1280 on **all three** tabs (overflow 0 each), not just the default one, which the browser suite alone would not have shown.
 

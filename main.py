@@ -31,6 +31,7 @@ from config import (
     MAX_SALARY,
     MIN_SALARY,
     MY_TEAM,
+    NHL_TEAM_ALIASES,
     SALARY_CAP,
 )
 # Imported as a module so `data_loader.loaded_disambiguations` is read live. It
@@ -490,6 +491,31 @@ def _dom_id(name: str) -> str:
 # has to find it live in different templates, and they are only guaranteed to
 # agree if there is one definition rather than two copies of an expression.
 templates.env.filters["dom_id"] = _dom_id
+
+
+def _nhl_logo_src(code: str) -> str:
+    """The URL for one NHL club badge, resolving the alias BEFORE naming a file.
+
+    The assets are named by the CANONICAL tricode -- the value side of
+    NHL_TEAM_ALIASES, which is also what team_odds.json and the NHL itself use.
+    The pool CSVs are not consistent about it: data/players.csv spells Utah
+    `UTH` on 78 rows while data/players-25.csv spells it `UTA` on 30, and before
+    this existed every template pasted the raw column value into the path, so
+    the 2025 pool rendered 30 broken images and 404'd on every page load.
+
+    One function for the same reason `_dom_id` is one function: the six render
+    sites and the tests that assert on them can only agree if there is a single
+    definition. Never build this path by hand.
+
+    An unknown code passes through unchanged so a missing logo stays VISIBLY
+    missing -- that is what the data invariant in tests/test_data_loader.py and
+    the pre-auction runbook's logo sweep are there to catch, and a silent
+    fallback would hide both.
+    """
+    return f"/nhl_logos/{NHL_TEAM_ALIASES.get(code, code)}.svg"
+
+
+templates.env.filters["nhl_logo_src"] = _nhl_logo_src
 
 
 @lru_cache(maxsize=None)

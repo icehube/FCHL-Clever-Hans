@@ -1,3 +1,4 @@
+{% from "macros/nhl.html" import nhl_logo %}
 {# One transaction row's NHL club badge. Expects `row`, a TransactionRecord —
    the same name `_log_team_link.html` takes, so the two sibling fragments have
    one contract rather than two. Both are driven by the loop variable directly,
@@ -7,10 +8,7 @@
    the roster, and a bought-out player is on no roster and gone from the pool —
    which is exactly the Transaction tab's content.
 
-   Guarded because the field can legitimately be blank: a record written before
-   the field existed whose player has since left players.csv keeps "" through
-   _backfill_nhl_teams. Draw nothing rather than a broken image. #}
-{% if row.nhl_team %}
-<img src="/nhl_logos/{{ row.nhl_team }}.svg" alt="{{ row.nhl_team }}"
-     class="h-5 inline object-contain" title="{{ row.nhl_team }}">
-{% endif %}
+   The blank case (a record written before the field existed whose player has
+   since left players.csv keeps "" through _backfill_nhl_teams) is handled by
+   the macro, which is where every other render site now gets the same guard. #}
+{{ nhl_logo(row.nhl_team) }}

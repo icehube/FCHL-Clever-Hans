@@ -1,0 +1,16 @@
+{# One NHL club badge. THE only place `/nhl_logos/...` is written -- six
+   templates pasted the path by hand until 2026-09-10, which is how the asset
+   could be named after an alias (`UTH.svg`) while a pool spelling the club
+   canonically (`UTA`) rendered 30 broken images with nobody noticing.
+
+   The alias resolution lives in `main._nhl_logo_src` rather than here, so the
+   tests that assert on a rendered badge can call the same function instead of
+   rebuilding the string -- the `_dom_id` rule.
+
+   Guarded because the column can legitimately be blank: 3 rows of
+   data/players-25.csv and 7 of data/players-23-converted.csv carry no NHL TEAM,
+   and a record written before the field existed keeps "" through
+   _backfill_nhl_teams. Draw nothing rather than an image that cannot load. #}
+{% macro nhl_logo(code) -%}
+{%- if code %}<img src="{{ code|nhl_logo_src }}" alt="{{ code }}" class="h-5 inline object-contain" title="{{ code }}">{% endif -%}
+{%- endmacro %}

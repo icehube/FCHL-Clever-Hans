@@ -91,24 +91,46 @@ else:
 ```
 
 ### 5. Logo coverage
+
+Two things this check got wrong until 2026-09-10, both of which hid a real gap:
+it read `data/players.csv` unconditionally, so it could not see the pool the app
+was actually pointed at, and it compared the CSV's spelling to the filenames
+directly, while the assets are named by the **canonical** tricode. Utah is the
+live case — `players.csv` says `UTH`, `players-25.csv` says `UTA`, and only
+`NHL_TEAM_ALIASES` reconciles them.
+
 Run:
 ```bash
 python3 -c "
 import csv, os
+import data_loader
+from config import NHL_TEAM_ALIASES
+
+pool = data_loader.PLAYERS_CSV   # honours FCHL_PLAYERS_CSV
 teams_in_csv = set()
-with open('data/players.csv') as f:
-    for row in csv.DictReader(f):
+with open(pool) as f:
+    reader = csv.DictReader(f)
+    if 'NHL TEAM' not in (reader.fieldnames or []):
+        print(f'SKIP: {pool} is the legacy schema (no NHL TEAM column)')
+        raise SystemExit(0)
+    for row in reader:
         t = row['NHL TEAM'].strip()
         if t:
             teams_in_csv.add(t)
 logos = set(f.replace('.svg', '') for f in os.listdir('nhl_logos') if f.endswith('.svg'))
-missing = teams_in_csv - logos
+missing = {t for t in teams_in_csv if NHL_TEAM_ALIASES.get(t, t) not in logos}
+print(f'pool: {pool}')
 if missing:
-    print(f'WARNING: {len(missing)} teams have no logo: {missing}')
+    print(f'WARNING: {len(missing)} teams have no logo: {sorted(missing)}')
 else:
     print(f'OK: All {len(teams_in_csv)} NHL teams have SVG logos')
 "
 ```
+
+A blank `NHL TEAM` is not a gap — `templates/macros/nhl.html` draws nothing for
+those. `UFA.svg` is the FCHL placeholder `players.csv` carries on 9 rows, and
+`ARI.svg` is a retired club kept because deleting it buys nothing; neither is
+cruft to clean up.
 
 ### 6. State file health
 Run:

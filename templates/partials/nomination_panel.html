@@ -1,3 +1,4 @@
+{% from "macros/nhl.html" import nhl_logo %}
 {# Nomination half of the auction panel — swapped on its own by /nominate and
    /set-nominator so neither can touch the live bidding session below it. The
    session (player, price, bidder toggles) lives only in the DOM of #bid-panel;
@@ -51,7 +52,7 @@
         <div class="card bg-base-300 p-3 text-sm">
             <div class="font-bold text-accent">{{ pick.player.name }}</div>
             <div class="text-xs opacity-70">
-                {{ pick.player.position }} · <img src="/nhl_logos/{{ pick.player.nhl_team }}.svg" alt="{{ pick.player.nhl_team }}" class="h-5 inline object-contain" title="{{ pick.player.nhl_team }}"> · {{ pick.player.projected_points }}pts
+                {{ pick.player.position }} · {{ nhl_logo(pick.player.nhl_team) }} · {{ pick.player.projected_points }}pts
                 {%- if show_prior and pick.player.prior_fchl_team %}
                 · Prior: {{ pick.player.prior_fchl_team }} @ ${{ pick.player.salary }}M
                 {%- endif %}

@@ -1,4 +1,5 @@
 {% from "macros/player.html" import player_label %}
+{% from "macros/nhl.html" import nhl_logo %}
 <section class="card bg-base-200 shadow-md p-4" id="team-panel">
     <div class="flex items-center gap-2 mb-2">
         <img src="/fchl_logos/{{ viewed_team.logo }}" alt="{{ viewed_team.code }}" class="w-6 h-6">
@@ -203,7 +204,7 @@
             <td>{{ p.position }}</td>
             <td class="font-mono text-xs opacity-70">{{ p.group }}</td>
             <td>{{ p.name }}</td>
-            <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
+            <td>{{ nhl_logo(p.nhl_team) }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
             <td class="flex gap-1 items-center">
@@ -302,7 +303,7 @@
             <td>{{ p.position }}</td>
             <td class="font-mono text-xs opacity-70">{{ p.group }}</td>
             <td>{{ p.name }}</td>
-            <td><img src="/nhl_logos/{{ p.nhl_team }}.svg" alt="{{ p.nhl_team }}" class="h-5 inline object-contain" title="{{ p.nhl_team }}"></td>
+            <td>{{ nhl_logo(p.nhl_team) }}</td>
             <td>${{ "%.1f"|format(p.salary) }}M</td>
             <td>{{ p.projected_points }}</td>
             <td>{{ "Yes" if p.counts_on_cap else "No" }}</td>

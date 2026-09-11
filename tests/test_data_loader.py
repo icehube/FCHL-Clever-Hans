@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from config import MIN_SALARY, ROSTER_SIZE, SALARY_CAP
+from config import MIN_SALARY, NHL_TEAM_ALIASES, ROSTER_SIZE, SALARY_CAP
 from data_loader import (
     build_initial_state,
     load_goalie_wins,
@@ -36,6 +36,7 @@ from data_loader import (
 )
 
 SAMPLE_CSV = str(Path(__file__).parent / "fixtures" / "players_sample.csv")
+LOGO_DIR = Path(__file__).parent.parent / "nhl_logos"
 FINGERPRINT = Path(__file__).parent / "fixtures" / "data_fingerprint.json"
 
 # Enough for the fixture's aliases without reading the live odds file — a rules
@@ -359,6 +360,40 @@ class TestLiveDataInvariants:
         assert len(state.available_players) >= needed, (
             "fewer biddable players than open roster spots — the MILP goes "
             "Infeasible for everyone"
+        )
+
+    # Every pool CSV in data/, not just the one the app is pointed at. The bug
+    # this catches was invisible for exactly that reason: data/players.csv
+    # spells Utah with the ALIAS (`UTH`), which happened to match the filename
+    # on disk, so the live pool was fine while data/players-25.csv — spelling it
+    # canonically — 404'd on 30 players.
+    @pytest.mark.parametrize("pool", sorted(
+        p for p in (Path(__file__).parent.parent / "data").glob("players*.csv")
+    ), ids=lambda p: p.name)
+    def test_every_nhl_club_in_every_pool_has_a_logo(self, pool):
+        """A club code that names no SVG is 30 broken images and 30 404s.
+
+        Resolved through NHL_TEAM_ALIASES, the same map `main._nhl_logo_src`
+        uses, because the assets are named by the canonical tricode and the CSVs
+        are not consistent about which spelling they carry.
+
+        Blank is allowed and is not a gap: 3 rows of players-25.csv and 7 of
+        players-23-converted.csv have no club, and the macro draws nothing for
+        those rather than an image that cannot load.
+        """
+        with open(pool) as f:
+            reader = csv.DictReader(f)
+            if "NHL TEAM" not in (reader.fieldnames or []):
+                pytest.skip(f"{pool.name} is the legacy schema — no NHL TEAM column")
+            codes = {(r["NHL TEAM"] or "").strip() for r in reader}
+        codes.discard("")
+
+        logos = {f.stem for f in LOGO_DIR.glob("*.svg")}
+        missing = sorted(c for c in codes
+                         if NHL_TEAM_ALIASES.get(c, c) not in logos)
+        assert not missing, (
+            f"{pool.name} names {len(missing)} NHL club(s) with no logo in "
+            f"{LOGO_DIR.name}/: {missing}"
         )
 
 

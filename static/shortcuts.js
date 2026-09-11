@@ -168,7 +168,16 @@ document.body.addEventListener('htmx:sendError', function() {
 document.body.addEventListener('htmx:afterRequest', function(e) {
     if (!e.detail.successful) return;
     var pick = e.target.closest && e.target.closest('.nomination-pick');
-    if (pick) pick.remove();
+    if (!pick) return;
+    var panel = pick.closest('#nomination-panel');
+    pick.remove();
+    /* Take the Clear button with the LAST card. Its Jinja gate only re-runs
+       when the server renders, so bidding both halves in turn would leave an x
+       beside "Auction" with nothing under it to clear. */
+    if (panel && !panel.querySelector('.nomination-pick')) {
+        var clear = panel.querySelector('#nomination-clear');
+        if (clear) clear.remove();
+    }
 });
 
 /* ── Platform-wide player search ─────────────────────────────────────────

@@ -1639,7 +1639,7 @@ async def find_player(request: Request, q: str = ""):
     `_disambiguated_names`' last-resort tier is ` (#n)`.
 
     **It deliberately does not build `_context`.** This fires on every
-    keystroke, and `_context` costs ~8.5ms and assembles a 704-row
+    keystroke, and `_context` costs ~8.5ms and assembles a 705-row
     `bid_limits` list regardless of what is rendered, against 0.33ms of
     actual work. Passing a dict already carrying `"request"` takes `_render`'s
     existing short-circuit. That narrows ONE endpoint; the BACKLOG entry
@@ -2322,7 +2322,8 @@ def _driver_rows(b: PriceBreakdown) -> dict:
             "bar_px": round(60.0 * abs(d.log_delta) / widest) if widest else 0,
             # The LABEL, not the ratio. A raw `floor_factor` shipped alongside
             # it for one commit, rendered by nothing — which is the exact defect
-            # the BACKLOG entry this feature closed described one level up:
+            # the finding this feature closed described one level up (now in
+            # CHANGELOG.md — it left BACKLOG.md when it was resolved):
             # an unrendered number beside a price factor is an invitation to
             # render it as one.
             "floor_label": _odds_label(o),

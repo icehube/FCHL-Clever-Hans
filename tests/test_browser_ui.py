@@ -980,7 +980,7 @@ class TestTooltipsStayInsideTheirPanel:
     # `data-tip` tooltips, and the one that mattered most is `#bid-limits`' only
     # `tooltip-left`: it renders per CAPPED row, and on a fresh state the ceiling
     # IS the salary cap, so nothing is ever capped and this suite had never once
-    # measured it (`BACKLOG.md`, bid_limits.html:41). `endgame-ceiling-binds`
+    # measured it (`BACKLOG.md`, bid_limits.html:64). `endgame-ceiling-binds`
     # produces ~83 capped rows.
     #
     # Three widths rather than all seven, because the extra cost is a page load
@@ -1151,13 +1151,22 @@ class TestTooltipsStayInsideTheirPanel:
             # became the harder one to reach.
             "Marginal (bid panel)": "What he adds to YOUR optimal roster",
             "Sigma (price chart)": "How SPREAD OUT",
-            # Was "Computed two ways" until 2026-08-17, when the tooltip was
-            # rewritten for GET /solve-standings. Anchored on the mechanism
-            # rather than on a turn of phrase: the two figures being computed
-            # differently is now the DEFAULT rather than the whole story, and
-            # this fragment goes away only if the tooltip stops explaining how
-            # to make them comparable.
-            "Proj (league table)": "Solve Standings",
+            # The league table header used to be here ("Solve Standings"), and
+            # it is GONE on purpose (2026-09-11) rather than having drifted.
+            # It was the app's only `data-tip` inside a `.table-scroll-x`, and
+            # measurement showed no bubble can be readable there: the scroller
+            # is 293px wide at 1024, DaisyUI centres with no flip logic, and
+            # sweeping every scroll position at which the header is visible put
+            # the bubble outside the visible box at 5 of 6 of them at 1280
+            # (worst 110px of 270). This suite could not see it because it
+            # measures at `scrollLeft: 0`, where that header is off-screen
+            # entirely — so the entry was passing while covering nothing.
+            # The tooltip is a native `title` now, which has no box to clip.
+            #
+            # Nothing replaces it: after that change NO `data-tip` lives inside
+            # a horizontally scrolling container, so the container class this
+            # entry stood for has nothing left to measure. If one is ever added
+            # there, it needs a scroll sweep and not this test.
             # The app's only `tooltip-left`, and the reason the endgame scenario
             # is in STATES. It renders per CAPPED row, so on a fresh state it
             # never renders at all and this suite measured 0 of them until
@@ -1298,6 +1307,73 @@ class TestMidBidClutterCanBeDismissed:
         assert player in panel, (
             f"the bid panel is not bidding on {player} — dismissing the card "
             f"replaced the request it was meant to accompany"
+        )
+
+    def test_the_clear_control_removes_both_cards_and_itself(self, page, live_server):
+        """The commonest case: you read both recommendations and want neither.
+
+        Asserted at ZERO rather than "fewer", because a handler that removed
+        only the first `.nomination-pick` — `querySelector` instead of
+        `querySelectorAll`, which is the obvious slip — satisfies every "the
+        card went away" reading. The three survivors matter as much: the panel
+        is /nominate's swap target, the button is the only way back, and
+        clearing must fire no request at all, which is what the bid-panel
+        assertion pins.
+        """
+        _open(page, live_server)
+        page.keyboard.press("n")
+        page.wait_for_selector(".nomination-pick")
+        assert page.locator(".nomination-pick").count() == 2, (
+            "expected an RFA and a UFA card — with one there is no 'both'"
+        )
+        bid_before = page.locator("#bid-panel").inner_text()
+
+        page.click("#nomination-clear")
+        page.wait_for_selector("#nomination-clear", state="detached")
+
+        assert page.locator(".nomination-pick").count() == 0, (
+            "clearing left a recommendation behind — the handler is removing "
+            "one card rather than every one"
+        )
+        assert page.locator("#nomination-panel").count() == 1, (
+            "the clear took the panel with it — it is /nominate's swap target "
+            "and nothing could land in it again"
+        )
+        assert page.locator('#nomination-panel button[hx-get="/nominate"]').count() == 1, (
+            "the clear removed the Get Recommendations button, which is the "
+            "only way back"
+        )
+        assert page.locator("#bid-panel").inner_text() == bid_before, (
+            "clearing the recommendations disturbed the bid panel — it is a "
+            "DOM-only dismiss and must fire no request"
+        )
+
+    def test_bidding_the_last_card_takes_the_clear_control_with_it(
+        self, page, live_server
+    ):
+        """The other direction, which the Jinja gate cannot cover.
+
+        That gate only re-evaluates when the server renders. Bidding both halves
+        removes both cards client-side, so without the tail in `shortcuts.js`
+        the x would sit beside "Auction" with nothing left to clear.
+        """
+        _open(page, live_server)
+        page.keyboard.press("n")
+        page.wait_for_selector(".nomination-pick")
+        assert page.locator("#nomination-clear").count() == 1, "precondition"
+
+        for half in ("RFA Pick", "UFA Pick"):
+            card = page.locator(".nomination-pick", has_text=half)
+            assert card.count() == 1, f"no {half} card to bid"
+            with page.expect_response(re.compile(r"/bid-check")):
+                card.locator("button[type='submit']").click()
+            page.wait_for_selector(
+                f".nomination-pick:has-text('{half}')", state="detached"
+            )
+
+        assert page.locator("#nomination-clear").count() == 0, (
+            "the last card went but the clear control stayed — it now clears "
+            "nothing"
         )
 
     def test_a_failed_bid_check_leaves_the_recommendation_on_screen(

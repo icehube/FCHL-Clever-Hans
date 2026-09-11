@@ -5277,6 +5277,64 @@ class TestExactStandingsOnDemand:
                 f"{text!r}"
             )
 
+    def test_the_header_and_the_marker_do_not_say_the_same_thing(self, client):
+        """They sit in the SAME `<th>`, and one of them is state-aware.
+
+        Until 2026-09-11 the `Proj` header carried a 375-char bubble that
+        restated the marker's own title at greater length and less accurately:
+        the marker branches three ways while the header said "estimates"
+        unconditionally, including in the state where every figure on screen is
+        a real solve. The split now is that the marker owns the BASIS and the
+        header owns what the column MEASURES.
+
+        Keyed on "Solve Standings", which is the marker's job to name — it is
+        the control that changes the basis, and the reason the marker stopped
+        saying `exact` on 2026-09-10 was that no word in it pointed at a
+        button. If that phrase ever reappears in the header, the two have
+        re-converged and the state-aware one is no longer the only answer.
+        """
+        page = section_of(client.get("/").text, "league-state")
+        header = re.search(r'<span title="([^"]*)">Proj</span>', page)
+        assert header, "the Proj header carries no explanation at all"
+        header_text = header.group(1)
+
+        assert "Solve Standings" not in header_text, (
+            f"the header tooltip names the button again, which is the marker's "
+            f"job and cannot be said correctly by a static string: {header_text!r}"
+        )
+        assert "12F/6D/2G" in header_text, (
+            f"the header no longer says what the column measures — the one "
+            f"thing the marker below it cannot say: {header_text!r}"
+        )
+        marker = re.search(r'id="proj-basis"[^>]*\stitle="([^"]*)"', page)
+        assert marker and "Solve Standings" in marker.group(1), (
+            "the basis marker stopped naming the button, so nothing does"
+        )
+
+    def test_the_header_explanation_is_not_a_daisyui_bubble(self, client):
+        """A bubble cannot be readable in this cell, and that is measured.
+
+        `Proj` is a `th` inside `.table-scroll-x`, whose VISIBLE width is 293px
+        at 1024 and 379px at 1280. DaisyUI centres a bubble on its trigger and
+        has no flip logic, so sweeping every scroll position at which the header
+        is fully visible put a 270px bubble outside the visible box at 5 of 6 of
+        them at 1280 (worst 110px), 4 of 5 at 1024 and 6 of 7 at 928. Narrowing
+        does not rescue it — an 80px bubble, too narrow for a sentence, is still
+        clipped at ~20% of hover positions — and re-anchoring only moves the
+        failure to the other edge.
+
+        Cheap and static because the browser suite structurally cannot catch a
+        regression here: `TestTooltipsStayInsideTheirPanel` measures at
+        `scrollLeft: 0`, where this header is not on screen, which is how the
+        375-char bubble passed it for a month.
+        """
+        page = section_of(client.get("/").text, "league-state")
+        assert "data-tip" not in page, (
+            "a DaisyUI bubble is back inside the league table — it lives in a "
+            "horizontal scroller too narrow for one, and the browser tooltip "
+            "suite measures unscrolled, so nothing else will catch this"
+        )
+
     def test_the_scan_solves_live_opponents_only(self, monkeypatch, client):
         """Done teams and BOT are skipped, and neither is an optimization.
 
@@ -5912,6 +5970,24 @@ class TestNominationIsNeverGatedByATurn:
         r = client.get("/nominate")
         assert r.status_code == 200
         assert "UFA Pick" in r.text
+
+    def test_the_clear_control_appears_only_with_something_to_clear(self, client):
+        """Both halves, and the ABSENCE is the one that can fail.
+
+        An x beside "Auction" with no cards under it is a control that does
+        nothing, which mid-draft reads as a broken button — so it is gated on
+        the same `is defined and` pair the cards themselves use. A test that
+        only asserted its presence would pass against an ungated one.
+        """
+        assert 'id="nomination-clear"' not in client.get("/").text, (
+            "the clear control renders on a fresh league, where there are no "
+            "recommendations to clear"
+        )
+        r = client.get("/nominate")
+        assert r.status_code == 200
+        assert 'id="nomination-clear"' in r.text, (
+            "recommendations came back with no way to dismiss them"
+        )
 
     def test_the_override_endpoint_is_gone(self, client):
         """404/405, not a silent 200 — a stale bookmark must not look like it

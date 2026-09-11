@@ -355,7 +355,8 @@ class TestDrainStrategy:
 class TestBothPricesReachThePanel:
     """The panel shows Layer 1 and Layer 2 side by side, and says which is which.
 
-    The owner want behind this (`BACKLOG.md`, 2026-08-07 testing pass) is a
+    The owner want behind this (the 2026-08-07 testing pass, written up in
+    `CHANGELOG.md` since 2026-09-11) is a
     discrimination: a player cheap because the *market* is thin looks identical
     to one cheap because the *model* rates him low when only one figure is on
     screen. So every pick carries both, and `capped` says whether they diverge

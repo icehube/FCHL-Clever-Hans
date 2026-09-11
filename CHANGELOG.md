@@ -22,6 +22,125 @@ rediscover the same non-problem.
 
 ## [2026-09-11]
 
+### Added
+
+- **A Clear control on the nomination panel.** `/nominate` returned an RFA and
+  a UFA card and nothing dismissed them except bidding one. `shortcuts.js` has
+  removed the card you acted on since the panel split, but the commoner case —
+  reading a recommendation and deciding against it — left it on screen until
+  the next `/nominate`. An × now sits beside "Auction", in the slot the removed
+  Override dropdown vacated this morning, and clears both cards at once (owner
+  decision; the alternative offered was one × per card).
+
+  **It is gated on there being something to clear, and taken away in both
+  directions.** An × beside a heading with nothing under it is a control that
+  does nothing, which mid-draft reads as a broken button. The Jinja gate is the
+  same `is defined and` pair the cards use — but that only re-evaluates when the
+  server renders, so bidding the RFA half and then the UFA half would strand it:
+  both cards go client-side and the × would be left alone. `shortcuts.js`'s
+  existing `htmx:afterRequest` handler now removes it when the last
+  `.nomination-pick` goes. Two paths, two tests.
+
+  Mutation-checked three ways, and the useful one is the first: `querySelector`
+  in place of `querySelectorAll` — the obvious slip — satisfies every "the card
+  went away" reading, which is why the browser test asserts the count at
+  **zero** rather than "fewer". The other two: the Jinja gate removed (the
+  fresh-league absence assertion fires) and the `shortcuts.js` tail removed
+  (the bid-both-halves test fires).
+
+### Fixed
+
+- **The Proj column tooltip was 375 characters in a box that could not be read,
+  and neither half of that was what the browser suite was measuring.** The
+  owner's report was "this tooltip is too big". It was: the longest hover text
+  in the app, **3.2× the median `data-tip`**, rendering **270×324px** — a third
+  of the panel's height hanging off a table header.
+
+  **The length was the smaller problem.** `Proj` is a `th` inside
+  `.table-scroll-x`, whose *visible* width is 293px at 1024 and 379px at 1280.
+  DaisyUI centres a bubble on its trigger and has no flip logic, so sweeping
+  every scroll position at which the header is fully visible put the bubble
+  outside the visible box at **5 of 6** of them at 1280 (worst **110px** of
+  270), 4 of 5 at 1024, 6 of 7 at 928. Only the fully-scrolled-right position
+  works.
+
+  **No bubble can live there, and that is geometry rather than tuning.** The
+  plan was to shorten the text and add a right-anchor rule in the shape
+  `.team-stats` already uses. Measured, that fixes nothing: re-anchoring moves
+  the failure to the opposite edge, and narrowing does not rescue it either —
+  computed over the same windows, a 200px bubble is still clipped at ~50% of
+  hover positions, 120px at ~30%, and even an 80px one, far too narrow for a
+  sentence, at ~20%. A 27px trigger inside a 293px window has no width that
+  works. So the header explanation is a native `title` now, which has no box to
+  clip — the conclusion `.price-drivers` reached in `style.css` for the same
+  reason, and the one the `#proj-basis` marker in the *same* `<th>` had already
+  reached.
+
+  **Why `TestTooltipsStayInsideTheirPanel` was green throughout.** It measures
+  at `scrollLeft: 0`, where the Proj header is not on screen at all, and bounds
+  containment against the scroller's `scrollWidth` rather than against what is
+  visible. A 270px bubble in a 379px panel passes both of its checks while being
+  unreadable at every scroll position an operator would hover from. That entry
+  is removed from its `required` inventory with the numbers written down, not
+  quietly dropped — and nothing replaces it, because after this change **no**
+  `data-tip` lives inside a horizontally scrolling container, so the container
+  class it stood for has nothing left to measure. A cheap static endpoint test
+  (`test_the_header_explanation_is_not_a_daisyui_bubble`) guards the regression
+  the browser suite structurally cannot see.
+
+  **The text lost the half that was already being said better.** The
+  `#proj-basis` marker rendered into the same `<th>` carries a state-aware
+  `title` in three branches; the header tip restated it at greater length and
+  **less accurately**, saying "estimates" unconditionally — including in the
+  state where every figure on screen is a real solve. So the basis story stays
+  with the marker and the header says what the column *measures*, which nothing
+  else in the app does and which is genuinely non-obvious: only the starting
+  12F/6D/2G scores. 375 chars → **143**.
+  `test_the_header_and_the_marker_do_not_say_the_same_thing` pins the split in
+  both directions.
+
+### Investigated
+
+- **The backlog is current.** Asked directly: does `BACKLOG.md` still describe
+  what is left to do? Audited end to end — every entry re-read, all 15
+  `file:line (symbol)` references resolved against the working tree, each
+  finding's mechanism re-checked in the code, and `CHANGELOG.md` plus 40 commits
+  grepped for anything that had closed one. **Nothing in the file has already
+  been fixed**, and no reference has drifted. Today's nomination-turn removal
+  stranded nothing: no entry mentions `current_nominator`, `/set-nominator`,
+  `snake_draft` or `nomination_index`, and `GET /nominate` still exists.
+
+  Four corrections landed, all in prose rather than in the findings themselves.
+  The triage note said "all **nineteen** findings reproduce" — true when it was
+  written that morning, and four were closed by the work that followed the same
+  day (`d89e4ba`, `8ca89f4`, `5b8aacc`), so it now says fifteen and names them.
+  The `_context` entry said that endpoint builds **16** keys; it builds **23**
+  (its 705-row `bid_limits` figure is right). Four references were re-anchored:
+  each passed `tests/test_backlog_refs.py` only because the enclosing symbol's
+  span absorbed it, while pointing at a docstring line, a bare `)` or an
+  unrelated line rather than at the code the entry describes. And the four
+  newest and highest-priority findings sat above the first `###` with three
+  paragraphs of guidance wedged below them, so a reader scanning headings missed
+  them — they have a `### recently filed` heading now.
+
+  Separately, six comments **pointing at** `BACKLOG.md` from code and tests had
+  rotted, which `tests/test_backlog_refs.py` structurally cannot see (it
+  validates references *inside* the two docs only): a stale 704-row figure the
+  backlog itself had already corrected to 705, two citations of a per-column
+  decomposition that moved to this file, a citation of `bid_limits.html` by a
+  line the backlog no longer references at all,
+  and two comments citing entries that were deleted when they were resolved.
+  All now point where the content actually is.
+
+- **"Goalie features" removed from the Ideas list** at the owner's request. It
+  was the only place in the repo recording that the July 2026 round-2 rebuild
+  moved goalies onto projected wins and that **the old accuracy numbers
+  therefore no longer apply** — `CHANGELOG.md` has nothing on goalie accuracy
+  and the nearest code comment documents a different goalie problem. That
+  caveat moved into `.claude/rules/pricing-pipeline.md` beside the existing
+  `proj_wins` documentation, where it is a fact about the model rather than a
+  want. The idea itself is gone.
+
 ### Removed
 
 - **The nomination-turn tracker — badge, Override dropdown, `POST

@@ -72,6 +72,31 @@
 <div id="nomination-panel">
     <div class="flex items-center gap-2 mb-2">
         <h2 class="card-title text-accent text-base">Auction</h2>
+        {# Clears BOTH cards at once, in the slot the removed Override dropdown
+           used to hold. `shortcuts.js` already dismisses the one card you acted
+           on; this is for the far commoner case of looking at a recommendation
+           and deciding against it, which until now left it on screen until the
+           next /nominate.
+
+           GATED on there being something to clear, and that is not decoration:
+           an x beside a heading with no cards under it is a control that does
+           nothing, which mid-draft reads as a broken button. Same
+           `is defined and` pair the cards below use, so the three cannot
+           disagree.
+
+           `closest()` rather than getElementById, following player_chart.html
+           and counterfactual.html. There is only one #nomination-panel today,
+           so this is idiom rather than necessity — but the idiom is what stops
+           the next partial that IS mounted twice getting it wrong.
+
+           It removes ITSELF as well, and shortcuts.js removes it when the last
+           card goes the other way (bidding both halves). Both paths, because
+           the Jinja gate above only re-evaluates when the server renders. #}
+        {% if (rfa_pick is defined and rfa_pick) or (ufa_pick is defined and ufa_pick) %}
+        <button id="nomination-clear" class="btn btn-xs btn-ghost ml-auto"
+                onclick="this.closest('#nomination-panel').querySelectorAll('.nomination-pick').forEach(c => c.remove()); this.remove()"
+                aria-label="Clear the recommendations" title="Clear">&times;</button>
+        {% endif %}
     </div>
 
     {# UNCONDITIONAL, and both halves of that are deliberate.

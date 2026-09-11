@@ -34,7 +34,8 @@
        min-content measured **815px** on a fresh state (no penalty column),
        2026-09-07, by tests/measure_layout.py. Down from 868px with the
        Spendable column, which is the number to distrust in the older note: the
-       per-column decomposition recorded in BACKLOG.md put Spendable at 100px,
+       per-column decomposition (in CHANGELOG.md since 2026-09-11, under the
+       League State notes) put Spendable at 100px,
        so subtracting predicted ~768 and the browser said 815. Take the figure
        from the instrument, never from arithmetic over the parts.
 
@@ -55,7 +56,8 @@
        word in the Proj header's basis marker cost 53px when longest-word
        reasoning predicted about 3. Shorter headers still work, and still trade
        legibility in a dense grid of money figures that all look alike; a
-       header phrase is NOT free. See BACKLOG.md before reaching for it. #}
+       header phrase is NOT free. Read the League State width notes in
+       CHANGELOG.md before reaching for it. #}
     <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
         <thead>
@@ -91,9 +93,43 @@
                    Three cheaper estimators were measured and all three are
                    WORSE (mean |err| 94 for this one against 147/176/401), so
                    the only thing better than the heuristic is the solve itself.
-                   Hence the button rather than a new formula. See BACKLOG.md. #}
+                   Hence the button rather than a new formula. See BACKLOG.md.
+
+                   NATIVE `title`, AND NO BUBBLE CAN LIVE HERE (2026-09-11).
+                   This was a 375-char `tooltip tooltip-bottom` — the longest
+                   hover text in the app, 3.2x the median `data-tip` — rendering
+                   270x324px. Two separate faults, and only one of them was the
+                   length.
+
+                   A bubble anchored to a trigger inside `.table-scroll-x`
+                   cannot be made readable, and that is geometry rather than
+                   tuning. The scroller's VISIBLE width is 293px at 1024 and
+                   379px at 1280; DaisyUI centres the bubble on its trigger and
+                   has no flip logic. Measured by sweeping every scroll position
+                   at which the `Proj` header is fully visible: the bubble was
+                   clipped at **5 of 6** such positions at 1280 (worst 110px of
+                   270), 4 of 5 at 1024, 6 of 7 at 928. Only the fully-scrolled-
+                   right position works — which is exactly why
+                   `TestTooltipsStayInsideTheirPanel` never saw it: it measures
+                   at `scrollLeft: 0`, where this header is not even on screen.
+                   Re-anchoring only moves the failure to the other edge, and
+                   narrowing does not rescue it either: a 27px trigger in a
+                   293px window leaves an 80px bubble — too narrow for a
+                   sentence — still clipped at 20% of hover positions. So the
+                   options were a native title or no explanation, the same
+                   conclusion `.price-drivers` reached in style.css.
+
+                   The TEXT is now what the basis marker below cannot say. It
+                   used to restate the marker's own `title` at greater length
+                   and LESS accurately: the marker is state-aware in three
+                   branches while this said "estimates" unconditionally,
+                   including in the state where every figure on screen is a real
+                   solve. So the estimate story lives there, and this says what
+                   the column measures — which nothing else in the app does, and
+                   which is genuinely non-obvious, since only the starting
+                   lineup scores. #}
                 <th data-sort-col="{{ 9 if any_penalties else 8 }}" data-sort-type="number" onclick="sortTable(this)" class="cursor-pointer">
-                    <span class="tooltip tooltip-bottom" data-tip="Projected points once the roster is filled. YOURS is the optimizer's actual best roster within your real budget. An opponent's is a quick estimate that can read either side of what they can actually reach — measured up to 14% high — until you press Solve Standings, which replaces every opponent's figure with a real optimizer solve. Any pick returns the column to estimates.">Proj</span>
+                    <span title="Projected points once the roster is filled — the best 12F/6D/2G only; the bench scores nothing. The marker below says which figures are solved.">Proj</span>
                     {% include "partials/standings_basis.html" %}
                 </th>
                 <th>Done</th>

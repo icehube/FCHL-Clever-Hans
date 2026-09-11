@@ -24,7 +24,14 @@ from fastapi.templating import Jinja2Templates
 # the event loop. See `_publish_if_current` for the whole rule.
 from starlette.concurrency import run_in_threadpool
 
-from config import BUYOUT_PENALTY_RATE, MAX_SALARY, MIN_SALARY, MY_TEAM, SALARY_CAP
+from config import (
+    BENCH_SIZE,
+    BUYOUT_PENALTY_RATE,
+    MAX_SALARY,
+    MIN_SALARY,
+    MY_TEAM,
+    SALARY_CAP,
+)
 # Imported as a module so `data_loader.loaded_disambiguations` is read live. It
 # is mutated in place, so a from-import would happen to work today — but it
 # would also survive data_loader switching to a rebind, silently and wrongly.
@@ -1190,6 +1197,9 @@ def _context(request: Request) -> dict:
         # The league's salary cap, so a template quoting it in prose reads the
         # config rather than carrying its own copy of "11.4" to drift.
         "max_salary": MAX_SALARY,
+        # Same reason: team_panel.html greys the Bench button at the cap and has
+        # to name the number in the tooltip.
+        "bench_size": BENCH_SIZE,
         "buyout_indicators": buyout_indicators,
         "market_prices": market_prices,
         "projections": projections,
@@ -2245,10 +2255,18 @@ async def toggle_bench(
             _render(request, "partials/all_panels.html"),
             f"{player_name} not found on {team_code}", "warning",
         )
-    # Snapshot like every other mutation — without it, undo after a bench
-    # toggle silently reverts the PREVIOUS action instead
-    auction_state.save_snapshot()
-    p.is_bench = not p.is_bench
+    # _undoable, not a bare save_snapshot(): this endpoint can now REJECT (the
+    # bench is capped at BENCH_SIZE), and save_snapshot() captures AND commits,
+    # so snapshotting before the outcome is known spends a chain entry on a
+    # request that changed nothing. rollback=False because set_bench validates
+    # before it mutates.
+    try:
+        with _undoable(rollback=False):
+            t.set_bench(player_name, not p.is_bench)
+    except ValueError as e:
+        return _toast(
+            _render(request, "partials/all_panels.html"), str(e), "error",
+        )
     _log_change(
         "toggle-bench",
         team_code,

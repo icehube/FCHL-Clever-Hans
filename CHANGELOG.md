@@ -24,6 +24,56 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The bench had no capacity limit, so a team could hold any number of benched
+  players.** Reported as "you shouldn't be able to add more than 4 people to a
+  bench — the system should make you move someone to active first." There was
+  no constant, no counter, no validation and no display: `is_bench` was a bare
+  flag on `PlayerOnRoster` and `ROSTER_SIZE` was the only roster number anything
+  checked.
+
+  **What this is not.** `is_bench` reaches no engine module at all. The MILP
+  selects its own starters (binary `s <= x`, slots capped 12/6/2) and
+  `lineup_points` takes the greedy top-k over every roster player regardless of
+  the flag — measured, benching a 76-point starter left `current_roster_points`
+  at 583, unmoved. So this is a bookkeeping and legality rule for the operator,
+  not a fix to a wrong number. The tool was recording an illegal roster shape
+  and had no way to notice.
+
+  `config.BENCH_SIZE` is `ROSTER_SIZE - sum(STARTING_LINEUP.values())` = 4,
+  derived from the two structural numbers and deliberately **not** from
+  `sum(BACKUP_TARGETS)`, which is also 4 but is a soft objective preference the
+  MILP is free to deviate from. `TeamState.set_bench()` validates before
+  mutating and raises; `TeamState.bench_count` counts `roster_players` only.
+
+  **Two endpoints add to the bench and a cap on the obvious one is bypassable in
+  two clicks.** `send_to_minors` and `add_minor_player` force `is_bench = True`
+  on the way down — deliberately, so a later recall lands on the bench instead
+  of displacing a starter — and `recall_from_minors` never resets it. Measured:
+  demote a BOT player and recall him and he is back in `roster_players` with
+  `is_bench=True`, bench count 0 → 1. So `recall_from_minors` carries the same
+  check, guarded on the flag rather than applied unconditionally: minors loaded
+  from the CSV carry `is_bench=False` (0 of 149 at reset), and recalling one of
+  those lands him active and must stay legal.
+
+  `POST /toggle-bench` moved from a bare `save_snapshot()` to
+  `with _undoable(rollback=False)`. That is forced rather than cosmetic: the
+  endpoint can now reject, `save_snapshot()` captures *and* commits, and the
+  error path pops from the other end of the chain — so a refusal would have read
+  as a no-op while destroying a real undo step. `rollback=False` is correct
+  because `set_bench` validates first.
+
+  The Bench button is greyed at the cap with a tooltip naming it; **Activate is
+  never greyed**, because it is the way out of a full bench and gating it would
+  deadlock the one workflow the cap makes harder — demoting a starter needs a
+  free bench slot to stage him in. There is no deadlock: send one of the four
+  benched down first.
+
+  Seven mutants checked, each killed by a different test: the cap removed from
+  `set_bench`; the recall guard removed; the recall guard made unconditional
+  (which is what would break CSV minors); `bench_count` over `all_players`;
+  `/toggle-bench` back to a pre-outcome `save_snapshot()`; Activate greyed too;
+  and the button never greyed.
+
 - **The forward price curve peaked at 80 points and fell, so the league's best
   forwards were priced below mid-tier ones.** Reported as "Kucherov is still
   priced lower than Panarin, which doesn't make sense" — and he was: on
@@ -761,11 +811,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:68 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:75 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
   to remember; `FCHL_STATE_DIR` overrides it explicitly.
-  `main.py:129 (_backfill_nhl_teams)` and
-  `main.py:153 (_backfill_keeper_flags)` follow the
+  `main.py:136 (_backfill_nhl_teams)` and
+  `main.py:160 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -882,7 +932,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:306 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:313 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup

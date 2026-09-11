@@ -185,7 +185,14 @@
                 <form hx-post="/toggle-bench" hx-target="#app" hx-swap="innerHTML" style="display:inline">
                     <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
                     <input type="hidden" name="player_name" value="{{ p.name }}">
-                    <button type="submit" class="btn btn-xs btn-ghost" title="{{ 'Activate' if p.is_bench else 'Bench' }}">{{ "Activate" if p.is_bench else "Bench" }}</button>
+                    {# Disabled only in the BENCH direction, and only at the cap.
+                       Activate is the way out of a full bench — greying it too
+                       would deadlock the workflow this cap makes harder, since
+                       demoting a starter needs a free bench slot to stage him
+                       in. The server refuses either way (TeamState.set_bench);
+                       this is the affordance, not the rule. #}
+                    {% set bench_full = not p.is_bench and viewed_team.bench_count >= bench_size %}
+                    <button type="submit" class="btn btn-xs btn-ghost" {% if bench_full %}disabled title="{{ viewed_team.code }}'s bench is full ({{ bench_size }}) — activate someone first"{% else %}title="{{ 'Activate' if p.is_bench else 'Bench' }}"{% endif %}>{{ "Activate" if p.is_bench else "Bench" }}</button>
                 </form>
                 {# A DIV, not a form, and no submit button — both deliberately.
 

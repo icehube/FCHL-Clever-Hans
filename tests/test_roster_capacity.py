@@ -16,7 +16,7 @@ number is what `evaluate_trade` accepts or declines on.
 import pytest
 from fastapi.testclient import TestClient
 
-from config import MY_TEAM, ROSTER_SIZE, SALARY_CAP
+from config import BENCH_SIZE, MY_TEAM, ROSTER_SIZE, SALARY_CAP
 from state import PlayerOnRoster
 
 
@@ -339,3 +339,233 @@ class TestSpotsDisplay:
 
         assert r.status_code == 200
         assert ">-1<" not in r.text.replace(" ", ""), "Spots must not render negative"
+
+
+class TestBenchCapacity:
+    """The bench holds BENCH_SIZE and nothing enforced that until 2026-09-10.
+
+    `is_bench` reaches NO engine module — the MILP selects its own starters
+    (`s <= x`, capped 12/6/2) and `lineup_points` reads every roster player
+    regardless — so a 5th benched player changed no number anywhere. Measured:
+    benching a 76-point starter left `current_roster_points` at 583, unmoved.
+    That is exactly why it needs a guard rather than a calculation fix: the tool
+    would record an illegal roster shape and never notice it had.
+    """
+
+    def _bot(self, client):
+        import main
+
+        return main.auction_state.teams[MY_TEAM]
+
+    def _bench(self, client, team_code, name):
+        return client.post(
+            "/toggle-bench", data={"team_code": team_code, "player_name": name}
+        )
+
+    def test_the_cap_is_the_leftover_roster_spots(self):
+        """Derived, not the literal 4 — and NOT sum(BACKUP_TARGETS), which is
+        also 4 but is a soft objective preference the MILP may deviate from."""
+        from config import BACKUP_TARGETS, STARTING_LINEUP
+
+        assert BENCH_SIZE == ROSTER_SIZE - sum(STARTING_LINEUP.values())
+        assert BENCH_SIZE == 4, "if the lineup shape changed, so did this"
+        assert sum(BACKUP_TARGETS.values()) == BENCH_SIZE, (
+            "they agree today by coincidence; BENCH_SIZE must not be derived "
+            "from the soft preference"
+        )
+
+    def test_bench_count_ignores_the_minors(self, client):
+        """send_to_minors forces is_bench on the way down so a later recall
+        lands on the bench. Counting all_players would put a team with 37
+        minors permanently over the cap."""
+        bot = self._bot(client)
+        victim = bot.roster_players[0]
+        bot.set_bench(victim.name, True)
+        bot.send_to_minors(victim.name)
+
+        assert bot.minor_players[-1].is_bench, "the travel marker is still set"
+        assert bot.bench_count == 0, "a minor occupies no bench slot"
+
+    def test_a_fifth_bench_is_refused(self, client):
+        bot = self._bot(client)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            bot.set_bench(p.name, True)
+        fifth = bot.roster_players[BENCH_SIZE]
+
+        with pytest.raises(ValueError, match="bench is full"):
+            bot.set_bench(fifth.name, True)
+
+        assert not fifth.is_bench, "a refusal must not have mutated the flag"
+        assert bot.bench_count == BENCH_SIZE
+
+    def test_activating_is_never_refused(self, client):
+        """The way out of a full bench. Gating it would deadlock the workflow
+        this cap makes harder: demoting a starter needs a free slot to stage
+        him in."""
+        bot = self._bot(client)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            bot.set_bench(p.name, True)
+
+        bot.set_bench(bot.roster_players[0].name, False)
+
+        assert bot.bench_count == BENCH_SIZE - 1
+        bot.set_bench(bot.roster_players[BENCH_SIZE].name, True)
+        assert bot.bench_count == BENCH_SIZE
+
+    def test_rebenching_someone_already_benched_is_not_a_fifth(self, client):
+        """The cap counts bench SLOTS, not toggle calls — a no-op set_bench on
+        somebody already down must not trip it."""
+        bot = self._bot(client)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            bot.set_bench(p.name, True)
+
+        bot.set_bench(bot.roster_players[0].name, True)  # already benched
+
+        assert bot.bench_count == BENCH_SIZE
+
+    def test_the_endpoint_refuses_and_says_why(self, client):
+        """200 with an error toast, like every other refusal here — so the
+        status code proves nothing and the bench count is what to read."""
+        from tests.helpers import toast_of
+
+        bot = self._bot(client)
+        names = [p.name for p in bot.roster_players[:BENCH_SIZE + 1]]
+        for name in names[:BENCH_SIZE]:
+            r = self._bench(client, MY_TEAM, name)
+            assert toast_of(r).get("type") != "error", f"{name} should have benched"
+
+        r = self._bench(client, MY_TEAM, names[BENCH_SIZE])
+
+        assert r.status_code == 200
+        toast = toast_of(r)
+        assert toast.get("type") == "error"
+        assert "bench is full" in toast.get("message", "")
+        assert self._bot(client).bench_count == BENCH_SIZE
+
+    def test_a_refused_toggle_costs_no_undo_depth(self, client):
+        """save_snapshot() captures AND commits, so snapshotting before the
+        outcome is known evicts the oldest chain entry at MAX_SNAPSHOTS while
+        the error path pops from the other end — a refusal that reads as a
+        no-op while quietly destroying a real undo step."""
+        import main
+
+        bot = self._bot(client)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            self._bench(client, MY_TEAM, p.name)
+        depth = len(main.auction_state._snapshots)
+
+        self._bench(client, MY_TEAM, bot.roster_players[BENCH_SIZE].name)
+
+        assert len(main.auction_state._snapshots) == depth, (
+            "a rejected request must not spend a snapshot"
+        )
+
+    def test_undo_still_reverts_the_last_successful_bench(self, client):
+        """The other half of the same mutant: _undoable must still COMMIT on
+        success. Reads the flag, not a count — pre-bench and post-bench have
+        identical roster and minors counts."""
+        import main
+
+        bot = self._bot(client)
+        victim = bot.roster_players[0]
+        self._bench(client, MY_TEAM, victim.name)
+        assert self._bot(client).find_player(victim.name).is_bench
+
+        client.post("/undo")
+
+        assert not self._bot(client).find_player(victim.name).is_bench
+
+    def test_the_button_is_greyed_at_the_cap(self, client):
+        """The affordance, not the rule. Only the BENCH direction — an
+        Activate button must never be disabled."""
+        from tests.helpers import section_of
+
+        bot = self._bot(client)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            self._bench(client, MY_TEAM, p.name)
+
+        panel = section_of(client.get(f"/team-view/{MY_TEAM}").text, "team-panel")
+
+        assert panel.count("Activate") >= BENCH_SIZE
+        for row in panel.split("<tr")[1:]:
+            if ">Bench<" in row:
+                assert "disabled" in row, "Bench must be greyed at the cap"
+            if ">Activate<" in row:
+                assert "disabled" not in row, "Activate is the way out"
+
+
+class TestRecallRespectsTheBench:
+    """The second bench-adding path, and the one a cap on /toggle-bench alone
+    leaves wide open: recall_from_minors never resets is_bench, and
+    send_to_minors forces it True on the way down."""
+
+    def test_a_demoted_player_comes_back_benched(self, client):
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = bot.roster_players[0]
+        bot.set_bench(victim.name, True)
+        bot.send_to_minors(victim.name)
+        bot.set_bench(bot.roster_players[0].name, False)  # clear the bench
+
+        bot.recall_from_minors(victim.name)
+
+        assert bot.find_player(victim.name).is_bench, (
+            "deliberate — a recall must not displace a starter"
+        )
+        assert bot.bench_count == 1
+
+    def test_recall_is_refused_when_the_bench_is_full(self, client):
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = bot.roster_players[0]
+        bot.set_bench(victim.name, True)
+        bot.send_to_minors(victim.name)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            bot.set_bench(p.name, True)
+
+        with pytest.raises(ValueError, match="bench is full"):
+            bot.recall_from_minors(victim.name)
+
+        assert any(p.name == victim.name for p in bot.minor_players), (
+            "validated before mutating — a refused recall leaves him down"
+        )
+
+    def test_a_csv_minor_recalls_without_a_bench_slot(self, client):
+        """Minors loaded from the CSV carry is_bench=False (measured: 0 of 149
+        at reset), so recalling one lands him ACTIVE and the cap does not apply.
+        Guarding recall unconditionally would refuse a legal move."""
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        fresh = next(p for p in bot.minor_players if not p.is_bench)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            bot.set_bench(p.name, True)
+
+        bot.recall_from_minors(fresh.name)
+
+        assert not bot.find_player(fresh.name).is_bench
+        assert bot.bench_count == BENCH_SIZE
+
+    def test_the_endpoint_reports_the_bench_reason(self, client):
+        """/move-to-roster already surfaces str(e) — the message has to read
+        well there, which is why it names the team and the cap."""
+        from tests.helpers import toast_of
+
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        victim = bot.roster_players[0]
+        bot.set_bench(victim.name, True)
+        bot.send_to_minors(victim.name)
+        for p in bot.roster_players[:BENCH_SIZE]:
+            bot.set_bench(p.name, True)
+
+        r = client.post(
+            "/move-to-roster",
+            data={"team_code": MY_TEAM, "player_name": victim.name},
+        )
+
+        assert r.status_code == 200
+        assert "bench is full" in toast_of(r).get("message", "")

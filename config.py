@@ -17,6 +17,13 @@ ROSTER_SIZE = 24
 # spots are position-agnostic insurance and contribute nothing to the total.
 STARTING_LINEUP = {"F": 12, "D": 6, "G": 2}
 
+# How many roster spots are left over once the lineup is fielded. Derived from
+# the two structural numbers rather than written as 4, and deliberately NOT
+# taken from sum(BACKUP_TARGETS) below — which also happens to be 4 but is a
+# soft objective preference the MILP is free to deviate from. This one is a
+# hard legality rule: 24 spots, 20 of them starting, so at most 4 on the bench.
+BENCH_SIZE = ROSTER_SIZE - sum(STARTING_LINEUP.values())
+
 # Position minimums (active roster) = must be able to field the lineup
 MIN_FORWARDS = 12
 MIN_DEFENSE = 6

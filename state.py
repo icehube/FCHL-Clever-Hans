@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, fields
 from functools import lru_cache
 
 from config import (
+    BENCH_SIZE,
     BUYOUT_ELIGIBLE_GROUPS,
     MAX_SALARY,
     MIN_SALARY,
@@ -216,6 +217,19 @@ class TeamState:
         return len(self.roster_players)
 
     @property
+    def bench_count(self) -> int:
+        """How many active-roster players are benched.
+
+        Over `roster_players`, so minors are excluded by construction — and that
+        is the point, not an oversight. `send_to_minors` and `add_minor_player`
+        force `is_bench = True` on the way down so a later recall lands on the
+        bench instead of displacing a starter, which makes a minor's flag a
+        travel marker rather than a roster slot. Counting `all_players` here
+        would put a team with 37 minors permanently over the cap.
+        """
+        return sum(1 for p in self.roster_players if p.is_bench)
+
+    @property
     def total_spots_remaining(self) -> int:
         """How many more players can be added to active roster."""
         return ROSTER_SIZE - self.roster_count
@@ -346,6 +360,33 @@ class TeamState:
         self.minor_players.append(player)
         self._invalidate_cache()
 
+    def set_bench(self, player_name: str, bench: bool) -> None:
+        """Bench or activate a roster player, capped at BENCH_SIZE benched.
+
+        The CBA roster is 24 with a 20-man starting lineup, so at most 4 sit on
+        the bench. Nothing enforced that until now: `is_bench` reaches no engine
+        module at all — the MILP picks its own starters and `lineup_points`
+        reads every roster player regardless — so a 5th benched player was a
+        bookkeeping lie the tool would happily record and never notice.
+
+        Validated before mutating, so a refusal leaves the flag exactly as it
+        was; `main.py` can therefore use `_undoable(rollback=False)` and a
+        rejected click costs no undo depth.
+
+        Activating is never refused. It is the way out of a full bench, and
+        gating it would deadlock the one workflow this cap makes harder:
+        demoting a starter needs a free bench slot to stage him in.
+        """
+        p = self.find_player(player_name)
+        if p is None:
+            raise ValueError(f"Player '{player_name}' not on {self.code}")
+        if bench and not p.is_bench and self.bench_count >= BENCH_SIZE:
+            raise ValueError(
+                f"{self.code}'s bench is full ({BENCH_SIZE}) — activate someone "
+                f"before benching '{player_name}'"
+            )
+        p.is_bench = bench
+
     def send_to_minors(self, player_name: str) -> None:
         """Move an active-roster player to minors. Player must be benched first.
 
@@ -403,6 +444,17 @@ class TeamState:
                     f"{self.code}'s active roster is full ({ROSTER_SIZE}) — "
                     f"bench a player and send them down before recalling "
                     f"'{player_name}'"
+                )
+            # The second bench-adding path, and the one a cap on /toggle-bench
+            # alone leaves wide open: a player demoted through send_to_minors
+            # keeps is_bench, so recalling him lands him ON the bench. Guarded on
+            # the flag rather than unconditionally, because minors loaded from
+            # the CSV carry is_bench=False (measured: 0 of 149 at reset) and
+            # recalling one of those lands him active, costing no bench slot.
+            if self.minor_players[i].is_bench and self.bench_count >= BENCH_SIZE:
+                raise ValueError(
+                    f"{self.code}'s bench is full ({BENCH_SIZE}) and "
+                    f"'{player_name}' comes back benched — activate someone first"
                 )
             self.minor_players[i].is_minor = False
             recalled = self.minor_players.pop(i)

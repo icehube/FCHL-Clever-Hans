@@ -66,6 +66,26 @@ rediscover the same non-problem.
   than the summary borrowing the table's rule, and a mutant that makes it ignore
   that argument dies.
 
+- **Three test defects the first commit introduced or left behind, all in the
+  code that zips engine facts onto rendered rows.**
+  `test_the_bars_are_scaled_in_log_space_not_on_factor_minus_one` carried an
+  INLINE copy of the hiding predicate — and a comment warning that a predicate
+  disagreeing with the template "silently labelled every width with the wrong
+  group". The rule changed on 2026-09-11 and the copy did not, which is exactly
+  the mislabelling its own comment describes.
+  `test_it_renders_the_numbers_the_engine_computed` compared the printed factors
+  against ALL five drivers rather than the live ones: it passed only because its
+  subject has every driver in play, and it quietly asserted the *opposite* of
+  the hiding rule. Both now go through one `_live_drivers` helper.
+
+  And the helper itself was unpinned, which mutation testing caught: reverting
+  it to the stale predicate broke nothing, because only ONE player in the pool
+  separates the two rules and no test happened to select him. A new sweep
+  asserts the helper picks the same rows as the card for all 705 players, so a
+  second statement of the rule can no longer drift in silence. Cost check on the
+  bidding path, where this card is embedded: `_driver_rows` is 0.013ms median /
+  0.046ms max, `GET /player-chart` 10.2ms median.
+
 - **`_odds_label` divided by its own argument.** `math.exp` underflows to `0.0`
   below about -745 rather than raising, so a `floor_logit_delta` past that would
   have produced a `ZeroDivisionError` — and this card is embedded in

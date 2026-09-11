@@ -1323,27 +1323,75 @@ class TestTheChartExplainsThePrice:
         has something to say."""
         return pool_top(1, position="F")[0]
 
-    def _live_groups(self, name: str) -> set[str]:
-        """The groups the engine says say something about this player.
+    @staticmethod
+    def _live_drivers(b) -> list:
+        """The drivers the card renders, in engine order.
 
-        BOTH columns, and rounded. Reading `log_delta != 0.0` — which this did
-        until 2026-09-11 — is wrong in two directions at once now: it keeps a
-        row whose price factor prints x1.00, and it would drop a row that does
-        nothing to the price while multiplying the floor odds by 20.
+        BOTH columns, and rounded. Reading `log_delta != 0.0` — which the two
+        callers below did until 2026-09-11 — is wrong in two directions at
+        once now: it keeps a row whose price factor prints x1.00, and it would
+        drop a row that does nothing to the price while multiplying the floor
+        odds by 20.
+
+        ONE helper, because the hazard here is a test zipping group names onto
+        rendered widths: a predicate that disagrees with the template by a
+        single row silently labels every width with the wrong group, which is
+        the failure `test_the_bars_are_scaled_in_log_space...` already carried
+        a comment about before its own inline copy went stale.
         """
+        import main
+
+        return [
+            d for d in b.drivers
+            if not (main._is_unit(d.factor)
+                    and main._is_unit(main._odds_ratio(d.floor_logit_delta)))
+        ]
+
+    def _decompose(self, name: str):
         import main
         from price_model import decompose_player
 
         player = main.auction_state.available_players[name]
-        b = decompose_player(
+        return decompose_player(
             player, main.model_params,
             main.auction_state.price_reference[player.position],
         )
-        return {
-            d.group for d in b.drivers
-            if not (main._is_unit(d.factor)
-                    and main._is_unit(math.exp(d.floor_logit_delta)))
-        }
+
+    def _live_groups(self, name: str) -> set[str]:
+        return {d.group for d in self._live_drivers(self._decompose(name))}
+
+    def test_the_test_helper_agrees_with_the_card_on_every_pool_player(self, client):
+        """`_live_drivers` is a second statement of the hiding rule, so pin it.
+
+        Every assertion in this class that zips engine facts onto rendered rows
+        trusts that helper to pick the same set the card does — and a predicate
+        that disagrees by ONE row mislabels every width rather than failing.
+        That is not hypothetical: the inline copy in
+        `test_the_bars_are_scaled_in_log_space...` went stale on 2026-09-11 when
+        the rule changed, and mutation testing showed reverting the helper to
+        the old predicate broke nothing, because only one player in the pool
+        separates the two and no test happened to select him.
+
+        Swept over the whole pool for that reason: the separating case is one
+        row in 3525 and picking a subject cannot be trusted to find it.
+        """
+        import main
+
+        mismatches = []
+        for name, player in main.auction_state.available_players.items():
+            ref = main.auction_state.price_reference.get(player.position)
+            if not ref:
+                continue
+            b = self._decompose(name)
+            mine = [d.group for d in self._live_drivers(b)]
+            card = [r["group"] for r in main._driver_rows(b)["rows"]]
+            if mine != card:
+                mismatches.append((name, mine, card))
+        assert not mismatches, (
+            f"the helper disagrees with the card on {len(mismatches)} player(s), "
+            f"so every zipped assertion in this class is suspect: "
+            f"{mismatches[:3]}"
+        )
 
     def test_it_names_exactly_the_drivers_that_are_in_play(self, client):
         """Set equality, both directions, against the engine.
@@ -1502,12 +1550,17 @@ class TestTheChartExplainsThePrice:
         assert base == pytest.approx(b.base_price, abs=0.005)
         assert median == pytest.approx(b.prediction.median_price, abs=0.005)
 
+        # The LIVE drivers, not all five. Comparing against b.drivers passed
+        # only because this subject happens to have every driver in play; the
+        # first player with an inert one would have failed it as a phantom
+        # mismatch, and it quietly asserted the OPPOSITE of the hiding rule.
+        live = self._live_drivers(b)
         printed = [float(m) for m in re.findall(r"&times;([\d.]{4,})", block)]
         assert printed == [
-            pytest.approx(d.factor, abs=0.005) for d in b.drivers
+            pytest.approx(d.factor, abs=0.005) for d in live
         ], (
             f"the card printed factors {printed} against the engine's "
-            f"{[round(d.factor, 2) for d in b.drivers]}"
+            f"{[round(d.factor, 2) for d in live]}"
         )
 
     def test_it_is_collapsed_by_default(self, client):
@@ -1592,8 +1645,11 @@ class TestTheChartExplainsThePrice:
         )
         # Against the LIVE drivers in engine order, not against GROUPS: inert
         # rows are hidden since 2026-09-10, so zipping the five names onto
-        # three bars silently labelled every width with the wrong group.
-        live = [d.group for d in b.drivers if d.log_delta != 0.0]
+        # three bars silently labelled every width with the wrong group. Via
+        # the shared helper since 2026-09-11 — this was an inline copy of the
+        # predicate and went stale the moment the rule changed, which is the
+        # mislabelling this very comment warns about.
+        live = [d.group for d in self._live_drivers(b)]
         assert len(rows) == len(live), (
             f"found {len(rows)} bars for {name} against {len(live)} live drivers"
         )
@@ -1849,9 +1905,11 @@ class TestTheFloorOddsColumn:
         multipliers and 0dp percentages, so re-multiplying is lossy by design,
         and a tight bound here would only be re-deriving the unit test.
         """
+        import main
+
         name = next(
-            n for n, p in main_module().auction_state.available_players.items()
-            if p.position in main_module().auction_state.price_reference
+            n for n, p in main.auction_state.available_players.items()
+            if p.position in main.auction_state.price_reference
         )
         b = self._decomposed(name)
         block = self._block(client.get(f"/player-chart/{name}").text)
@@ -1937,9 +1995,11 @@ class TestTheFloorOddsColumn:
         quoted as percentages, so a percentage inside a driver row means
         somebody built the order-dependent version.
         """
+        import main
+
         name = next(
-            n for n, p in main_module().auction_state.available_players.items()
-            if p.position in main_module().auction_state.price_reference
+            n for n, p in main.auction_state.available_players.items()
+            if p.position in main.auction_state.price_reference
         )
         block = self._block(client.get(f"/player-chart/{name}").text)
         driver_rows = [
@@ -2075,12 +2135,6 @@ class TestOddsLabel:
                     f"{player.name} {d.group} rendered as {label}"
                 )
         assert seen > 1000, f"only {seen} rows swept; the pool did not load"
-
-
-def main_module():
-    import main
-
-    return main
 
 
 class TestBidCheckOnAPlayerItCannotFind:

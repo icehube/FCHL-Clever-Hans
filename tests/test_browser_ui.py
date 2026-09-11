@@ -1937,6 +1937,132 @@ class TestTradeChoiceLists:
         page.uncheck(f'{boxes}[value="{names[0]}"]')
         assert page.text_content("#trade-panel .choice-summary").startswith("1 selected")
 
+    def test_the_selection_survives_an_evaluate(self, page, live_server):
+        """The reported bug, in the browser, which is the only place it exists.
+
+        "When I evaluate a trade, the players get deselected, so I have to readd
+        all of them to modify the trade to recheck things." The form used to be
+        inside the swap, so the response replaced it with a stateless copy: no
+        `checked` in the template, no `selected` on any partner option, and the
+        fetched list back at its "Select a team first" placeholder with nothing
+        to re-fire `loadTradeChoices`.
+
+        Both halves on purpose. The give side is server-rendered and comes back
+        unticked; the receive side is built by JS and comes back GONE, taking
+        the partner selection with it. A give-only test passes against a fix
+        that rebuilt the Jinja half and left the fetched one empty.
+        """
+        _open(page, live_server)
+        self._open_forms(page)
+
+        give = page.eval_on_selector_all(
+            "#trade-panel input[name=give_player]",
+            "els => els.slice(0, 2).map(e => e.value)",
+        )
+        assert len(give) == 2, "BOT has fewer than two tradeable players"
+        for n in give:
+            page.check(f'#trade-panel input[name=give_player][value="{n}"]')
+
+        partner = self._pick_partner(
+            page, "#trade-source-team", "#trade-receive-list")
+        page.check("#trade-receive-list input[type=checkbox] >> nth=0")
+
+        with page.expect_response(re.compile(r"/trade-evaluate")):
+            page.click("#trade-panel button[type=submit]")
+        page.wait_for_selector(".trade-verdict")
+
+        still = page.eval_on_selector_all(
+            "#trade-panel input[name=give_player]",
+            "els => els.filter(e => e.checked).map(e => e.value)")
+        assert still == give, f"the evaluate cleared the give list: {still}"
+
+        assert page.eval_on_selector(
+            "#trade-source-team", "el => el.value") == partner, (
+            "the partner selection was lost, so the receive list cannot be "
+            "rebuilt without picking the team again"
+        )
+        received = page.eval_on_selector_all(
+            "#trade-receive-list input[type=checkbox]",
+            "els => els.filter(e => e.checked).length")
+        assert received == 1, (
+            f"{received} of the fetched receive boxes are still ticked — the "
+            "JS-built half was rebuilt or destroyed by the swap"
+        )
+
+        summaries = page.eval_on_selector_all(
+            "#trade-panel .choice-summary", "els => els.map(e => e.textContent.trim())")
+        assert all(t.startswith(("2 selected", "1 selected")) for t in summaries), (
+            f"the running counters reset: {summaries}"
+        )
+
+    def test_changing_the_selection_marks_the_verdict_stale(self, page, live_server):
+        """The hazard the fix creates, closed in the same commit.
+
+        /trade-execute posts the SERVER's last_trade_eval, not this form, and
+        only refuses a trade_id that no longer matches. Now that the ticks
+        survive, unticking a player and hitting Execute would execute the trade
+        you evaluated rather than the one on screen — so the verdict says it is
+        stale and the button stops being clickable.
+
+        Deliberately a trade the engine ACCEPTS (BOT's worst points-per-dollar
+        keeper for the partner's best player), because DECLINE renders no
+        Execute button at all and the disabled assertion would be vacuous. The
+        button count is asserted first so a data change fails loudly here
+        instead of quietly passing.
+        """
+        _open(page, live_server)
+        self._open_forms(page)
+
+        # Both lists render sorted by projected points, descending. So the LAST
+        # give box is BOT's weakest player and the FIRST receive box is the
+        # partner's best -- which is the trade the engine accepts. Reading
+        # els[0] on the give side hands away BOT's best and gets a DECLINE,
+        # which renders no Execute button at all.
+        worst = page.eval_on_selector_all(
+            "#trade-panel input[name=give_player]",
+            "els => els[els.length - 1].value")
+        page.check(f'#trade-panel input[name=give_player][value="{worst}"]')
+        self._pick_partner(page, "#trade-source-team", "#trade-receive-list")
+        page.check("#trade-receive-list input[type=checkbox] >> nth=0")
+
+        with page.expect_response(re.compile(r"/trade-evaluate")):
+            page.click("#trade-panel button[type=submit]")
+        page.wait_for_selector(".trade-verdict")
+
+        buttons = "#trade-panel .trade-verdict button[type=submit]"
+        assert page.eval_on_selector_all(buttons, "els => els.length") == 1, (
+            "no Execute button — this fixture needs a trade the engine accepts, "
+            "or the disabled assertion below cannot fail"
+        )
+        assert not page.is_visible(".trade-stale-note"), (
+            "the verdict is already marked stale before anything changed"
+        )
+        assert page.eval_on_selector(buttons, "el => el.disabled") is False
+
+        page.uncheck(f'#trade-panel input[name=give_player][value="{worst}"]')
+
+        assert page.is_visible(".trade-stale-note"), (
+            "the selection changed and nothing on screen says the verdict no "
+            "longer describes it"
+        )
+        assert page.eval_on_selector(buttons, "el => el.disabled") is True, (
+            "Execute is still live against a trade the form no longer shows"
+        )
+
+        # The way OUT. Nothing clears `is-stale` in JS — the swap brings a fresh
+        # verdict div — so a fix that marked the panel instead of the verdict,
+        # or that reused the element, would strand the operator with a dead
+        # Execute button and no way back.
+        page.check(f'#trade-panel input[name=give_player][value="{worst}"]')
+        with page.expect_response(re.compile(r"/trade-evaluate")):
+            page.click("#trade-panel button[type=submit]")
+        page.wait_for_selector(".trade-verdict:not(.is-stale)")
+
+        assert not page.is_visible(".trade-stale-note")
+        assert page.eval_on_selector(buttons, "el => el.disabled") is False, (
+            "re-evaluating left Execute disabled, so the verdict cannot be acted on"
+        )
+
 
 class TestTheHeaderSearchLandsWhereItPoints:
     """Three DOM-level properties of the finder, none of them server-visible.

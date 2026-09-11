@@ -3768,6 +3768,146 @@ class TestTheTradeFormCanSeeTheMinors:
         assert incoming.name in bot
 
 
+class TestEvaluatingATradeKeepsTheForm:
+    """The reported bug: "the players get deselected, so I have to readd all of
+    them to modify the trade to recheck things."
+
+    The form used to sit inside the swap — `hx-target="#trade-panel"` with
+    `hx-swap="outerHTML"` — and the template renders no `checked` anywhere, no
+    `selected` on any partner option, and `#trade-receive-list` back at its
+    "Select a team first" placeholder. So every evaluate handed back a stateless
+    copy of the form you had just filled in. The answer is the same one
+    `#bid-advice` uses inside `#bid-panel`: when the state lives only in the DOM,
+    swap the answer and not the room it is standing in.
+
+    The browser tests prove the ticks survive. These prove the RESPONSE cannot
+    destroy them, which is the half that runs in 50ms.
+    """
+
+    def _evaluate(self, client):
+        """Give BOT's lowest-points player, receive the partner's best.
+
+        Derived by role, never by name. Chosen because the engine accepts it —
+        asserted below — so the Execute form is actually rendered and the tests
+        that care about it are not vacuous.
+        """
+        import main
+
+        bot = main.auction_state.teams[MY_TEAM]
+        give = min(bot.all_players, key=lambda p: p.projected_points)
+        source = next(c for c, t in main.auction_state.teams.items()
+                      if c != MY_TEAM and t.roster_players)
+        incoming = max(main.auction_state.teams[source].roster_players,
+                       key=lambda p: p.projected_points)
+        return client.post("/trade-evaluate", data={
+            "give_player": [give.name],
+            "source_team": source,
+            "receive_player": [json.dumps({
+                "name": incoming.name,
+                "position": incoming.position,
+                "salary": incoming.salary,
+                "projected_points": incoming.projected_points,
+            })],
+        })
+
+    def test_the_response_is_the_verdict_and_not_the_form(self, client):
+        """The one assertion that could not pass before the split: the give list
+        is 49 checkboxes and every one of them used to come back unticked."""
+        r = self._evaluate(client)
+
+        assert r.status_code == 200, r.text
+        assert 'class="trade-verdict' in r.text, "no verdict in the response"
+        assert 'name="give_player"' not in r.text, (
+            "the evaluate response still carries the give list, so the swap "
+            "replaces the form and every tick is lost"
+        )
+        assert 'id="trade-receive-list"' not in r.text, (
+            "the receive list is in the response, so it reverts to its "
+            "placeholder and the partner selection goes with it"
+        )
+
+    def test_an_empty_evaluate_leaves_the_swap_target_standing(self, client):
+        """A target that disappears with its contents can be swapped once.
+
+        `bid_panel.html` documents the same trap from the other side: both
+        branches of that template own `#bid-advice` for exactly this reason.
+        Submitting with nothing ticked sets `result = None`, and the placeholder
+        branch is what keeps the next evaluate able to land.
+        """
+        r = client.post("/trade-evaluate", data={})
+
+        assert r.status_code == 200
+        assert 'id="trade-result"' in r.text, (
+            "an empty evaluate returned no swap target, so #trade-result is "
+            "gone from the document and every later evaluate swaps nowhere"
+        )
+        assert "trade-verdict" not in r.text, "an empty trade produced a verdict"
+
+    def test_the_form_targets_the_id_the_response_renders(self, client):
+        """Two strings in two files with no import between them.
+
+        A typo in either is completely silent: htmx logs nothing useful for a
+        target it cannot find, and the panel simply stops answering.
+        """
+        form = section_of(client.get("/").text, "trade-panel")
+        m = re.search(r'hx-post="/trade-evaluate"[^>]*hx-target="#([^"]+)"', form)
+        assert m, "the evaluate form has no hx-target"
+
+        assert f'id="{m.group(1)}"' in self._evaluate(client).text, (
+            f'the form targets #{m.group(1)}, which the response does not render'
+        )
+
+    def test_the_page_holds_exactly_one_swap_target(self, client):
+        """htmx takes the FIRST id match without complaining, so a second copy
+        sends swaps into the wrong one — the `counterfactual.html` lesson."""
+        assert client.get("/").text.count('id="trade-result"') == 1
+
+    @staticmethod
+    def _verdict_div(html: str) -> str:
+        """The `.trade-verdict` element's own markup, by depth-counting `<div>`.
+
+        Slicing from the class attribute to the END of the string is not this,
+        and the difference is the entire point of the test below: measured
+        2026-09-10, moving the Execute form out to a SIBLING of the verdict left
+        a to-end-of-string slice green. A mutant that dies in no test is the
+        thing to be suspicious of.
+        """
+        at = html.index('class="trade-verdict')
+        start = html.rindex("<div", 0, at)
+        depth, i = 0, start
+        while True:
+            opened = html.find("<div", i)
+            closed = html.find("</div>", i)
+            assert closed != -1, "unbalanced <div> in the verdict"
+            if opened != -1 and opened < closed:
+                depth, i = depth + 1, opened + len("<div")
+            else:
+                depth, i = depth - 1, closed + len("</div>")
+                if depth == 0:
+                    return html[start:i]
+
+    def test_the_execute_button_is_inside_the_verdict(self, client):
+        """`markTradeEvalStale` disables `button[type=submit]` scoped to
+        `.trade-verdict`, so an Execute button rendered as a sibling would stay
+        live against a selection that no longer matches the evaluation."""
+        r = self._evaluate(client)
+        assert "ACCEPT" in r.text, (
+            "this fixture needs a trade the engine accepts, or no Execute "
+            "button is rendered and the assertions below cannot fail"
+        )
+
+        verdict = self._verdict_div(r.text)
+        assert 'hx-post="/trade-execute"' in verdict, (
+            "the Execute form is outside .trade-verdict, so the staleness "
+            "guard cannot reach its button"
+        )
+        assert 'name="trade_id"' in verdict
+        assert "trade-stale-note" in verdict, (
+            "the staleness warning is not in the verdict, so nothing on screen "
+            "would say the form no longer matches the answer"
+        )
+
+
 class TestNoBidControlIsUnnamed:
     """Stated as the general rule, the same shape as
     `TestTheTradeFormCanSeeTheMinors::test_no_control_in_either_trade_form_is_unnamed`

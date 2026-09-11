@@ -1,6 +1,6 @@
 {% from "macros/player.html" import player_label %}
 <section class="card bg-base-200 shadow-md p-4" id="trade-panel">
-    <details {% if trade_result is defined and trade_result %}open{% endif %}>
+    <details>
         <summary class="card-title text-accent text-base mb-2 cursor-pointer select-none flex items-center gap-2">
             <span class="collapse-chevron">▶</span> Trade Evaluator
         </summary>
@@ -11,7 +11,11 @@
            points off the edge. Stacking is what buys the width; two columns of
            the 521px panel at 1600 is still only 236px, so this is unconditional
            rather than a breakpoint. #}
-        <form hx-post="/trade-evaluate" hx-target="#trade-panel" hx-swap="outerHTML" hx-encoding="multipart/form-data">
+        {# hx-target is the VERDICT, not the panel. Until 2026-09-10 this swapped
+           #trade-panel outerHTML, so every evaluate replaced the form you had
+           just filled in with a stateless copy of itself — see
+           trade_verdict.html for the whole story. #}
+        <form hx-post="/trade-evaluate" hx-target="#trade-result" hx-swap="outerHTML" hx-encoding="multipart/form-data">
             <div class="flex flex-col gap-3">
                 <div class="choice-block">
                     <h3 class="font-semibold text-sm mb-1">I Give</h3>
@@ -66,58 +70,7 @@
             <button type="submit" class="btn btn-primary btn-sm mt-2">Evaluate Trade</button>
         </form>
 
-        {% if trade_result is defined and trade_result %}
-        {% set verdict_class = 'success' if trade_result.recommendation == 'accept' else 'error' %}
-        {# `trade-verdict` is a hook, not a style: it names "the answer" so a
-           test does not have to reach for a layout class that happens to sit
-           there. Measured — a test that read `#trade-panel .grid` for this went
-           GREEN against an endpoint dropping half the trade the moment the form
-           wrapper regained a `grid`, because the form lists all 49 players and
-           "the name is in there" is then trivially true. #}
-        <div class="trade-verdict mt-3 p-3 rounded-lg bg-{{ verdict_class }}/10 border border-{{ verdict_class }}/30">
-            <div class="text-xs mb-2 grid grid-cols-2 gap-3">
-                <div>
-                    <div class="opacity-70">I give:</div>
-                    {% for p in trade_result.give %}
-                    <div>{{ player_label(p) }}</div>
-                    {% endfor %}
-                </div>
-                <div>
-                    <div class="opacity-70">I receive:</div>
-                    {% for p in trade_result.receive %}
-                    <div>{{ player_label(p) }}</div>
-                    {% endfor %}
-                </div>
-            </div>
-            <h3 class="font-bold text-sm">Verdict: <span class="text-{{ verdict_class }}">{{ trade_result.recommendation|upper }}</span></h3>
-            <p class="text-xs opacity-80 mt-1">{{ trade_result.reasoning }}</p>
-
-            <table class="table table-xs mt-2">
-                <thead><tr><th>Scenario</th><th>Points</th><th>Cap Remaining</th></tr></thead>
-                <tbody>
-                <tr>
-                    <td>{{ trade_result.current_scenario.description }}</td>
-                    <td>{{ "%.0f"|format(trade_result.current_scenario.total_points) }}</td>
-                    <td>${{ "%.1f"|format(trade_result.current_scenario.cap_remaining) }}M</td>
-                </tr>
-                {% for s in trade_result.scenarios %}
-                <tr class="{% if s == trade_result.best_scenario %}font-bold text-accent{% endif %}">
-                    <td>{{ s.description }}</td>
-                    <td>{{ "%.0f"|format(s.total_points) }}</td>
-                    <td>${{ "%.1f"|format(s.cap_remaining) }}M</td>
-                </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-
-            {% if trade_result.recommendation == "accept" %}
-            <form hx-post="/trade-execute" hx-target="#app" hx-swap="innerHTML" class="mt-2">
-                <input type="hidden" name="trade_id" value="{{ trade_result.trade_id }}">
-                <button type="submit" class="btn btn-primary btn-sm">Execute Trade</button>
-            </form>
-            {% endif %}
-        </div>
-        {% endif %}
+        {% include "partials/trade_verdict.html" %}
     </details>
 </section>
 {# No inline <script> here any more. This file and shortcuts.js carried two

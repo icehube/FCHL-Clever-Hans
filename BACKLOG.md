@@ -28,7 +28,7 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
   `tests/test_endpoints.py` payloads for no behavioural change, and it was out
   of scope for a question about turn order.
 
-- [2026-09-10] [grill] `main.py:2135 (_driver_rows)` — **hiding inert driver rows on an EXACTLY-zero `log_delta` still leaves 12 rows on screen printing `×1.00`** (measured over the fresh 705-player pool: 2361 visible rows, of which 11 Scarcity and 1 NHL team round to 1.00 at the card's 2dp), so the confusion the change removed for the structural cases is not fully gone for near-zero ones. Deferred deliberately rather than switched to a rounding test: a `×1.004` row dropped from a card that prints both a base and a median leaves a gap between them that nothing on screen explains, and `test_it_names_exactly_the_drivers_that_are_in_play` compares the rendered groups against `log_delta != 0.0` in both directions, so a rounding rule fails it by design. Fixing it properly means the card stating the residual, which is a design question and an owner decision, not a filter tweak. 0.5% of rows, so the cost of waiting is measured and small.
+- [2026-09-10] [grill] `main.py:2141 (_driver_rows)` — **hiding inert driver rows on an EXACTLY-zero `log_delta` still leaves 12 rows on screen printing `×1.00`** (measured over the fresh 705-player pool: 2361 visible rows, of which 11 Scarcity and 1 NHL team round to 1.00 at the card's 2dp), so the confusion the change removed for the structural cases is not fully gone for near-zero ones. Deferred deliberately rather than switched to a rounding test: a `×1.004` row dropped from a card that prints both a base and a median leaves a gap between them that nothing on screen explains, and `test_it_names_exactly_the_drivers_that_are_in_play` compares the rendered groups against `log_delta != 0.0` in both directions, so a rounding rule fails it by design. Fixing it properly means the card stating the residual, which is a design question and an owner decision, not a filter tweak. 0.5% of rows, so the cost of waiting is measured and small.
 
 - [2026-09-10] [design-review] `state.py:786 (_searchable)` — **two different
   people sharing one name yield one search hit, and the pool copy is the one
@@ -263,14 +263,18 @@ measured at 1280, the four controls rendered 120–183px against labels wanting
 229–316px, so the salary and points were off the edge on every row. Both forms
 are now stacked one-column `.choice-list` checkbox blocks.
 
-Two things deliberately **not** built, and both would be follow-ups rather than
-oversights. **Re-ticking the boxes after an evaluate**: the response re-renders
-`#trade-panel` and the form comes back empty, exactly as the selects did — and
-unlike the buyout picker there is no control contradicting the answer beside it,
-since the verdict block lists what you gave and received. Restoring it means
-re-fetching and re-ticking the JS-built half. **A search box over the 49 rows**:
-the height cap plus full-width labels is the measured fix; revisit only if
-scrolling still bites in a real break.
+One thing deliberately **not** built: **a search box over the 49 rows**. The
+height cap plus full-width labels is the measured fix; revisit only if scrolling
+still bites in a real break.
+
+The other deferral here — **re-ticking the boxes after an evaluate** — was
+resolved on 2026-09-10 and is written up in `CHANGELOG.md`. Worth knowing why
+it sat: this entry framed it as "restoring" the selection, which does mean
+re-fetching and re-ticking the JS-built half, and that is real work. The actual
+fix was to stop destroying it — `/trade-evaluate` now swaps the verdict alone.
+It also said "there is no control contradicting the answer beside it", which
+became false the moment the form survived; the staleness marker shipped with the
+fix for exactly that reason.
 
 One accepted rough edge, measured rather than assumed: at **1024px** the widest
 Give row wants 305px against a 293px list and scrolls 12px inside it. The draft

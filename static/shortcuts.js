@@ -514,6 +514,12 @@ function auctionTeamClick(btn) {
    `<select multiple>` scrolls your picks out of sight, so you could not tell
    what you had chosen — or that a plain click had just discarded it. */
 function updateTradeSummary(input) {
+    /* FIRST, ahead of every early return below. Unticking the last box takes
+       the `!picked.length` branch, and that is the most likely way a trade gets
+       narrowed — a stale marker placed at the bottom fires on every change
+       EXCEPT the one that empties a list. Caught by the browser test, not by
+       reading. */
+    markTradeEvalStale(input);
     var block = input.closest('.choice-block');
     if (!block) return;
     var out = block.querySelector('.choice-summary');
@@ -526,6 +532,31 @@ function updateTradeSummary(input) {
     var total = 0;
     picked.forEach(function(el) { total += parseFloat(el.dataset.salary || 0); });
     out.textContent = picked.length + ' selected · $' + total.toFixed(1) + 'M';
+}
+
+/* A verdict stops describing the form the moment either list changes.
+
+   Only reachable since 2026-09-10, and it is the cost of the fix that made it
+   reachable: /trade-evaluate now swaps #trade-result alone, so the ticked boxes
+   survive an evaluate — and /trade-execute posts the SERVER's last_trade_eval,
+   not this form. Unticking a player and hitting Execute would therefore execute
+   the trade you evaluated, not the one on screen, with nothing saying so.
+
+   Scoped to #trade-panel because updateTradeSummary also serves the team
+   panel's /trade-between form, which has no verdict beside it.
+
+   The verdict is left readable rather than removed: the owner's words were "to
+   modify the trade to recheck things", so comparing against the previous answer
+   is the use case. Disabling the submit is what removes the hazard. */
+function markTradeEvalStale(el) {
+    var panel = el.closest && el.closest('#trade-panel');
+    if (!panel) return;
+    var verdict = panel.querySelector('.trade-verdict');
+    if (!verdict || verdict.classList.contains('is-stale')) return;
+    verdict.classList.add('is-stale');
+    verdict.querySelectorAll('button[type="submit"]').forEach(function(b) {
+        b.disabled = true;
+    });
 }
 
 /* Fill a .choice-list with a team's roster as checkboxes.
@@ -585,6 +616,7 @@ function loadTradeChoices(teamCode, listId, opts) {
    checkboxes that were counted no longer exist, so the old count would be a
    claim about players who are not on screen. */
 function updateTradeSummaryFor(list) {
+    markTradeEvalStale(list);
     var block = list.closest('.choice-block');
     var out = block && block.querySelector('.choice-summary');
     if (out) out.textContent = 'None selected';

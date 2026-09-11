@@ -287,6 +287,100 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Evaluating a trade wiped the form you had just filled in.** Reported as
+  "when I evaluate a trade, the players get deselected, so I have to readd all
+  of them to modify the trade to recheck things".
+
+  `trade_panel.html`'s evaluate form posted with `hx-target="#trade-panel"` and
+  `hx-swap="outerHTML"`, against a `<section id="trade-panel">` that contains
+  both checkbox lists — so the answer and the question were swapped together,
+  and the replacement is stateless by construction: the template renders no
+  `checked` anywhere, no `selected` on any partner `<option>`, and
+  `#trade-receive-list` back at its literal "Select a team first" placeholder.
+  Nothing re-fires `loadTradeChoices` (its only trigger is the select's
+  `onchange`), so the fetched half did not merely come back unticked, it came
+  back **gone**, taking the partner selection with it. Both running
+  `N selected · $X.XM` counters reset, and the 180px scrolling lists returned to
+  the top.
+
+  Fixed by narrowing the swap instead of rebuilding the state: the verdict moved
+  into `templates/partials/trade_verdict.html`, the form targets `#trade-result`,
+  and `/trade-evaluate` answers with that fragment. Same reasoning as
+  `#bid-advice` inside `#bid-panel` — when the state lives only in the DOM, swap
+  the answer and not the room it is standing in — and one step cleaner, because
+  `/trade-evaluate` has a single consumer and can return the fragment directly
+  rather than returning the panel and narrowing with `hx-select`, which carries
+  the documented trap that an unmatched `hx-select` on an `outerHTML` swap
+  **deletes** its target.
+
+  **Both branches of the fragment carry `id="trade-result"`**, and the empty one
+  is load-bearing for the reason `bid_panel.html` records: a swap target that
+  disappears with its contents can only be swapped once. An evaluate with
+  nothing ticked sets `result = None` and renders `<div id="trade-result"></div>`,
+  33 bytes, so the next evaluate still has somewhere to land.
+  `test_an_empty_evaluate_leaves_the_swap_target_standing` is that assertion;
+  deleting the `{% else %}` branch fails it *and*
+  `test_the_page_holds_exactly_one_swap_target`.
+
+  The `.trade-verdict` **class** stays on the populated branch alone — it is the
+  documented hook for "there is an answer on screen", and
+  `wait_for_selector(".trade-verdict")` has to keep meaning that.
+
+  Side effect worth recording: the response went from **26,934 bytes** carrying
+  all **49** `give_player` checkboxes to **1,747**, because the give list stops
+  being serialised once per evaluate.
+
+  **The fix creates one hazard, and it ships closed in the same commit.**
+  `/trade-execute` posts the SERVER's `last_trade_eval`, not the form, and only
+  refuses a `trade_id` that no longer matches — so once the ticks survive,
+  unticking a player and hitting Execute would execute the trade you
+  *evaluated* rather than the one on screen, with nothing saying so. It was
+  reachable before only by ticking boxes into an empty form; afterwards it is
+  the natural next click. `markTradeEvalStale` in `shortcuts.js` now adds
+  `is-stale` to the verdict and disables every submit inside it on any change to
+  either list, scoped with `closest('#trade-panel')` so the team panel's
+  `/trade-between` form — which shares `updateTradeSummary` and has no verdict —
+  is untouched. The verdict itself is left readable rather than removed, because
+  "to modify the trade to recheck things" means comparing against the previous
+  answer.
+
+  **The stale marker is called FIRST in `updateTradeSummary`, ahead of its early
+  returns, and that is not tidiness.** Unticking the last box takes the
+  `!picked.length` branch and returns; with the call at the bottom the marker
+  fired on every change *except* the one that empties a list — which is the most
+  likely way a trade gets narrowed. Caught by the browser test on its first run,
+  not by reading the diff.
+
+  No opacity dim on `.trade-verdict.is-stale`: CSS `opacity` creates a group, so
+  a child can never be brighter than its parent and the warning would be the
+  faintest thing in the block it is warning about. The note is hidden and shown
+  by one class instead, so `shortcuts.js` owns no copy of the sentence.
+
+  Two smaller things went with it. `<details {% if trade_result %}open{% endif %}>`
+  is **deleted**: after the split nothing renders `trade_panel.html` with a
+  `trade_result`, and the element is open by construction — you clicked Evaluate
+  inside it. And one of the new endpoint tests had to be rewritten before it
+  could fail: slicing the response from `class="trade-verdict` to the end of the
+  string passes just as happily with the Execute form moved OUT to a sibling,
+  which is precisely the arrangement that would leave the button live. It now
+  depth-counts `<div>` to find the element's real extent, and the mutant dies.
+
+  Nothing clears `is-stale` in JS — the next evaluate brings a fresh verdict
+  div — so the browser test re-evaluates and requires the note gone and the
+  button live again. That half is not decoration either: putting the marker on
+  `#trade-panel` instead of on the verdict (and scoping the CSS to match) leaves
+  the operator with a permanently dead Execute button and no way back, and it
+  fails there.
+
+  Measured against the unfixed build to confirm the browser tests are the proof
+  and not decoration: restoring the old target + handler pair fails
+  `test_the_selection_survives_an_evaluate`, and removing the marker call fails
+  `test_changing_the_selection_marks_the_verdict_stale`.
+
+  Out of scope and still true: an `/assign` returns `all_panels.html` and wipes
+  the trade form with everything else. Trades happen during auction breaks per
+  the CBA, so that is not the reported problem.
+
 - **Utah's logo was missing on the 2025 pool, because the asset is named after
   the alias.** Reported as "the UTA Logo is missing". `config.NHL_TEAM_ALIASES`
   declares `{"UTH": "UTA"}` — so `UTA` is the canonical tricode, matching

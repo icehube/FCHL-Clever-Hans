@@ -1694,7 +1694,13 @@ async def trade_evaluate(request: Request):
 
     ctx = _context(request)
     ctx["trade_result"] = result
-    return _render(request, "partials/trade_panel.html", ctx)
+    # The VERDICT alone, not the panel. The ticked checkboxes, the partner
+    # select and the JS-built "I Receive" list live only in the DOM, exactly
+    # like the bidding session in #bid-panel -- returning the whole panel here
+    # meant every evaluate handed back a stateless copy of the form you had just
+    # filled in, so modifying a trade meant re-entering it. Also 1.9KB instead
+    # of 27KB, since the 49-row give list stops being serialised per evaluate.
+    return _render(request, "partials/trade_verdict.html", ctx)
 
 
 @contextmanager

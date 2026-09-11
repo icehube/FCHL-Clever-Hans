@@ -126,6 +126,15 @@
 }
 .choice-row:hover { background: var(--bg-hover); }
 
+/* "Selection changed — re-evaluate" inside a trade verdict. Rendered always and
+   shown by one class, so shortcuts.js owns no copy of the sentence.
+
+   Deliberately no opacity dim on .trade-verdict.is-stale: CSS opacity creates a
+   group, so a child can never be brighter than its parent — the warning would
+   be the faintest thing in the block it is warning about. */
+.trade-stale-note { display: none; }
+.trade-verdict.is-stale .trade-stale-note { display: block; }
+
 /* Player table row highlights */
 tr.in-optimal { background: rgba(158, 206, 106, 0.12) !important; }
 tr.is-rfa td:nth-child(2) { border-left: 3px solid var(--yellow); }

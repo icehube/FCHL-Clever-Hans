@@ -91,7 +91,26 @@ pool, so two fixed decimals print `×0.00` on **66 rows** — a column reporting
 "this driver did nothing" about the single largest effect on the card. It shows
 the reciprocal as `÷`, with precision following magnitude (p50 1.99, p90 14.2,
 p99 3392) and a `÷1000+` cap, because the measured maximum is 11,691,617 and
-those digits are not a number anyone uses.
+those digits are not a number anyone uses. The cap tests the **rounded** value,
+since `1 / exp(-log(1000))` is 999.9999999999998 and a bare `>=` prints a naked
+`1000` — the capped figure without the `+`. And the exponential is taken by
+`main._odds_ratio`, which clamps in LOG space first: `math.exp` underflows to
+`0.0` below about -745 rather than raising, `_odds_label` divides by its
+argument, and this card is embedded in `/bid-check`, so the failure would be a
+500 on the bidding path. The pool has 729 of headroom today, but
+`model_params.json` comes from another repo.
+
+**The collapsed `<summary>` obeys the same rule at its OWN precision, which is
+one decimal rather than two.** It is the closed state — the thing the card
+answers with before anyone opens it — and it was the worse offender: measured
+2026-09-11, **135 of 705** players had a summary naming a driver and printing
+`×1.0`, against 12 such rows inside, and for **82** of them that driver moved
+the floor odds 1.5x or more. The entry is dropped rather than reworded, because
+the floor percentage beside it is already the answer for those players; 27
+players legitimately show no price driver at all. `main._is_unit` takes a
+`places` argument for exactly this, and each caller must match its own template
+formatter — a summary filtered at the table's two decimals is a silent mutant,
+and there is a test for it.
 
 **A row is hidden only when BOTH columns print 1.00 — reading one of them is a
 bug.** Measured 2026-09-11, **11 of the 12** rows whose price factor rounds to

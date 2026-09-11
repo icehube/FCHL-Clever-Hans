@@ -22,6 +22,50 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Fixed
+
+- **The team panel's "Proj PTS" was a raw sum including bench players, so it
+  was not a legal lineup.** Reported as "in League State it says Proj.
+  Est/Solved. But then in the Team Panel it also shows Proj PTS. These values
+  are different." They were — and the panel's was the wrong one.
+
+  Three figures read as one and only one was mislabelled *and* miscomputed:
+
+  | Where | Quantity | Was |
+  |---|---|---|
+  | League State **Pts** | `current_roster_points` — best 12F/6D/2G right now | correct |
+  | League State **Proj** | optimal points once the roster is filled | correct |
+  | Team panel **Proj PTS** | `roster_players\|sum('projected_points')` | **wrong** |
+
+  Bench players score nothing under league scoring — `lineup_points` takes the
+  greedy top-k per position for exactly that reason — so summing every roster
+  player counts phantom points from anyone past 12F/6D/2G. It agreed with the
+  truth while rosters were small enough that everyone starts, which is why it
+  shipped unnoticed and bit only at the end of a draft, when the number is read
+  hardest: measured on `full-roster-still-bidding`, MAC showed **901** against
+  a real **896** and HSM **1140** against **1121**.
+
+  The tile now shows `current_roster_points` and is labelled **Lineup PTS**.
+  The rename is half the fix: "Proj" already means the optimal FILLED roster,
+  both in League State's column and in the headline two lines below the tile,
+  and a third meaning on the same screen is what the report was about.
+
+  League State's own headers deliberately did **not** change. Its `<th>`s sit
+  in the widest table in the app and DaisyUI applies `white-space: nowrap` to
+  header cells, so a header's min-content is its whole string — measured on
+  this same table, one extra word in the basis marker cost 53px. The team panel
+  has no such constraint, so that is where the vocabulary got fixed.
+
+  The MILP headline also gained "(your *Proj* in League State)" and switched
+  from `"%.0f"` to `|int`, matching `_context` — **consistency, not a bug**:
+  `MILPSolution.total_points` is declared `float` but is always fed from
+  `state.lineup_points`, which sums ints, and measured across all six scenarios
+  the two formats never disagree. The mutation swapping them back survives, and
+  the template comment says so rather than implying coverage it does not have.
+  What is pinned is the cross-panel equality, compared as **rendered** — going
+  through `_context` instead would have passed on a build where one panel
+  showed something else entirely.
+
 ### Added
 
 - **A `+` on the Price Model card, so a chart you opened can start the

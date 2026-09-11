@@ -48,9 +48,21 @@
             <div class="text-xs opacity-60">Max Bid</div>
             <div class="text-sm font-semibold">${{ "%.1f"|format(viewed_team.physical_max_bid) }}M</div>
         </div>
-        <div class="tooltip tooltip-bottom" data-tip="Sum of projected fantasy points across the active roster">
-            <div class="text-xs opacity-60">Proj PTS</div>
-            <div class="text-sm font-semibold text-accent">{{ viewed_team.roster_players|sum(attribute='projected_points') }}</div>
+        {# LINEUP points, not a sum. This read
+           `roster_players|sum('projected_points')` until 2026-09-10, which
+           counts bench players — who score nothing — and so was not a legal
+           lineup at all. It agreed with the truth only while rosters were too
+           small to exceed 12F/6D/2G anywhere, i.e. until the end of the draft:
+           measured on full-roster-still-bidding, MAC read 901 against 896 and
+           HSM 1140 against 1121.
+
+           Labelled "Lineup PTS" rather than "Proj PTS" because the word Proj
+           already means something else two lines down and in League State's
+           own column — the optimal roster once it is FILLED. This is the same
+           quantity as League State's "Pts". #}
+        <div class="tooltip tooltip-bottom" data-tip="Points from the best 12F/6D/2G this roster can field right now — bench players score nothing. The same number as League State's Pts column.">
+            <div class="text-xs opacity-60">Lineup PTS</div>
+            <div class="text-sm font-semibold text-accent">{{ viewed_team.current_roster_points }}</div>
         </div>
     </div>
 
@@ -60,7 +72,18 @@
 
     {% if viewed_team.is_my_team and milp and milp.status == "Optimal" %}
     <div class="alert alert-success py-2 text-sm mb-2">
-        <strong>Optimal Projected Points: {{ "%.0f"|format(milp.total_points) }}</strong>
+        {# The SAME quantity as BOT's Proj cell in League State, rendered with
+           the same expression `_context` uses (`int(...)`) rather than "%.0f",
+           which rounds where int() truncates.
+
+           Not a live bug, and worth saying so: MILPSolution.total_points is
+           DECLARED float but is always fed from state.lineup_points, which
+           sums ints — measured across all six scenarios, the two formats never
+           disagree. So this is consistency, not a fix, and a mutation swapping
+           them back dies in no test. The parenthetical is the part that earns
+           its place: it tells the operator these two figures are one number. #}
+        <strong>Optimal Projected Points: {{ milp.total_points|int }}</strong>
+        <span class="opacity-70">(your <em>Proj</em> in League State)</span>
         (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
     </div>
     {# An EMPTY STATE, not a second warning. A failed MILP takes both the

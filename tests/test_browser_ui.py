@@ -1083,9 +1083,11 @@ class TestTooltipsStayInsideTheirPanel:
         #
         # Matched on `data-tip`, NOT on the trigger's label. Labels are not
         # unique: the first version of this required "Proj", which the team
-        # panel's pre-existing "Proj PTS" tile satisfies — so deleting the
-        # league-table Proj tooltip this batch added left the test green.
-        # Caught by mutation, which is the only thing that would have caught it.
+        # panel's own "Proj PTS" tile satisfied — so deleting the league-table
+        # Proj tooltip this batch added left the test green. Caught by
+        # mutation, which is the only thing that would have caught it. (That
+        # tile is "Lineup PTS" since 2026-09-10, which removes the collision
+        # but not the lesson: a label is not an identifier.)
         required = {
             "Worth up to (bid panel)": "HARD LIMIT",
             # Conditional since 2026-09-07 and therefore rendered by exactly one

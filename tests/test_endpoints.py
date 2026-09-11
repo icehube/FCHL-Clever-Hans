@@ -1089,6 +1089,106 @@ class TestLognormalPdfPath:
         assert floor_bar is None
 
 
+class TestTheTeamPanelsPointsFigures:
+    """Three "points" numbers read as one, and one of them was wrong.
+
+    League State's **Pts** is `current_roster_points` (best 12F/6D/2G right
+    now); its **Proj** is the optimal roster once filled; the team panel's tile
+    said **Proj PTS** and was neither — it was a raw sum over every roster
+    player, bench included. Reported as "in League State it says Proj. Est /
+    Solved. But then in the Team Panel it also shows Proj PTS. These values are
+    different."
+    """
+
+    def _tile(self, html: str) -> int:
+        """The Lineup PTS figure out of the team panel's stat strip."""
+        panel = section_of(html, "team-panel")
+        m = re.search(
+            r'Lineup PTS</div>\s*<div[^>]*>(\d+)</div>', panel
+        )
+        assert m, "no Lineup PTS tile in the team panel"
+        return int(m.group(1))
+
+    def test_the_tile_is_the_lineup_not_the_sum(self, client):
+        """`full-roster-still-bidding` because the two agree everywhere else:
+        until a roster exceeds 12F/6D/2G at some position every player starts,
+        which is why this shipped unnoticed and bit only at the end of a draft.
+        """
+        import main
+
+        client.post("/load-scenario", data={"name": "full-roster-still-bidding"})
+
+        divergent = [
+            code for code, t in main.auction_state.teams.items()
+            if sum(p.projected_points for p in t.roster_players)
+            > t.current_roster_points
+        ]
+        assert divergent, (
+            "this scenario no longer has a team whose bench is carrying phantom "
+            "points — the test cannot fail and needs a new fixture"
+        )
+
+        for code in divergent:
+            t = main.auction_state.teams[code]
+            shown = self._tile(client.get(f"/team-view/{code}").text)
+            assert shown == t.current_roster_points
+            assert shown < sum(p.projected_points for p in t.roster_players), (
+                f"{code}: the tile is still the bench-inclusive sum"
+            )
+
+    def test_the_tile_matches_league_states_pts_column(self, client):
+        """Same quantity, so the same number — that is the whole point of
+        renaming it away from "Proj"."""
+        import main
+
+        client.post("/load-scenario", data={"name": "full-roster-still-bidding"})
+        code = max(
+            main.auction_state.teams,
+            key=lambda c: main.auction_state.teams[c].roster_count,
+        )
+
+        html = client.get(f"/team-view/{code}").text
+        expected = main.auction_state.teams[code].current_roster_points
+
+        assert self._tile(html) == expected
+
+    def test_the_milp_headline_matches_bots_proj_cell(self, client):
+        """Two panels, one number — compared as RENDERED, not against the
+        source both would read.
+
+        Asserting each against `_context` would pass on a build where one panel
+        had been changed to show something else entirely, because the
+        comparison would go through the value rather than the screen. The
+        owner's complaint was about two figures disagreeing on screen.
+        """
+        import main
+
+        page = client.get("/").text
+        assert main.milp_solution and main.milp_solution.status == "Optimal"
+
+        panel = section_of(page, "team-panel")
+        m = re.search(r"Optimal Projected Points: (\d+)", panel)
+        assert m, "no MILP headline on BOT's panel"
+
+        cell = re.search(
+            rf'<span id="proj-{MY_TEAM}"[^>]*>(\d+)', section_of(page, "league-state")
+        )
+        assert cell, "no Proj figure for BOT in League State"
+
+        assert m.group(1) == cell.group(1), (
+            f"team panel says {m.group(1)}, League State says {cell.group(1)} "
+            f"— the same quantity rendered two ways"
+        )
+
+    def test_the_panel_names_the_column_it_agrees_with(self, client):
+        """Without this the two figures are still unlabelled strangers, which
+        is what the report was actually about."""
+        panel = section_of(client.get("/").text, "team-panel")
+
+        assert "Optimal Projected Points" in panel
+        assert "<em>Proj</em> in League State" in panel
+
+
 class TestPlayerChart:
     """The chart is mounted in two places, so the body must own no id.
 

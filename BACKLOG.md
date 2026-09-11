@@ -16,7 +16,14 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
-### recently filed
+### unsorted
+
+<!-- Named for the SORTING, not for the age. "recently filed" was the first
+     draft and it rots: it is accurate only until something newer is filed
+     under one of the headings below, after which it labels the older half of
+     the file "recent". This heading exists because the newest findings sat
+     above the first `###` with three paragraphs of general guidance wedged
+     under them, so a reader scanning headings missed them entirely. -->
 
 - [2026-09-11] [grill] `main.py:1762 (trade_execute)` — **a trade whose form
   has been edited since the evaluate is still executable if JavaScript does not

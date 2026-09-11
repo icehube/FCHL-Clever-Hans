@@ -1,8 +1,8 @@
 {# Bidding half of the auction panel — swapped on its own by /bid-check. This
    fragment IS the bidding session: the player, the price, and the bidder
    toggles live nowhere else, so anything that replaces it loses them. Keeping
-   it out of /nominate's and /set-nominator's responses is what makes those two
-   safe to fire mid-bid.
+   it out of /nominate's response is what makes that endpoint — and the bare
+   `n` keypress bound to it — safe to fire mid-bid.
 
    The player datalist stays in the shell (auction_control.html), not here: it
    is ~700 options, the inputs below reference it by id from anywhere in the

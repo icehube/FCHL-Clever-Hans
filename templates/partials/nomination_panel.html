@@ -1,9 +1,9 @@
 {% from "macros/nhl.html" import nhl_logo %}
-{# Nomination half of the auction panel — swapped on its own by /nominate and
-   /set-nominator so neither can touch the live bidding session below it. The
-   session (player, price, bidder toggles) lives only in the DOM of #bid-panel;
-   before the split both endpoints re-rendered the whole #auction-control from
-   base context and wiped it, and /nominate is bound to a bare `n` keypress. #}
+{# Nomination half of the auction panel — swapped on its own by /nominate so
+   it cannot touch the live bidding session below it. The session (player,
+   price, bidder toggles) lives only in the DOM of #bid-panel; before the split
+   /nominate re-rendered the whole #auction-control from base context and wiped
+   it, and it is bound to a bare `n` keypress. #}
 {# The two prices a recommendation is judged on, one definition, called by both
    cards. Layer 2's clearing price is the headline (it is what a nomination
    actually fetches, and what the drain ranking runs on); Layer 1's vacuum price
@@ -72,40 +72,35 @@
 <div id="nomination-panel">
     <div class="flex items-center gap-2 mb-2">
         <h2 class="card-title text-accent text-base">Auction</h2>
-        {% if current_nominator %}
-        <span class="badge {% if current_nominator == my_team %}badge-primary{% else %}badge-ghost{% endif %}">
-            {{ current_nominator }}'s turn
-        </span>
-        {% endif %}
-        <select class="select select-xs select-bordered bg-base-300 ml-auto" onchange="if(this.value) htmx.ajax('POST', '/set-nominator', {target:'#nomination-panel', swap:'outerHTML', values:{team_code: this.value}})" title="Override nominator">
-            <option value="">Override...</option>
-            {% for code in nomination_order %}
-            {% if not teams[code].is_done %}
-            <option value="{{ code }}">{{ code }}</option>
-            {% endif %}
-            {% endfor %}
-        </select>
     </div>
 
-    {# Nomination recommendations (when it's our turn).
+    {# UNCONDITIONAL, and both halves of that are deliberate.
 
-       No `and not bid_advice` guard: that hid the button mid-bid because
-       nominating destroyed the session. It can't any more, and keeping the
-       guard would be worse than dropping it — /bid-check no longer re-renders
-       this panel, so the button's visibility would freeze at whatever it was
-       when this fragment was last rendered instead of tracking bid_advice. #}
-    {% if current_nominator == my_team %}
+       No turn gate: the tool stopped tracking a nomination pointer on
+       2026-09-11 because it gated nothing it computes. `recommend_nomination`
+       is hard-coded to MY_TEAM and turn-blind, and the `n` shortcut already
+       fired this endpoint out of turn — so the gate only hid the button that
+       documents a request the keyboard could make anyway. Knowing who you
+       would put up while somebody ELSE is nominating is useful in its own
+       right.
+
+       No `hx-trigger="load"` either: each /nominate is a MILP solve, and this
+       fragment ships inside all_panels.html, which answers GET / and a dozen
+       other things — a load trigger would solve on every page load and every
+       panel swap. On demand, like the two manual scans. #}
     <button hx-get="/nominate" hx-target="#nomination-panel" hx-swap="outerHTML" class="btn btn-primary btn-sm w-full mb-2">
-        It's My Turn — Get Recommendations
+        Get Recommendations
     </button>
-    {% endif %}
 
     {# `.nomination-pick` marks a recommendation as dismissable: shortcuts.js
        removes the one whose "Bid on" form just fired, AFTER the request
        succeeds. Only that one — per the CBA a nomination turn is 1 RFA + 1 UFA
        and an RFA sale KEEPS the turn, so the other half is the next thing you
        need, not clutter. Removed on afterRequest rather than on click because
-       htmx aborts a request whose triggering element leaves the DOM. #}
+       the gate is `event.detail.successful`, which is only knowable after the
+       response: a failed request must leave the card standing, since /nominate
+       is the only way back. (htmx does NOT abort a request whose trigger
+       leaves the DOM — measured 2026-09-10, the swap lands anyway.) #}
     {% if rfa_pick is defined and rfa_pick %}
     {{ pick_card(rfa_pick, "RFA Pick (Secret Bid)", show_prior=True) }}
     {% endif %}

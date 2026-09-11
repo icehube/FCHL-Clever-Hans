@@ -390,9 +390,6 @@ class TestAuctionStateSerialization:
                 )
             ],
             nomination_order=["BOT", "SRL"],
-            nomination_round=1,
-            nomination_index=0,
-            snake_draft=True,
         )
         return state
 
@@ -408,8 +405,7 @@ class TestAuctionStateSerialization:
         assert "Available1" in restored.available_players
         assert restored.available_players["Available1"].projected_points == 80
         assert len(restored.transaction_log) == 1
-        assert restored.nomination_round == 1
-        assert restored.snake_draft is True
+        assert restored.nomination_order == ["BOT", "SRL"]
 
     def test_keeper_provenance_survives_a_round_trip(self):
         """`is_keeper` is the only roster-player field position cannot rebuild.
@@ -545,9 +541,6 @@ class TestSnapshotFieldsCannotDrift:
                 )
             ],
             nomination_order=["SRL", "BOT"],  # not alphabetical, not default
-            nomination_round=3,
-            nomination_index=1,
-            snake_draft=False,
             price_reference={"D": {"projected_points": 44.0, "log_rank": 1.5}},
         )
 
@@ -643,7 +636,7 @@ class TestSnapshotFieldsCannotDrift:
         """The claim itself, end to end through save/restore.
 
         `TestAuctionStateSnapshots.test_save_and_restore` checks `teams` alone.
-        This is the same question asked of all eight, which is what the
+        This is the same question asked of every field, which is what the
         enumeration in `restore_snapshot` promises.
         """
         state = self._loaded()
@@ -655,9 +648,6 @@ class TestSnapshotFieldsCannotDrift:
         state.transaction_log = []
         state.change_log = []
         state.nomination_order = []
-        state.nomination_round = 99
-        state.nomination_index = 98
-        state.snake_draft = True
         state.price_reference = {}
         assert all(
             self._value(getattr(state, n)) != before[n] for n in self._fields()
@@ -678,15 +668,17 @@ class TestSnapshotFieldsCannotDrift:
         """
         state = self._loaded()
         state.save_snapshot()
-        state.nomination_round = 10
+        state.nomination_order = ["ONE"]
         state.save_snapshot()
-        state.nomination_round = 20
+        state.nomination_order = ["TWO"]
 
         assert state.restore_snapshot() is True
-        assert state.nomination_round == 10
+        assert state.nomination_order == ["ONE"]
         assert state._snapshots, "the first undo emptied the chain"
         assert state.restore_snapshot() is True
-        assert state.nomination_round == 3, "the second undo did not go back further"
+        assert state.nomination_order == ["SRL", "BOT"], (
+            "the second undo did not go back further"
+        )
 
 
 class TestAuctionStateSnapshots:
@@ -721,75 +713,6 @@ class TestAuctionStateSnapshots:
         for _ in range(60):
             state.save_snapshot()
         assert len(state._snapshots) == 50
-
-
-class TestNominationOrder:
-    def test_current_nominator(self):
-        state = AuctionState(
-            teams={
-                "A": _make_team(code="A"),
-                "B": _make_team(code="B"),
-                "C": _make_team(code="C"),
-            },
-            nomination_order=["A", "B", "C"],
-        )
-        assert state.current_nominator() == "A"
-
-    def test_advance_nomination(self):
-        state = AuctionState(
-            teams={
-                "A": _make_team(code="A"),
-                "B": _make_team(code="B"),
-                "C": _make_team(code="C"),
-            },
-            nomination_order=["A", "B", "C"],
-        )
-        state.advance_nomination()
-        assert state.current_nominator() == "B"
-
-    def test_snake_draft_reverses_on_odd_round(self):
-        state = AuctionState(
-            teams={
-                "A": _make_team(code="A"),
-                "B": _make_team(code="B"),
-                "C": _make_team(code="C"),
-            },
-            nomination_order=["A", "B", "C"],
-            nomination_round=1,  # Odd round → reversed
-            snake_draft=True,
-        )
-        assert state.current_nominator() == "C"
-
-    def test_skips_done_teams(self):
-        team_b = _make_team(code="B")
-        team_b.is_done = True
-        state = AuctionState(
-            teams={
-                "A": _make_team(code="A"),
-                "B": team_b,
-                "C": _make_team(code="C"),
-            },
-            nomination_order=["A", "B", "C"],
-        )
-        assert state.current_nominator() == "A"
-        state.advance_nomination()
-        assert state.current_nominator() == "C"  # B skipped
-
-    def test_wrap_around_increments_round(self):
-        state = AuctionState(
-            teams={
-                "A": _make_team(code="A"),
-                "B": _make_team(code="B"),
-            },
-            nomination_order=["A", "B"],
-            snake_draft=True,
-        )
-        assert state.nomination_round == 0
-        state.advance_nomination()  # A done
-        state.advance_nomination()  # B done, wraps
-        assert state.nomination_round == 1
-        # Round 1 is odd → reversed → first is B
-        assert state.current_nominator() == "B"
 
 
 class TestMinorsMovement:

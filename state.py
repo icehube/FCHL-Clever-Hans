@@ -671,10 +671,11 @@ class AuctionState:
     available_players: dict[str, Player] = field(default_factory=dict)
     transaction_log: list[TransactionRecord] = field(default_factory=list)
     change_log: list[ChangeRecord] = field(default_factory=list)
+    # Purely a DISPLAY order now: the standings rows, the bidder-toggle grid,
+    # the trade-partner dropdown and `default_bidders` all iterate it so the
+    # league appears in one stable order. The turn pointer that used to index
+    # it was removed 2026-09-11 -- it gated nothing the tool computes.
     nomination_order: list[str] = field(default_factory=list)
-    nomination_round: int = 0
-    nomination_index: int = 0
-    snake_draft: bool = True
     # The per-position "typical player" the price-driver breakdown measures
     # against, frozen at draft time for exactly the reason `Player.pos_rank`
     # is: the pool shrinks. Recomputed against a drafted-down pool the
@@ -686,31 +687,6 @@ class AuctionState:
     # computed from the surviving pool and be wrong for the rest of the draft.
     price_reference: dict[str, dict[str, float]] = field(default_factory=dict)
     _snapshots: list[str] = field(default_factory=list, repr=False)
-
-    def current_nominator(self) -> str | None:
-        """Which team nominates next, respecting snake draft and is_done."""
-        order = self._effective_order()
-        if not order:
-            return None
-        idx = self.nomination_index % len(order)
-        return order[idx]
-
-    def advance_nomination(self) -> None:
-        """Move to the next nominator."""
-        order = self._effective_order()
-        if not order:
-            return
-        self.nomination_index += 1
-        if self.nomination_index >= len(order):
-            self.nomination_index = 0
-            self.nomination_round += 1
-
-    def _effective_order(self) -> list[str]:
-        """Nomination order for the current round, skipping done teams."""
-        active = [t for t in self.nomination_order if not self.teams[t].is_done]
-        if self.snake_draft and self.nomination_round % 2 == 1:
-            active = list(reversed(active))
-        return active
 
     def capture_snapshot(self) -> str:
         """Serialize the current state WITHOUT putting it on the undo chain.
@@ -939,9 +915,6 @@ class AuctionState:
             "transaction_log": [_transaction_to_dict(t) for t in self.transaction_log],
             "change_log": [_change_to_dict(c) for c in self.change_log],
             "nomination_order": self.nomination_order,
-            "nomination_round": self.nomination_round,
-            "nomination_index": self.nomination_index,
-            "snake_draft": self.snake_draft,
             "price_reference": self.price_reference,
         }
         if include_snapshots:
@@ -967,9 +940,6 @@ class AuctionState:
             _change_from_dict(d) for d in data.get("change_log", [])
         ]
         state.nomination_order = data["nomination_order"]
-        state.nomination_round = data["nomination_round"]
-        state.nomination_index = data["nomination_index"]
-        state.snake_draft = data["snake_draft"]
         state.price_reference = data.get("price_reference", {})
         state._snapshots = data.get("_snapshots", [])
         return state

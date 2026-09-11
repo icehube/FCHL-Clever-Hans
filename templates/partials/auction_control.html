@@ -1,6 +1,6 @@
 {# Shell only. The two halves swap independently so neither endpoint can
-   clobber the other's state: /nominate and /set-nominator return just
-   #nomination-panel, /bid-check returns just #bid-panel. The live bidding
+   clobber the other's state: /nominate returns just #nomination-panel,
+   /bid-check returns just #bid-panel. The live bidding
    session — player, price, bidder toggles — exists ONLY in #bid-panel's DOM,
    and a bare `n` keypress fires /nominate, so a shared swap target meant one
    stray keystroke wiped it mid-auction.

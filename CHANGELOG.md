@@ -22,6 +22,95 @@ rediscover the same non-problem.
 
 ## [2026-09-11]
 
+### Removed
+
+- **The nomination-turn tracker — badge, Override dropdown, `POST
+  /set-nominator`, three state fields and the `/assign` advance.** The owner
+  asked whether it earned its place: *"Even when it's my turn, I can just get
+  recommendations and then put that player into the auction system to be bid
+  on. Do I need that dropdown/intro order?"* The audit answer is sharper than
+  "it is unused": **the turn's only effect on the running tool was to HIDE a
+  button.**
+
+  `AuctionState` carried `nomination_index`, `nomination_round` and
+  `snake_draft`; `current_nominator()` walked `_effective_order()`; `/assign`
+  advanced the pointer on every UFA sale; the panel drew an `X's turn` badge
+  and an Override `<select>` posting to `/set-nominator`; and the button read
+  `{% if current_nominator == my_team %}`. That gate is the whole of what the
+  feature did. `current_nominator()` had **exactly one** non-test caller —
+  `main._context`, putting it in the template namespace. It was never compared,
+  branched on or passed to anything in Python, and `grep` found it nowhere in
+  `market.py`, `optimizer.py`, `trade.py`, `/bid-check` or the MILP.
+  `recommend_nomination` is hard-coded to `MY_TEAM` and turn-blind; `/nominate`
+  never checked a pointer (its docstring asserted "It's BOT's turn" against
+  code that checked nothing); `/assign` validates only that the team and the
+  player exist, so any team could always be assigned any player at any time.
+
+  **The inconsistency is what made it worth removing rather than merely
+  harmless.** `shortcuts.js` binds `n` to `GET /nominate` unconditionally, so
+  the recommendations were *already* available out of turn — by keyboard, while
+  the button documenting them was hidden. Nothing was lost; a keyboard-only
+  path became a visible one.
+
+  **Nothing asserted the gate.** No test anywhere read the badge text, the
+  badge classes, or the button's presence or absence — which is also why the
+  removal needed new tests rather than deleted ones to stay honest.
+
+  Two latent bugs went out with it. `/team-done` flipped `is_done` without
+  adjusting `nomination_index`, so `_effective_order()` shrank and the same
+  index silently resolved to a **different** team. And the Override dropdown
+  listed `nomination_order` forward while the pointer indexed a list *reversed*
+  on odd rounds, so on half the rounds the dropdown and the badge disagreed
+  about what a selection meant.
+
+  **`nomination_order` stays, under that name** (owner decision — no
+  data-format churn before a draft). It is the app's canonical team display
+  order: `league_state.html`, `standings_cells.html`, `bid_panel.html`,
+  `team_panel.html` and `main`'s `default_bidders` all iterate it, it is in the
+  data fingerprint, and `standings_cells.html` reading the same **unfiltered**
+  list is what makes its OOB cells match League State's rows by construction
+  rather than by coincidence. `snake_draft` did go, from both `data_loader.py`
+  and `data/fchl_teams.json`; it was never in the fingerprint, so that cost no
+  refresh dance. Both league rules stay documented in CLAUDE.md's CBA section —
+  what changed is that the tool no longer claims to model them.
+
+  The button is **unconditional and still on demand**, never
+  `hx-trigger="load"`: each `/nominate` is a MILP solve and the fragment ships
+  inside `all_panels.html`, which answers `GET /` and a dozen other things, so
+  a load trigger would solve on every page load and every panel swap — the
+  hazard `/solve-standings` already documents.
+
+  Mutation-checked five ways, and **one mutant exposed a weak test rather than
+  weak code**. The first version of the always-visible-button test took a
+  single checkpoint after eleven picks; a faithfully restored round-robin gate
+  over an eleven-team order lands back on BOT after exactly eleven picks, so
+  that mutant **survived** while looking like coverage. The test now walks one
+  lap **plus one** and asserts the button after every pick, and the mutant dies.
+  The other four: `/set-nominator` restored (caught by a 404/405 assertion,
+  because a silent 200 is what a stale bookmark would look like), a dead
+  context key named in a template (caught by a static grep guard — a template
+  naming a key that no longer exists renders **empty** rather than raising),
+  and `from_json` / `to_json` reading or writing a removed key.
+
+  **Backward compatibility was the one thing that could have bitten on draft
+  day.** `from_json` read all three keys with **bracket** access, so dropping
+  the reads is what lets a state file written before today load unchanged — and
+  the operator's live `data/state/auction_state.json` is exactly that file. A
+  `KeyError` there is a tool that will not boot four hours into an auction, and
+  the failure would be *silent*: `lifespan` catches broad `Exception` by design,
+  so it would have renamed a byte-perfect draft record `.corrupt` and started
+  fresh. `TestALegacySaveStillLoads` supplies the three keys and asserts they
+  are ignored.
+
+  Docs corrected in passing: `.claude/rules/pricing-pipeline.md` said
+  `nomination_order` was read by "four templates" when it was five — the claim
+  was written 2026-09-10 and was already stale, since `standings_cells.html`
+  joined the list on 2026-08-17. Removing the dropdown made the stale number
+  accidentally true, which is recorded rather than quietly inherited. And
+  `standings_cells.html` explained its unfiltered loop by saying done teams
+  "are dropped by `next_nominator`" — a function that has never existed
+  anywhere in this repo.
+
 ### Investigated
 
 - **Tailwind's Play CDN stays; a real build is not worth its cost here.** Open

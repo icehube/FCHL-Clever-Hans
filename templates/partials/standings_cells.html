@@ -16,9 +16,11 @@
    roster is final and BOT's was already a MILP optimum — but the RANK badge is
    recomputed from everyone's new numbers, and that badge is on BOT's row.
 
-   `nomination_order` for the loop, matching league_state.html's own iteration:
-   it carries all 11 teams (done teams are dropped by `next_nominator`, not from
-   this list), so the two agree by construction rather than by coincidence. #}
+   `nomination_order` for the loop, matching league_state.html's own iteration.
+   The list is deliberately UNFILTERED — it carries all 11 teams, a done team
+   included, because league_state.html keeps that team's row (styled, not
+   dropped) and the two must agree by construction rather than by coincidence.
+   Every `proj-<CODE>` span therefore renders, so no OOB swap can miss. #}
 {% for code in nomination_order %}
 {{ proj_figure(code, projections.get(code, {}), my_team, oob=true) }}
 {% endfor %}

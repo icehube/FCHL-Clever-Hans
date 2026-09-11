@@ -761,11 +761,11 @@ class TestOverCapTradesWarn:
 
 
 class TestUndoRevertsEveryRosterEdit:
-    """The six snapshot-taking endpoints that had no undo test.
+    """The snapshot-taking endpoints that had no undo test.
 
-    Ten POST endpoints call `save_snapshot()`; four were covered above
-    (`test_00`–`test_04`). These six were not: /adjust-salary, /toggle-bench,
-    /move-to-minors, /move-to-roster, /set-nominator, /trade-between. All six
+    Nine POST endpoints call `save_snapshot()`; four were covered above
+    (`test_00`–`test_04`). These five were not: /adjust-salary, /toggle-bench,
+    /move-to-minors, /move-to-roster, /trade-between. All five
     restore correctly today — this is insurance on the one operation that
     cannot be worked around. Mid-draft there is no second Ctrl+Z, so an undo
     that quietly restores less than it should is unrecoverable and invisible.
@@ -890,23 +890,6 @@ class TestUndoRevertsEveryRosterEdit:
                 round(self._bot().total_salary, 2),
             ),
             "/move-to-roster",
-        )
-
-    def test_undo_reverts_set_nominator(self, client):
-        import main
-
-        target = next(
-            c for c in main.auction_state._effective_order()
-            if c != main.auction_state.current_nominator()
-        )
-        self._undo_cycle(
-            client,
-            lambda: client.post("/set-nominator", data={"team_code": target}),
-            lambda: (
-                main.auction_state.nomination_index,
-                main.auction_state.current_nominator(),
-            ),
-            "/set-nominator",
         )
 
     def test_undo_reverts_trade_between(self, client):

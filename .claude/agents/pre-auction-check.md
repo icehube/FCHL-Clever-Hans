@@ -28,10 +28,10 @@ with TestClient(app) as c:
     print(f'MILP points: {main.milp_solution.total_points}')
     print(f'Market ceiling: {main.market_info.market_ceiling}')
     print(f'Floor demand: {main.market_info.floor_demand}')
-    print(f'Nominator: {main.auction_state.current_nominator()}')
+    print(f'Team order: {len(main.auction_state.nomination_order)}')
 "
 ```
-Verify: index returns 200, state returns 200 with 11 teams, MILP is Optimal, market ceiling > MIN_SALARY, floor_demand is False.
+Verify: index returns 200, state returns 200 with 11 teams, MILP is Optimal, market ceiling > MIN_SALARY, floor_demand is False, team order lists 11.
 
 ### 3. Data quality — duplicate names and lost rows
 The loader now renames colliding names (`Matt Murray (DAL)` / `Matt Murray (TOR)`)

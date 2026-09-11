@@ -2694,32 +2694,14 @@ class TestTeamView:
         assert code in r.text
 
 
-class TestSetNominator:
-    def test_set_nominator_valid(self, client):
-        """Setting a valid nominator should update auction control."""
-        r = client.post("/set-nominator", data={"team_code": "LGN"})
-        assert r.status_code == 200
-        assert "Auction" in r.text
-
-    def test_set_nominator_invalid(self, client):
-        """Setting an invalid team code should not crash."""
-        r = client.post("/set-nominator", data={"team_code": "FAKE"})
-        assert r.status_code == 200
-        # Was `"Nomination" in r.text`, which matched only the HTML comment
-        # "Nomination recommendations" — moving a comment broke it, and it
-        # would have passed on any fragment that happened to carry the word.
-        assert 'id="nomination-panel"' in r.text
-
-
 class TestBidSessionSurvives:
     """The live bidding session exists only in #bid-panel's DOM.
 
     Player, price and bidder toggles are never persisted server-side, so any
     response that replaces that region loses them. Before the panel was split,
-    /nominate and /set-nominator both returned the whole #auction-control from
-    base context and wiped the session — and /nominate fires on a bare `n`
-    keypress, whose guard only covers INPUT/TEXTAREA/SELECT, so focus on a
-    bidder-logo button left it live.
+    /nominate returned the whole #auction-control from base context and wiped
+    the session — and it fires on a bare `n` keypress, whose guard only covers
+    INPUT/TEXTAREA/SELECT, so focus on a bidder-logo button left it live.
 
     These assert the STRUCTURAL property rather than any rendered value: an
     endpoint cannot clobber a region it does not return.
@@ -2727,15 +2709,6 @@ class TestBidSessionSurvives:
 
     def test_nominate_cannot_touch_the_bid_region(self, client):
         r = client.get("/nominate")
-        assert r.status_code == 200
-        assert 'id="nomination-panel"' in r.text
-        assert 'id="bid-form"' not in r.text
-        assert 'id="bidder-logos"' not in r.text
-
-    @pytest.mark.parametrize("team_code", ["LGN", "FAKE"])
-    def test_set_nominator_cannot_touch_the_bid_region(self, client, team_code):
-        """Both paths — the valid one and the rejected team code."""
-        r = client.post("/set-nominator", data={"team_code": team_code})
         assert r.status_code == 200
         assert 'id="nomination-panel"' in r.text
         assert 'id="bid-form"' not in r.text
@@ -5886,6 +5859,115 @@ class TestTheStandingsResolveThemselvesAfterAPick:
         assert 'hx-get="/solve-standings"' in section_of(
             client.get("/").text, "league-state"
         )
+
+
+class TestNominationIsNeverGatedByATurn:
+    """The tool stopped tracking a nomination pointer on 2026-09-11.
+
+    It gated exactly one thing — the visibility of the Get Recommendations
+    button — and gated nothing the engine computes: `recommend_nomination` is
+    hard-coded to MY_TEAM and reads no pointer, `/nominate` never checked one,
+    and the `n` shortcut fired the endpoint out of turn regardless. So the gate
+    only hid the button that documents a request the keyboard could already
+    make. These pin the removal in the three places it could creep back.
+    """
+
+    # Page-wide rather than sliced: `section_of` wants a <section> and the
+    # nomination panel is a <div>, and the attribute form `hx-get="/nominate"`
+    # appears in exactly one place in the rendered app — the button itself.
+    BUTTON = 'hx-get="/nominate"'
+
+    def test_the_button_is_offered_on_a_fresh_league(self, client):
+        assert self.BUTTON in client.get("/").text
+
+    def test_the_button_survives_every_offset_in_the_order(self, client):
+        """The case the gate used to break, asserted at EVERY phase.
+
+        The old pointer advanced on each UFA sale and the button showed only
+        while it pointed at BOT, so it was hidden for ten sales in eleven. One
+        checkpoint is not enough to pin that: a round-robin over an eleven-team
+        order returns to BOT after exactly eleven picks, so a single assertion
+        taken there passes against a fully restored gate — measured, a mutant
+        doing precisely that survived. Walking one lap PLUS one lands on every
+        offset, so no phase of any round-robin can dodge it.
+
+        Sales go to an OPPONENT, so nothing BOT owns moves and the gate is the
+        only thing under test.
+        """
+        order = main_state().nomination_order
+        buyer = next(c for c in order if c != "BOT")
+        for pick, name in enumerate(pool_top(len(order) + 1), start=1):
+            assign(client, name, buyer, 0.5)
+            assert self.BUTTON in client.get("/").text, (
+                f"the button disappeared after pick {pick}"
+            )
+
+    def test_the_recommendations_themselves_come_back_out_of_turn(self, client):
+        """Not just the button: the endpoint answers with real picks."""
+        order = main_state().nomination_order
+        buyer = next(c for c in order if c != "BOT")
+        for name in pool_top(len(order) - 1):
+            assign(client, name, buyer, 0.5)
+
+        r = client.get("/nominate")
+        assert r.status_code == 200
+        assert "UFA Pick" in r.text
+
+    def test_the_override_endpoint_is_gone(self, client):
+        """404/405, not a silent 200 — a stale bookmark must not look like it
+        worked."""
+        r = client.post("/set-nominator", data={"team_code": "LGN"})
+        assert r.status_code in (404, 405), (
+            f"/set-nominator still answers {r.status_code}"
+        )
+
+    def test_nothing_names_the_removed_turn_api(self):
+        """Static guard, in the shape `test_no_template_builds_the_path_itself`
+        uses: the badge and the dropdown came back one template at a time
+        before, and a template naming a context key that no longer exists
+        renders EMPTY rather than raising."""
+        dead = ("current_nominator", "advance_nomination", "set-nominator",
+                "nomination_index", "nomination_round", "snake_draft")
+        searched = sorted((REPO / "templates").rglob("*.html")) + [
+            REPO / "static" / "shortcuts.js",
+            REPO / "main.py",
+            REPO / "state.py",
+            REPO / "data_loader.py",
+        ]
+        found = {
+            f.relative_to(REPO).as_posix(): name
+            for f in searched
+            for name in dead
+            if name in f.read_text()
+        }
+        assert not found, f"the nomination turn is referenced again: {found}"
+
+
+class TestALegacySaveStillLoads:
+    """A state file written before 2026-09-11 carries three keys that no
+    longer exist on `AuctionState`.
+
+    `from_json` read them with BRACKET access, so the removal had to drop the
+    reads as well as the fields — and the operator's live
+    `data/state/auction_state.json` is exactly this file. A KeyError here is a
+    tool that will not boot four hours into a draft; a silent `.corrupt` rename
+    is worse, because `lifespan` catches broad `Exception` by design.
+    """
+
+    def test_the_three_removed_keys_are_ignored(self, client):
+        import state as state_mod
+
+        payload = json.loads(main_state().to_json(include_snapshots=False))
+        assert "nomination_round" not in payload, "precondition: no longer written"
+        payload["nomination_round"] = 7
+        payload["nomination_index"] = 4
+        payload["snake_draft"] = False
+
+        restored = state_mod.AuctionState.from_json(json.dumps(payload))
+
+        assert restored.nomination_order == main_state().nomination_order
+        assert len(restored.teams) == len(main_state().teams)
+        assert not hasattr(restored, "nomination_round")
 
 
 def main_state():

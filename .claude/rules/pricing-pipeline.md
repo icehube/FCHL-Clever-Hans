@@ -322,16 +322,22 @@ The bid recommendation must **NEVER** exceed what opponents can force BOT to pay
 
 If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardless of what the model or marginal value says.
 
-**Whose NOMINATION turn it is does not enter any of this.** Asked directly by
-the owner on 2026-09-10 -- "does it matter who's turn it is to bid? all that I
-think matters is that if it's mine or if it's someone else's" -- and the answer
-is that they are right. `current_nominator()` is read in exactly one place,
-`nomination_panel.html`, where it draws a badge and gates the "It's My Turn"
-button; `grep` finds it nowhere in `market.py`, `optimizer.py`, `/bid-check` or
-the MILP. `/assign` only *advances* it, and `/set-nominator` is the one mutating
-POST that deliberately skips `_recompute()` -- because, as
-`tests/test_bid_cache.py` puts it, **a marginal value cannot depend on whose
-turn it is**.
+**Whose NOMINATION turn it is does not enter any of this -- and since
+2026-09-11 the tool does not track one at all.** Asked directly by the owner on
+2026-09-10 -- "does it matter who's turn it is to bid? all that I think matters
+is that if it's mine or if it's someone else's" -- and the answer is that they
+are right. This section was written that day to record the audit;
+`current_nominator()` was read in exactly ONE place, `nomination_panel.html`,
+where it drew a badge and gated the "It's My Turn" button, and `grep` found it
+nowhere in `market.py`, `optimizer.py`, `/bid-check` or the MILP. The owner
+asked the follow-up the next day -- do I need the dropdown at all -- and the
+whole concept came out: the three state fields, `/set-nominator`, the badge,
+and the gate. **The gate was the only effect the feature had on the running
+tool**, and the button it hid is now unconditional; the `n` shortcut had been
+bypassing it all along. See CLAUDE.md for the removal in full. What that
+audit's conclusion buys is still the point, now structurally rather than by
+inspection: **a marginal value cannot depend on whose turn it is**, and there is
+no longer a turn for it to depend on.
 
 What the engine actually reduces a bidder set to is two things:
 
@@ -346,8 +352,13 @@ So opponent identity matters only as a way to look up a budget, permuting the
 same opponents changes nothing, and opponent roster *needs* never gate a bid at
 all (`_bidding_opponents` gates on `physical_max_bid`, **not** on spots
 remaining -- bidding is position-agnostic by CBA, and a 24-man team with cap
-space is still a bidder). The `nomination_order` list *is* read by four
-templates, but purely as a stable display order, never as a turn.
+space is still a bidder). The `nomination_order` list survives the removal and
+is read by **four** templates -- `league_state.html`, `standings_cells.html`,
+`bid_panel.html`, `team_panel.html` -- plus `main._default_bidders`, but purely
+as a stable display order, never as a turn. It was **five** when this paragraph
+was written on 2026-09-10, which said four and was already wrong
+(`standings_cells.html` joined on 2026-08-17); the fifth was the Override
+dropdown, and removing it is what made the stale count accidentally true.
 
 **The two are computed over different SETS, and that is why they behave nothing alike.** The idle one takes all 10 opponents, so any two rich teams pin it at `MAX_SALARY`; the live one takes only the named bidders, which is usually two or three, so a single poor rival puts it well below. Measured mid-draft on the same states where the idle ceiling never left the cap:
 

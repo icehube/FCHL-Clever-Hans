@@ -238,7 +238,9 @@ reads the global and will fail, correctly.
 
 ## fchl_teams.json
 
-Team metadata, nomination order, penalties, colors, logos. Key fields: `id`, `is_my_team`, `name`, `penalty`, `colors`, `logo`, `nomination_order`, `snake_draft`.
+Team metadata, team order, penalties, colors, logos. Key fields: `id`, `is_my_team`, `name`, `penalty`, `colors`, `logo`, `nomination_order`.
+
+`nomination_order` keeps its name but is now purely a **display** order — the League State rows, the `/solve-standings` OOB cells, the bidder-toggle grid, the trade-partner dropdown and `default_bidders` all iterate it so the league appears in one stable order. The turn pointer that used to index it was removed 2026-09-11. `snake_draft` went with it; it was never in the data fingerprint, so dropping the key costs no refresh dance.
 
 ## team_odds.json
 

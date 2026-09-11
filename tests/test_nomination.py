@@ -352,41 +352,6 @@ class TestDrainStrategy:
         )
 
 
-class TestComboNominationTurn:
-    """League rule: a turn is 1 RFA (silent) + 1 UFA (open). The nomination
-    pointer must advance only when the UFA half sells."""
-
-    @pytest.fixture
-    def client(self):
-        from fastapi.testclient import TestClient
-        import main
-        with TestClient(main.app) as c:
-            c.post("/reset")
-            yield c
-
-    def _nominator(self, client):
-        import json as _json
-        state = _json.loads(client.get("/state").text)
-        import main
-        return main.auction_state.current_nominator()
-
-    def test_rfa_sale_keeps_turn_ufa_sale_advances(self, client):
-        import main
-        first = main.auction_state.current_nominator()
-
-        rfa = next(p for p in main.auction_state.available_players.values() if p.is_rfa)
-        client.post("/assign", data={"player": rfa.name, "team": first, "salary": "2.0"})
-        assert main.auction_state.current_nominator() == first, (
-            "RFA half of a combo must not pass the nomination turn"
-        )
-
-        ufa = next(p for p in main.auction_state.available_players.values() if not p.is_rfa)
-        client.post("/assign", data={"player": ufa.name, "team": first, "salary": "2.0"})
-        assert main.auction_state.current_nominator() != first, (
-            "UFA sale completes the combo turn"
-        )
-
-
 class TestBothPricesReachThePanel:
     """The panel shows Layer 1 and Layer 2 side by side, and says which is which.
 

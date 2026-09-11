@@ -141,18 +141,6 @@ class TestCacheStaysTrue:
                 f"after {label}: cached ${cached}M != fresh ${fresh}M"
             )
 
-    def test_set_nominator_need_not_invalidate(self, client):
-        """The one mutating endpoint that skips _recompute, deliberately.
-
-        It moves `nomination_index` and nothing else; a marginal value cannot
-        depend on whose turn it is. Pinned so that if /set-nominator ever grows
-        a real state change, this fails and forces the question.
-        """
-        player = _a_player()
-        before = main._marginal_value(player)
-        assert client.post("/set-nominator", data={"team_code": "LGN"}).status_code == 200
-        assert main._marginal_value(player) == before == _fresh(player)
-
     def test_cache_is_per_player(self, client):
         """Two players in one epoch must not share an entry."""
         first = _a_player()

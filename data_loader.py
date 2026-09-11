@@ -307,7 +307,7 @@ def build_initial_state(
     teams: dict[str, TeamState] = {}
     for code, info in metadata.items():
         if not isinstance(info, dict):
-            continue  # Skip nomination_order, snake_draft, etc.
+            continue  # Skip the top-level nomination_order list
         if "id" not in info:
             continue
 
@@ -324,13 +324,11 @@ def build_initial_state(
         )
 
     nomination_order = metadata.get("nomination_order", [])
-    snake_draft = metadata.get("snake_draft", True)
 
     return AuctionState(
         teams=teams,
         available_players=biddable,
         nomination_order=nomination_order,
-        snake_draft=snake_draft,
         # Frozen here, beside the pos_rank ranking above and for the same
         # reason — this is the draft-time pool, and it is the last moment the
         # reference describes the league rather than what is left of it.

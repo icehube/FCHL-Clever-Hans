@@ -384,11 +384,6 @@ class TestAPIEdgeCases:
         r = client.post("/team-done", data={"team_code": "FAKE"})
         assert r.status_code == 200
 
-    def test_set_nominator_invalid_team(self, client):
-        """Setting nominator to invalid team should not crash."""
-        r = client.post("/set-nominator", data={"team_code": "FAKE"})
-        assert r.status_code == 200
-
     def test_team_view_nonexistent_changes_nothing(self, client):
         """An unknown code leaves the view exactly where it was.
 

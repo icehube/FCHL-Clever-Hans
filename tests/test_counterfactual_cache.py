@@ -158,19 +158,6 @@ class TestCacheStaysTrue:
             f"{sold} was drafted by SRL and is still being recommended"
         )
 
-    def test_set_nominator_need_not_invalidate(self, client):
-        """The one mutating endpoint that skips _recompute, deliberately.
-
-        It moves `nomination_index` and nothing else; a counterfactual cannot
-        depend on whose turn it is. Pinned so that if /set-nominator ever grows
-        a real state change, this fails and forces the question.
-        """
-        player = _a_player()
-        before = main._counterfactual(player)
-        assert client.post("/set-nominator", data={"team_code": "LGN"}).status_code == 200
-        assert _same(main._counterfactual(player), before)
-        assert _same(main._counterfactual(player), _fresh(player))
-
     def test_cache_is_per_player(self, client):
         first = _a_player()
         second = _a_player(skip={first.name})

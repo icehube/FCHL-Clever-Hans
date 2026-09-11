@@ -1316,7 +1316,6 @@ def _context(request: Request) -> dict:
         "milp": milp_solution,
         "bid_limits": bid_limits,
         "nomination_order": auction_state.nomination_order,
-        "current_nominator": auction_state.current_nominator(),
         "my_team": MY_TEAM,
         # The league's salary cap, so a template quoting it in prose reads the
         # config rather than carrying its own copy of "11.4" to drift.
@@ -1397,12 +1396,6 @@ async def assign_player(
         nhl_team=p.nhl_team,
     )
 
-    # A nomination turn is a combo: 1 RFA (silent bid) then 1 UFA (open
-    # bid). The turn passes to the next team only when the UFA half sells —
-    # advancing on the RFA too skipped every other team in the order.
-    # Late-draft states with no RFAs left advance on every (UFA) sale.
-    if not p.is_rfa:
-        auction_state.advance_nomination()
     _recompute()
     _save_state()
     # The view follows the sale. On your own pick that is BOT, unchanged since
@@ -1511,7 +1504,12 @@ async def bid_check(
 
 @app.get("/nominate", response_class=HTMLResponse)
 async def nominate(request: Request):
-    """It's BOT's turn: get nomination recommendation."""
+    """Nomination recommendations for BOT — 1 RFA and 1 UFA.
+
+    Available at any time, in or out of turn: `recommend_nomination` is
+    hard-coded to MY_TEAM and reads no turn pointer, and knowing who you would
+    put up is useful while somebody else is nominating.
+    """
     model_expected = {name: pred.expected_price for name, pred in model_prices.items()}
     rfa_pick, ufa_pick = recommend_nomination(
         auction_state, market_prices, model_expected,
@@ -2440,20 +2438,6 @@ async def player_chart(request: Request, player_name: str):
     else:
         ctx.update(chart)
     return _render(request, "partials/player_chart.html", ctx)
-
-
-@app.post("/set-nominator", response_class=HTMLResponse)
-async def set_nominator(request: Request, team_code: str = Form(...)):
-    """Override which team nominates next."""
-    order = auction_state._effective_order()
-    # Nomination half only, both paths — the nominator badge lives there, and
-    # returning the whole panel wiped any in-flight bidding session.
-    if team_code not in order:
-        return _render(request, "partials/nomination_panel.html")
-    auction_state.save_snapshot()
-    auction_state.nomination_index = order.index(team_code)
-    _save_state()
-    return _render(request, "partials/nomination_panel.html")
 
 
 @app.get("/team-view/{team_code}", response_class=HTMLResponse)

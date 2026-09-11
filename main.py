@@ -14,7 +14,8 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
-from functools import partial
+from functools import lru_cache, partial
+from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
@@ -447,6 +448,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="FCHL Auction Manager", lifespan=lifespan)
+# Absolute, so _asset_version stats the right file whatever the process
+# cwd is — the mount below resolves relative to it and pytest does not.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/fchl_logos", StaticFiles(directory="fchl_logos"), name="logos")
 app.mount("/nhl_logos", StaticFiles(directory="nhl_logos"), name="nhl_logos")
@@ -486,6 +490,44 @@ def _dom_id(name: str) -> str:
 # has to find it live in different templates, and they are only guaranteed to
 # agree if there is one definition rather than two copies of an expression.
 templates.env.filters["dom_id"] = _dom_id
+
+
+@lru_cache(maxsize=None)
+def _asset_version(path: str) -> str:
+    """A cache-busting token for one file under `static/`, from its mtime.
+
+    StaticFiles sends `last-modified` and `etag` and NO `Cache-Control`, and per
+    RFC 9111 §4.2.2 a response with no explicit freshness may be served from
+    cache under *heuristic* freshness — the browser never revalidates, so it
+    never learns the file changed. A conditional GET does return 304 correctly;
+    the problem is that the browser has no reason to make one.
+
+    That is not theoretical here. Two fixes shipped on 2026-09-09 (the
+    search-box `focusout` dismissal, and `#pool-rows` so the position filters
+    survive an open price chart) were both re-reported as still broken the next
+    day, by an operator running the previous `shortcuts.js`. Both were verified
+    working in a fresh browser profile within minutes.
+
+    `static/vendor/*` is deliberately NOT routed through this: those filenames
+    already carry their version (`htmx-1.9.10.min.js`), so they are correctly
+    cacheable forever and a query string would only defeat that.
+
+    Memoised, so the whole app pays one stat() per asset. That means a file
+    edited while the server is running keeps its old token until restart — which
+    is what `--reload` is for, and the alternative is a stat() on every page
+    render for a number that cannot change in a production run.
+    """
+    try:
+        return str(int((STATIC_DIR / path).stat().st_mtime))
+    except OSError:
+        # A missing asset is the template's bug, not this function's, and a
+        # cache-busting token is no reason to fail a page load mid-draft.
+        return "0"
+
+
+# A global rather than a `_context` key: base.html must not depend on `_context`,
+# which `_render` deliberately short-circuits on the hot path (/find-player).
+templates.env.globals["asset_version"] = _asset_version
 
 
 buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"

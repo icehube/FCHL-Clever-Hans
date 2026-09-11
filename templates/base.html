@@ -42,7 +42,12 @@
         --border-btn: 1px;
     }
     </style>
-    <link rel="stylesheet" href="/static/style.css">
+    <!-- ?v= is a cache buster, and it is only on the two APP assets. StaticFiles
+         sends no Cache-Control, so a browser may hold these under heuristic
+         freshness and never revalidate — twice on 2026-09-09 a shipped fix was
+         re-reported as broken by an operator running the previous shortcuts.js.
+         static/vendor/* is versioned in the filename already and stays cached. -->
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_version('style.css') }}">
 </head>
 <body>
     <div class="navbar bg-base-200 border-b border-base-300 px-4 sticky top-0 z-50 min-h-0 h-10">
@@ -245,6 +250,6 @@
     <main id="app">
         {% block content %}{% endblock %}
     </main>
-    <script src="/static/shortcuts.js"></script>
+    <script src="/static/shortcuts.js?v={{ asset_version('shortcuts.js') }}"></script>
 </body>
 </html>

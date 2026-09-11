@@ -24,6 +24,57 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **App assets were unversioned, so two shipped fixes were re-reported as
+  broken the next day.** "When I move away from the search box, the drop menu
+  still displays" and "the Position Filters don't work when the price model is
+  open" — both had landed on 2026-09-09, and both reproduced as **working** in
+  a fresh browser profile within minutes of being reported. The operator was
+  running the previous `shortcuts.js`.
+
+  `StaticFiles` sends `last-modified` and `etag` and **no `Cache-Control`**,
+  and RFC 9111 §4.2.2 lets a cache serve such a response under *heuristic*
+  freshness without revalidating. The conditional GET works perfectly — `curl`
+  with an `If-Modified-Since` returns 304 correctly. The browser simply has no
+  reason to make one.
+
+  `_asset_version()` is a Jinja global returning the file's integer mtime, and
+  `base.html` appends `?v=` to `style.css` and `shortcuts.js`. A global rather
+  than a `_context` key, because `base.html` must not depend on `_context`,
+  which `_render` deliberately short-circuits on the hot path (`/find-player`).
+  Memoised, so the app pays one `stat()` per asset and a file edited while the
+  server runs keeps its old token until restart — which is what `--reload` is
+  for, and the alternative is a `stat()` on every render for a number that
+  cannot change in a production run.
+
+  **`static/vendor/*` is deliberately excluded.** Those filenames already carry
+  their version (`htmx-1.9.10.min.js`), so they are correctly cacheable forever
+  and a query string would only defeat that; a test asserts no vendored
+  reference grows one.
+
+  The wider lesson, recorded because it cost a day: a bug report that does not
+  reproduce in a fresh browser profile is a **cache** report until proven
+  otherwise, and the first thing to check is whether the asset carrying the fix
+  can be revalidated at all.
+
+### Investigated
+
+- **"When I move away from the search box, the drop menu still displays" —
+  no code change.** The `focusout` handler at `static/shortcuts.js` already
+  closes the results, and does it correctly: it ignores a focus move to another
+  element *inside* `#player-search`, so tabbing from the input to a result does
+  not dismiss what you are reaching for. Verified in a fresh browser — the
+  results container went from 1 child to 0 on clicking away. See the
+  cache-busting entry above for why it looked broken.
+
+- **"The Position Filters don't work when the price model is open" — no code
+  change.** Fixed on 2026-09-09 by giving the pool `<tbody>` the id
+  `pool-rows`, because `#player-chart-container` sits inside `#bid-limits` and
+  before the pool table, so `document.querySelector('#bid-limits tbody')`
+  resolved to the price-drivers table once a chart was open. Verified in a
+  fresh browser at 1280px: with a drivers card open, filtering to D took the
+  pool from 614 rows to 227 and left all 6 driver rows on screen with their
+  labels intact. Same cause as above.
+
 - **The team panel's "Proj PTS" was a raw sum including bench players, so it
   was not a legal lineup.** Reported as "in League State it says Proj.
   Est/Solved. But then in the Team Panel it also shows Proj PTS. These values
@@ -885,11 +936,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:75 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:76 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
   to remember; `FCHL_STATE_DIR` overrides it explicitly.
-  `main.py:136 (_backfill_nhl_teams)` and
-  `main.py:160 (_backfill_keeper_flags)` follow the
+  `main.py:137 (_backfill_nhl_teams)` and
+  `main.py:161 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -1006,7 +1057,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:313 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:314 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup
@@ -1645,7 +1696,7 @@ nothing failed.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1331 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1372 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -1750,7 +1801,7 @@ nothing failed.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1312 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1353 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

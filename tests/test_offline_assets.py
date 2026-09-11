@@ -315,3 +315,56 @@ def test_no_source_map_references():
         assert "sourceMappingURL" not in path.read_text(errors="replace"), (
             f"{path.name} references a source map we don't serve — strip it"
         )
+
+
+class TestAppAssetsAreCacheBusted:
+    """A shipped fix the browser never fetches is not a shipped fix.
+
+    `StaticFiles` sends `last-modified` and `etag` and no `Cache-Control`, and
+    RFC 9111 §4.2.2 lets a cache serve such a response under *heuristic*
+    freshness without revalidating. The conditional GET works perfectly; the
+    browser just has no reason to make one.
+
+    Two fixes landed 2026-09-09 — the search box's `focusout` dismissal, and
+    `#pool-rows` so the position filters survive an open price chart — and both
+    were re-reported as still broken the next day by an operator running the
+    previous `shortcuts.js`. Both verified working in a fresh browser profile
+    within minutes.
+    """
+
+    APP_ASSETS = ("style.css", "shortcuts.js")
+
+    def test_both_app_assets_carry_a_version(self, client):
+        page = client.get("/").text
+
+        for asset in self.APP_ASSETS:
+            m = re.search(rf'/static/{re.escape(asset)}\?v=(\d+)', page)
+            assert m, f"/static/{asset} is referenced without a ?v= cache buster"
+            assert int(m.group(1)) > 0, f"{asset} got the missing-file fallback"
+
+    def test_the_token_tracks_the_file(self):
+        """Two different files must get two different tokens, or the buster is
+        a constant and changes nothing. Compares real files rather than
+        touching one — mtime resolution makes a touch-and-compare flaky."""
+        import main
+
+        tokens = {a: main._asset_version(a) for a in self.APP_ASSETS}
+        assert len(set(tokens.values())) == len(tokens), (
+            f"every asset got the same token: {tokens}"
+        )
+
+    def test_a_missing_asset_does_not_break_the_page(self):
+        """A cache-busting token is no reason to fail a render mid-draft."""
+        import main
+
+        assert main._asset_version("no-such-file.css") == "0"
+
+    def test_the_vendored_libraries_are_left_alone(self):
+        """Their filenames already carry the version, so they are correctly
+        cacheable forever — a query string would only defeat that."""
+        base = (TEMPLATES / "base.html").read_text()
+
+        for ref in _VENDORED.findall(base):
+            assert "?" not in ref, (
+                f"{ref} is filename-versioned and must stay cacheable"
+            )

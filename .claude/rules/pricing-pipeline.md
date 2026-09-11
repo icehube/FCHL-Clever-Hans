@@ -263,6 +263,33 @@ The bid recommendation must **NEVER** exceed what opponents can force BOT to pay
 
 If no opponent can bid above $5.5M, BOT's max recommendation is $5.6M -- regardless of what the model or marginal value says.
 
+**Whose NOMINATION turn it is does not enter any of this.** Asked directly by
+the owner on 2026-09-10 -- "does it matter who's turn it is to bid? all that I
+think matters is that if it's mine or if it's someone else's" -- and the answer
+is that they are right. `current_nominator()` is read in exactly one place,
+`nomination_panel.html`, where it draws a badge and gates the "It's My Turn"
+button; `grep` finds it nowhere in `market.py`, `optimizer.py`, `/bid-check` or
+the MILP. `/assign` only *advances* it, and `/set-nominator` is the one mutating
+POST that deliberately skips `_recompute()` -- because, as
+`tests/test_bid_cache.py` puts it, **a marginal value cannot depend on whose
+turn it is**.
+
+What the engine actually reduces a bidder set to is two things:
+
+1. the boolean **"is BOT one of them"** -- `bid_winner` tests it for membership,
+   `compute_live_ceiling` reads it as `bot_bidding`, and `/bid-check` turns it
+   into `bot_uncontested`; and
+2. the **sorted multiset of the other bidders' `physical_max_bid`** --
+   `compute_live_ceiling` projects the codes to numbers and then sorts, which
+   destroys both the submitted order and the identities.
+
+So opponent identity matters only as a way to look up a budget, permuting the
+same opponents changes nothing, and opponent roster *needs* never gate a bid at
+all (`_bidding_opponents` gates on `physical_max_bid`, **not** on spots
+remaining -- bidding is position-agnostic by CBA, and a 24-man team with cap
+space is still a bidder). The `nomination_order` list *is* read by four
+templates, but purely as a stable display order, never as a turn.
+
 **The two are computed over different SETS, and that is why they behave nothing alike.** The idle one takes all 10 opponents, so any two rich teams pin it at `MAX_SALARY`; the live one takes only the named bidders, which is usually two or three, so a single poor rival puts it well below. Measured mid-draft on the same states where the idle ceiling never left the cap:
 
 | live ceiling below `MAX_SALARY` | fresh | mid-draft |

@@ -16,6 +16,18 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
+- [2026-09-10] [owner-question] `main.py:1392 (bid_check)` — **the
+  `highest_bidder` form field is dead and looks load-bearing.** Surfaced while
+  answering "does it matter whose turn it is to bid": no JavaScript ever writes
+  it (`bid_panel.html`'s hidden input is round-tripped from `ctx` and
+  `shortcuts.js` never touches it, so in practice it is always `""`), it lands
+  in `MarketInfo.highest_bidder`, and `compute_bid_recommendation` never reads
+  that field. `compute_market_ceiling` *does* populate it and `tests/test_market.py`
+  asserts on it, so the dataclass field stays either way — this is about the
+  form field and its hidden input. Deferred because removing it edits eight
+  `tests/test_endpoints.py` payloads for no behavioural change, and it was out
+  of scope for a question about turn order.
+
 - [2026-09-10] [grill] `main.py:2109 (_driver_rows)` — **hiding inert driver rows on an EXACTLY-zero `log_delta` still leaves 12 rows on screen printing `×1.00`** (measured over the fresh 705-player pool: 2361 visible rows, of which 11 Scarcity and 1 NHL team round to 1.00 at the card's 2dp), so the confusion the change removed for the structural cases is not fully gone for near-zero ones. Deferred deliberately rather than switched to a rounding test: a `×1.004` row dropped from a card that prints both a base and a median leaves a gap between them that nothing on screen explains, and `test_it_names_exactly_the_drivers_that_are_in_play` compares the rendered groups against `log_delta != 0.0` in both directions, so a rounding rule fails it by design. Fixing it properly means the card stating the residual, which is a design question and an owner decision, not a filter tweak. 0.5% of rows, so the cost of waiting is measured and small.
 
 - [2026-09-10] [design-review] `state.py:786 (_searchable)` — **two different

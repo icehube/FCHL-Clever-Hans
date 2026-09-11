@@ -122,6 +122,35 @@ rediscover the same non-problem.
 
 ### Investigated
 
+- **"Does it matter whose turn it is to bid? All that I think matters is that
+  if it's mine or if it's someone else's. Is that right?" — yes, and no code
+  changed.** The answer is written into
+  `.claude/rules/pricing-pipeline.md`'s Critical rule section, where the two
+  ceiling contexts already live, because it is a domain fact that keeps being
+  re-derived.
+
+  `current_nominator()` is read in exactly one place — `nomination_panel.html`,
+  where it draws a badge and gates the "It's My Turn" button. It appears
+  nowhere in `market.py`, `optimizer.py`, `/bid-check` or the MILP. `/assign`
+  only *advances* it, and `/set-nominator` is the single mutating POST that
+  deliberately skips `_recompute()`, on the grounds `tests/test_bid_cache.py`
+  states outright: a marginal value cannot depend on whose turn it is.
+
+  What the engine reduces a bidder set to is the boolean "is BOT one of them"
+  and the **sorted multiset** of the other bidders' `physical_max_bid` —
+  `compute_live_ceiling` projects codes to numbers and sorts, destroying both
+  order and identity. So opponent identity matters only as a way to look up a
+  budget, permuting the same opponents changes nothing, and opponent roster
+  *needs* never gate a bid at all (`_bidding_opponents` gates on
+  `physical_max_bid`, not on spots remaining — a 24-man team with cap space is
+  still a bidder). `nomination_order` *is* read by four templates, but purely
+  as a stable display order.
+
+  One thing the question surfaced went to `BACKLOG.md` rather than being
+  fixed here: the `highest_bidder` form field on `/bid-check` is dead — no JS
+  writes it, and `compute_bid_recommendation` never reads the `MarketInfo`
+  field it feeds.
+
 - **"When I move away from the search box, the drop menu still displays" —
   no code change.** The `focusout` handler at `static/shortcuts.js` already
   closes the results, and does it correctly: it ignores a focus move to another

@@ -22,6 +22,28 @@ rediscover the same non-problem.
 
 ## [2026-09-10]
 
+### Removed
+
+- **17MB of third-party reference material was committed by accident and is
+  now untracked.** `git add -A` on the bench-cap commit swept in four files
+  that had been sitting untracked in `data/` since before the session and that
+  nobody asked to version: two DobberHockey PDFs (9.4MB and 6.0MB), the
+  2026-27 draft-list workbook (1.3MB) and the free-agent draft workbook
+  (128KB). Nothing in the app or the tests opens any of them — the one mention
+  anywhere is a docstring in `tests/test_state_json_conversion.py` naming a
+  file by date, not reading it.
+
+  `git rm --cached` untracks them; they stay on disk. `.gitignore` now covers
+  `data/*.pdf` and `data/*.xlsx` by **extension rather than by name**, because
+  the next guide will have a different filename and the same sweep will happen
+  again; verified that no currently-tracked file in `data/` matches the new
+  rules (all nine are `.csv` or `.json`).
+
+  **The blobs are still in the history of those commits**, which are unpushed —
+  so dropping them is a rewrite of unpublished work rather than of anything
+  shared, and it is the owner's call rather than something to do quietly. Until
+  then `.git` carries ~17MB it does not need.
+
 ### Added
 
 - **Solve Standings now runs itself after every pick.** Asked for directly: "is

@@ -33,5 +33,13 @@ FCHL-auction-pricer/
 .DS_Store
 Thumbs.db
 
+# Reference material dropped in data/ for a human to read — league workbooks
+# and the DobberHockey guides. Not inputs to anything: nothing in the app or
+# the tests opens them, and they are third-party publications. Four of them
+# (17MB, two PDFs of 9.4MB and 6.0MB) were swept into a commit by `git add -A`
+# on 2026-09-10, which is why this rule is by extension rather than by name.
+data/*.pdf
+data/*.xlsx
+
 # LibreOffice lock files (created while a data workbook is open)
 .~lock.*#

@@ -103,21 +103,35 @@
 
                    A bubble anchored to a trigger inside `.table-scroll-x`
                    cannot be made readable, and that is geometry rather than
-                   tuning. The scroller's VISIBLE width is 293px at 1024 and
-                   379px at 1280; DaisyUI centres the bubble on its trigger and
-                   has no flip logic. Measured by sweeping every scroll position
-                   at which the `Proj` header is fully visible: the bubble was
-                   clipped at **5 of 6** such positions at 1280 (worst 110px of
-                   270), 4 of 5 at 1024, 6 of 7 at 928. Only the fully-scrolled-
-                   right position works — which is exactly why
-                   `TestTooltipsStayInsideTheirPanel` never saw it: it measures
-                   at `scrollLeft: 0`, where this header is not even on screen.
+                   tuning. DaisyUI centres the bubble on its trigger and has no
+                   flip logic, and `Proj` is second from last of eleven columns
+                   — so even scrolled fully right there are only **82px**
+                   between the trigger and the box edge, for a bubble wanting
+                   135px of them. Re-measured 2026-09-11 closed-form over the
+                   scroll range (it is linear in `scrollLeft`, so a sampled
+                   sweep reports its own step): the 270px bubble is clipped at
+                   **100%** of the positions where this header is fully
+                   visible, and THE FRACTION IS THE SAME AT 1600, 1280, 1024 AND
+                   928 — the constraint is content geometry, so no width helps.
                    Re-anchoring only moves the failure to the other edge, and
-                   narrowing does not rescue it either: a 27px trigger in a
-                   293px window leaves an 80px bubble — too narrow for a
-                   sentence — still clipped at 20% of hover positions. So the
-                   options were a native title or no explanation, the same
-                   conclusion `.price-drivers` reached in style.css.
+                   narrowing does not rescue it: 200px is still 100%, 120px is
+                   57%, and an 80px bubble — far too narrow for a sentence — is
+                   still 32%. Carrying the `data-tip` at all also widened this
+                   table by **39px** (`scrollWidth` 776 -> 815), since an
+                   absolutely positioned descendant joins its ancestor's
+                   scrollable overflow. `TestTooltipsStayInsideTheirPanel` never
+                   saw any of it: it measures at `scrollLeft: 0`, where this
+                   header is not even on screen. So the options were a native
+                   title or no explanation, the same conclusion
+                   `.price-drivers` reached in style.css.
+
+                   Superseded, and recorded because the shape of the error
+                   recurs: an earlier sweep reported "5 of 6 positions at 1280,
+                   4 of 5 at 1024, 6 of 7 at 928" and "only the fully-scrolled-
+                   right position works". Those were samples, so the counts
+                   varied with how many the step happened to take rather than
+                   with the width; and the position that "works" is clipped by
+                   under a pixel.
 
                    The TEXT is now what the basis marker below cannot say. It
                    used to restate the marker's own `title` at greater length

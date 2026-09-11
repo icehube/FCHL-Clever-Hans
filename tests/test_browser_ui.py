@@ -1129,11 +1129,19 @@ class TestTooltipsStayInsideTheirPanel:
 
         # Named rather than counted. A count alone goes quiet-green the day a
         # template drops a tooltip: fewer bubbles trivially means fewer
-        # offenders, so this test would keep passing while covering less. These
-        # four are the ones the 2026-08-08 batch placed or wrote — one per
-        # distinct container, so between them they exercise every rule in the
-        # CSS block (left-anchored flex row, capped-width stat grid, the
-        # league table header, and the chart meta line).
+        # offenders, so this test would keep passing while covering less.
+        #
+        # What the four cover, corrected 2026-09-11 when the league-table entry
+        # came out: the bid panel's two exercise `.bid-details`' left-anchor,
+        # Sigma exercises `.chart-meta`'s static-position override, and the
+        # capped price is the app's only `tooltip-left`. The `.team-stats` grid
+        # is deliberately NOT named here — its rules are per-breakpoint
+        # `nth-child` bands, so no single tile stands for them; the tiles are
+        # held by the `counted >= 10` floor below instead. This comment claimed
+        # "one per distinct container" over a list of four CSS rules while the
+        # dict held five entries, and then survived the removal by going wrong
+        # in the other direction; a comment that inventories a dict has to be
+        # edited with it.
         #
         # Matched on `data-tip`, NOT on the trigger's label. Labels are not
         # unique: the first version of this required "Proj", which the team
@@ -1154,12 +1162,15 @@ class TestTooltipsStayInsideTheirPanel:
             # The league table header used to be here ("Solve Standings"), and
             # it is GONE on purpose (2026-09-11) rather than having drifted.
             # It was the app's only `data-tip` inside a `.table-scroll-x`, and
-            # measurement showed no bubble can be readable there: the scroller
-            # is 293px wide at 1024, DaisyUI centres with no flip logic, and
-            # sweeping every scroll position at which the header is visible put
-            # the bubble outside the visible box at 5 of 6 of them at 1280
-            # (worst 110px of 270). This suite could not see it because it
-            # measures at `scrollLeft: 0`, where that header is off-screen
+            # measurement showed no bubble can be readable there: DaisyUI
+            # centres with no flip logic, and `Proj` is second from last of
+            # eleven columns, so even scrolled fully right only 82px separate
+            # the trigger from the box edge. Computed closed-form over the
+            # scroll range, the 270px bubble was clipped at 100% of the
+            # positions where the header is fully visible — the same at 1600,
+            # 1280, 1024 and 928, because the constraint is content geometry
+            # rather than viewport width. This suite could not see it because
+            # it measures at `scrollLeft: 0`, where that header is off-screen
             # entirely — so the entry was passing while covering nothing.
             # The tooltip is a native `title` now, which has no box to clip.
             #

@@ -57,24 +57,48 @@ rediscover the same non-problem.
   of the panel's height hanging off a table header.
 
   **The length was the smaller problem.** `Proj` is a `th` inside
-  `.table-scroll-x`, whose *visible* width is 293px at 1024 and 379px at 1280.
-  DaisyUI centres a bubble on its trigger and has no flip logic, so sweeping
-  every scroll position at which the header is fully visible put the bubble
-  outside the visible box at **5 of 6** of them at 1280 (worst **110px** of
-  270), 4 of 5 at 1024, 6 of 7 at 928. Only the fully-scrolled-right position
-  works.
+  `.table-scroll-x`, and DaisyUI centres a bubble on its trigger with no flip
+  logic. Re-measured 2026-09-11 closed-form over the whole scroll range rather
+  than sampled (the geometry is linear in `scrollLeft`, so the answer is a
+  ratio of interval lengths and a sampled sweep just reports its own step):
+  the shipped 270px bubble is outside the visible box at **100%** of the scroll
+  positions where the header is fully visible.
+
+  **The figures do not depend on the viewport width — that was the error in the
+  first write-up of this entry.** Measured at 1600 / 1280 / 1024 / 928, the
+  clipped fractions are *identical* at all four, because the binding constraint
+  is the trigger's clearance from the **table's right edge** (82px), which is
+  content geometry. `Proj` is second from last of eleven columns, so scrolling
+  fully right still leaves only 82px to the box edge for a bubble wanting 135px
+  of it. The superseded sampled figures — 5 of 6 positions at 1280, 4 of 5 at
+  1024, 6 of 7 at 928, "only the fully-scrolled-right position works" — read as
+  width-dependent because each width happened to admit a different number of
+  samples, and the "works" position is clipped by **under a pixel**, which the
+  sweep's tolerance swallowed.
+
+  **The bubble was also widening the widest table in the app.** An absolutely
+  positioned descendant contributes to its ancestor's scrollable overflow, so
+  merely carrying the `data-tip` pushed `.table-scroll-x`'s `scrollWidth` from
+  **776 to 815px** (+39, identical at all four widths). The bubble partly made
+  room for itself: those 39px of extra scroll range are why the pre-removal
+  page had 121px of right clearance against 82px now. This does **not** explain
+  the unreconciled 815px min-content figure in `league_state.html`'s note —
+  checked, `tests/measure_layout.py` reads `getBoundingClientRect()` under
+  `width: min-content`, a border box, which excludes that overflow. The
+  coincidence is exact and is still a coincidence.
 
   **No bubble can live there, and that is geometry rather than tuning.** The
   plan was to shorten the text and add a right-anchor rule in the shape
   `.team-stats` already uses. Measured, that fixes nothing: re-anchoring moves
   the failure to the opposite edge, and narrowing does not rescue it either —
-  computed over the same windows, a 200px bubble is still clipped at ~50% of
-  hover positions, 120px at ~30%, and even an 80px one, far too narrow for a
-  sentence, at ~20%. A 27px trigger inside a 293px window has no width that
-  works. So the header explanation is a native `title` now, which has no box to
-  clip — the conclusion `.price-drivers` reached in `style.css` for the same
-  reason, and the one the `#proj-basis` marker in the *same* `<th>` had already
-  reached.
+  over the shipped geometry a 200px bubble is clipped at **100%** of hover
+  positions, 120px at **57%**, and even an 80px one, far too narrow for a
+  sentence, at **32%**. (The first write-up said ~50 / ~30 / ~20%, which was
+  both sampled and quoted from one width; the real figures are worse and do not
+  vary.) A 27px trigger with 82px of clearance has no width that works. So the
+  header explanation is a native `title` now, which has no box to clip — the
+  conclusion `.price-drivers` reached in `style.css` for the same reason, and
+  the one the `#proj-basis` marker in the *same* `<th>` had already reached.
 
   **Why `TestTooltipsStayInsideTheirPanel` was green throughout.** It measures
   at `scrollLeft: 0`, where the Proj header is not on screen at all, and bounds

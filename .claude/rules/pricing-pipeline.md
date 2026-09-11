@@ -354,8 +354,12 @@ all (`_bidding_opponents` gates on `physical_max_bid`, **not** on spots
 remaining -- bidding is position-agnostic by CBA, and a 24-man team with cap
 space is still a bidder). The `nomination_order` list survives the removal and
 is read by **four** templates -- `league_state.html`, `standings_cells.html`,
-`bid_panel.html`, `team_panel.html` -- plus `main._default_bidders`, but purely
-as a stable display order, never as a turn. It was **five** when this paragraph
+`bid_panel.html`, `team_panel.html` -- plus the `default_bidders` string
+`_context` builds from it in `main.py`, but purely as a stable display order,
+never as a turn. (That last was written `main._default_bidders` for a day; no
+such symbol exists and grepping the name finds nothing, which is the rot the
+`(symbol)` convention exists to stop. It is a local, so name its enclosing
+function.) It was **five** when this paragraph
 was written on 2026-09-10, which said four and was already wrong
 (`standings_cells.html` joined on 2026-08-17); the fifth was the Override
 dropdown, and removing it is what made the stale count accidentally true.

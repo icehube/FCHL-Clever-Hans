@@ -5314,14 +5314,16 @@ class TestExactStandingsOnDemand:
     def test_the_header_explanation_is_not_a_daisyui_bubble(self, client):
         """A bubble cannot be readable in this cell, and that is measured.
 
-        `Proj` is a `th` inside `.table-scroll-x`, whose VISIBLE width is 293px
-        at 1024 and 379px at 1280. DaisyUI centres a bubble on its trigger and
-        has no flip logic, so sweeping every scroll position at which the header
-        is fully visible put a 270px bubble outside the visible box at 5 of 6 of
-        them at 1280 (worst 110px), 4 of 5 at 1024 and 6 of 7 at 928. Narrowing
-        does not rescue it — an 80px bubble, too narrow for a sentence, is still
-        clipped at ~20% of hover positions — and re-anchoring only moves the
-        failure to the other edge.
+        `Proj` is a `th` inside `.table-scroll-x`, second from last of eleven
+        columns. DaisyUI centres a bubble on its trigger and has no flip logic,
+        so even scrolled fully right only 82px separate the trigger from the
+        box edge, against the 135px a 270px bubble wants. Computed closed-form
+        over the scroll range, that bubble is outside the visible box at 100%
+        of the positions where the header is fully visible — identical at 1600,
+        1280, 1024 and 928, because the constraint is content geometry rather
+        than viewport width. Narrowing does not rescue it (200px 100%, 120px
+        57%, 80px — too narrow for a sentence — still 32%) and re-anchoring only
+        moves the failure to the other edge.
 
         Cheap and static because the browser suite structurally cannot catch a
         regression here: `TestTooltipsStayInsideTheirPanel` measures at

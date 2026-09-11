@@ -16,6 +16,17 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 ## Open findings
 
+- [2026-09-10] [manual-verification] `nhl_logos/` — **`data/players-25.csv`
+  spells Utah `UTA` and there is no `UTA.svg`**, so 30 players render a broken
+  logo and every page load on that pool logs 404s (measured at 1280px: 8 on a
+  fresh load, 5 mid-draft). Not a draft-day problem and that is why it is
+  deferred: `data/players.csv` — the pool the real auction runs on — spells it
+  `UTH`, and a sweep of every `NHL TEAM` value in that file against
+  `nhl_logos/*.svg` came back with **nothing missing**. The two files disagree
+  on the abbreviation for one franchise across data vintages, so the fix is a
+  normalisation decision (loader alias? a second SVG? re-export the 2025 pool?)
+  rather than dropping a file in, and it only ever shows on the alternate pool.
+
 - [2026-09-10] [owner-question] `main.py:1392 (bid_check)` — **the
   `highest_bidder` form field is dead and looks load-bearing.** Surfaced while
   answering "does it matter whose turn it is to bid": no JavaScript ever writes

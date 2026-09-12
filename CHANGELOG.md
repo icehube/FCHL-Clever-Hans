@@ -108,6 +108,68 @@ rediscover the same non-problem.
   — taking the close-by-id check with it. Verified by mutation that the
   narrowed version still catches a close button resolving by id.
 
+### Investigated
+
+- **The draft-day backlog items were put to the owner instead of waiting for
+  the draft.** Seven entries were parked on "revisit if it actually bites on
+  the day" — a deferral reason that expires only during a live auction, which
+  is the worst moment to discover the answer is yes. Asked directly on
+  2026-09-12, four of the seven resolved on a sentence each. That is worth
+  recording as a method: a trigger phrased as draft-day *feel* is usually a
+  question for the operator, not a measurement waiting on an event.
+
+- **The cold `/bid-check` stall is not felt, so the 2026-08-19 entry is
+  closed.** Owner: "It's not slow at all, didn't notice the stall." The entry's
+  trigger was explicitly subjective — a stall on the FIRST bid of a player
+  actually being felt — and the operator is the only instrument for it. The
+  measurements stand and are not in dispute: a cold `/bid-check` is 935ms (a
+  binary search over MILP solves), 89.5–89.8% of it inside CBC in aggregate and
+  65–92% per subject; the warm path is 9ms from the marginal cache, which is
+  what the operator's own next keystroke hits. **The costed fix is not lost by
+  closing this.** Three candidates were measured 2026-08-21 with
+  `tests/measure_marginal.py` (which stays, and re-runs with `--sweep`): model
+  reuse 1.06x, reuse plus `warmStart=True` 1.14x, and the probe search's
+  single-solve dual 1.55–1.60x on the big-pool states (1.45x overall, worst
+  subject 1511ms → 772ms), all three reproducing the reference marginal
+  byte-for-byte over 168 subjects. It was not shipped because 1.6x on the slow
+  cases does not buy a second MILP formulation plus a confirm loop plus two
+  float-epsilon subtleties on the hottest path in the app — and that reasoning
+  is unchanged. Note this is a report from use ahead of the auction, not from
+  the auction: if the day feels different, the work is sitting there.
+
+- **Opponent roster edits get a log entry and an undo, not a confirm dialog.**
+  Owner: "Don't put an edit confirmation button. Just log it and allow an
+  undo." The 2026-08-11 entry worried that `/assign` pointing the view at the
+  buyer auto-presents a rival's EDITABLE panel at the highest-tempo moment of
+  the draft, where the controls used to need a deliberate click. Verified that
+  the behaviour the decision asks for already ships, rather than assuming it:
+  all five edit kinds — `adjust-salary`, `toggle-bench`, `move-to-minors`,
+  `move-to-roster`, `team-done` — append a `ChangeRecord` through
+  `main._log_change`, which the Logs panel renders in its **Change** tab with
+  timestamp, team, kind and detail; and every one of them snapshots (through
+  `_undoable` or `save_snapshot`, enforced by
+  `TestEveryMutatingPostTakesASnapshot`), so `Ctrl+Z` reverts it. So an
+  accidental edit is visible and reversible, which is what was asked. No code
+  change. Gating the forms on `is_my_team` was never on the table — auditing a
+  rival is the feature the 2026-08-07 view work exists to provide.
+
+- **Only `/assign` re-solves the exact standings, and that is now a decision
+  rather than a deferral.** Owner: "keep the button for all the other edits, no
+  need to recompute after them." Since 2026-09-10 a pick fires
+  `HX-Trigger-After-Settle: {"solveStandings": true}` and the column re-solves
+  itself; every other mutation still calls `_recompute()`, still clears
+  `exact_projections`, and still drops the column back to estimates, with
+  `#proj-basis` saying so and the manual button the way back. The open question
+  was whether to extend the trigger to the other mutations. Closed as no: the
+  parallel scan is 384ms on a fresh league, a bench toggle or a salary edit is
+  not a moment that needs a rank badge to be exact, and the marker already
+  makes the state honest. **The two measured warnings the entry carried still
+  apply to any future attempt**: a per-team cache invalidated only when that
+  team's roster or budget changes would have served 28 of 45 stale rows (62%)
+  over five picks on a fresh league, with single-pick swings reaching −26
+  points; and a synchronous solve on the other action paths is exactly what the
+  out-of-band after-settle shape exists to avoid.
+
 ## [2026-09-11]
 
 ### Removed

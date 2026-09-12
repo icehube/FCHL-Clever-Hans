@@ -640,7 +640,15 @@ def _marginal_value(player: Player) -> float:
 # _marginal_cache. Holds objects rather than floats, but an epoch ends at every
 # assign, so in practice this is the one or two players bid on since the last
 # sale — not worth a bound.
-_counterfactual_cache: dict[str, CounterfactualResult] = {}
+#
+# Keyed on (name, price) rather than name alone, because the Recompute button
+# asks for the same player at a DIFFERENT price and a name-only key would hand
+# back the market-price answer while the card quoted the live bid. That widens
+# the bound from "players bid on since the last sale" to "players × deliberate
+# clicks", which is still tiny: every extra entry costs someone a click and two
+# MILP solves, so the operator cannot generate them faster than ~5/second even
+# trying.
+_counterfactual_cache: dict[tuple[str, float], CounterfactualResult] = {}
 
 
 def _cf_price(player_name: str) -> float:
@@ -660,42 +668,62 @@ def _cf_price(player_name: str) -> float:
     return round(market_prices.get(player_name, MIN_SALARY), 1)
 
 
-def _counterfactual(player: Player) -> CounterfactualResult:
-    """Roster with vs without `player` at the market price, cached this epoch.
+def _counterfactual(player: Player, price: float) -> CounterfactualResult:
+    """Roster with vs without `player` at `price`, cached this epoch.
 
-    Two MILP solves (~200ms), pure in (roster, budget, pool, market prices) —
-    the same inputs _recompute() replaces. Keyed on the MARKET price and not
-    the live bid on purpose: that is what makes it epoch-stable, and re-solving
+    Two MILP solves (~200ms), pure in (roster, budget, pool, market prices,
+    price) — the first four are the inputs _recompute() replaces, and the fifth
+    is in the key.
+
+    The price the callers pass by DEFAULT is still the market price and not the
+    live bid, which is what makes the auto-loaded card epoch-stable: re-solving
     per $0.1M increment would put a 200ms response back inside the window where
-    it can land between mousedown and mouseup on Assign.
+    it can land between mousedown and mouseup on Assign. Sharpening it to the
+    live bid is a button the operator presses, never a trigger — see
+    `_counterfactual_context`.
     """
-    if player.name not in _counterfactual_cache:
-        _counterfactual_cache[player.name] = generate_counterfactual(
+    key = (player.name, price)
+    if key not in _counterfactual_cache:
+        _counterfactual_cache[key] = generate_counterfactual(
             player,
-            _cf_price(player.name),
+            price,
             auction_state.teams[MY_TEAM],
             auction_state.available_players,
             market_prices,
         )
-    return _counterfactual_cache[player.name]
+    return _counterfactual_cache[key]
 
 
-def _counterfactual_context(player_name: str) -> dict | None:
+def _counterfactual_context(player_name: str, price: float | None = None) -> dict | None:
     """Template variables needed by counterfactual.html.
 
     Returns None if the player isn't in the pool. Used by both /explain and the
     bid panel's lazy mount, mirroring _chart_context.
+
+    `price` is the Recompute button asking for this player at the price on the
+    table instead of the expected clearing price. Through `_legal_salary` for
+    the same reason `_cf_price` rounds: a bid box auto-submits whatever was
+    typed, and a verdict reading "Skip him at $46.0M" would be conditioned on a
+    price the CBA has no room for. That quantization is also what keeps the
+    cache key dense — a raw float would miss on every keystroke.
     """
     p = auction_state.available_players.get(player_name)
     if p is None:
         return None
+    at_bid = price is not None
+    cf_price = _legal_salary(price) if at_bid else _cf_price(player_name)
     return {
-        "counterfactual": _counterfactual(p),
+        "counterfactual": _counterfactual(p, cf_price),
         "cf_player": p,
         # The whole verdict is conditioned on this price — without it the panel
         # shows a points delta the reader can't judge. Already quantized, so
         # what is quoted is exactly what was solved.
-        "cf_price": _cf_price(player_name),
+        "cf_price": cf_price,
+        # Which of the two prices that is. The card names the figure in its
+        # verdict either way; this says whether it is a forecast of the
+        # clearing price or the number currently on the table, which is the
+        # whole difference between the auto-load and a Recompute.
+        "cf_at_bid": at_bid,
     }
 
 
@@ -1670,20 +1698,34 @@ async def find_player(request: Request, q: str = ""):
 
 
 @app.get("/explain/{player_name}", response_class=HTMLResponse)
-async def explain(request: Request, player_name: str, inline: bool = False):
+async def explain(
+    request: Request,
+    player_name: str,
+    inline: bool = False,
+    price: float | None = None,
+):
     """Why not bid: counterfactual explanation.
 
     `inline=1` returns the body alone, for the bid panel's lazy mount; the
     default returns the standalone `#explanation` section the Available Players
     table's "?" links swap. Same analysis, two mount points — a query param
     rather than a second route, since only the wrapper differs.
+
+    `price` is the same idea one level down: the Recompute button re-asks for
+    the card at the bid on the table rather than at the expected clearing
+    price. Optional, because omitting it has to keep meaning "the market
+    price" — that is what the lazy mount fires on every panel swap, and making
+    it mandatory would put a 200ms solve on the trigger instead of the click.
     """
     template = (
         "partials/counterfactual.html" if inline else "partials/explanation.html"
     )
     ctx = _context(request)
     ctx["counterfactual"] = None
-    cf = _counterfactual_context(player_name)
+    # Only the bid panel's mount owns a live price, so only it gets the button
+    # that reads one — see counterfactual.html.
+    ctx["cf_inline"] = inline
+    cf = _counterfactual_context(player_name, price)
     if cf is not None:
         ctx.update(cf)
     return _render(request, template, ctx)

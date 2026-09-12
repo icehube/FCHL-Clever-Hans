@@ -10,8 +10,48 @@
    panel rendering and this loading. #}
 {% if counterfactual is defined and counterfactual %}
 <div class="counterfactual-card">
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between gap-2">
         <h3 class="font-bold text-sm">{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
+        <div class="flex items-center gap-1">
+        {# Which price the card is conditioned on. The verdict below already
+           names the figure; this names the BASIS, which is the whole
+           difference between a card that loaded itself and one the operator
+           asked for — same job as #proj-basis on the Proj column, and a native
+           `title` for the same reason: this body is mounted inside panels that
+           scroll, and a DaisyUI bubble in a scroller is clipped with no flip
+           logic to save it. #}
+            <span class="text-xs opacity-60 whitespace-nowrap"
+                  title="{% if cf_at_bid %}Solved at the price asked for, not at the forecast — raise the bid and ask again to re-sharpen.{% else %}Solved at the expected clearing price, which is what this card loads at.{% if cf_inline %} Press Recompute to re-solve at the bid on the table.{% endif %}{% endif %}">{{ "at your bid" if cf_at_bid else "at market" }}</span>
+        {# Recompute at the price on the table. Four things here are
+           load-bearing:
+
+           - Gated on cf_inline, so it exists only in the bid panel's mount.
+             The standalone #explanation mount is opened from the players table
+             for an ARBITRARY player, where #bid-price holds the price of a
+             different player entirely. An undefined cf_inline is falsy in
+             Jinja, so the fail-safe direction is "no button" rather than a
+             button reading the wrong input.
+           - hx-target is `closest .counterfactual-card`, never
+             #bid-counterfactual: this body is mounted twice and carries no id
+             of its own (same reason the close button uses closest()). It also
+             means a response with no card removes the CARD and leaves the
+             mount standing — deleting the mount is the #bid-advice bug.
+           - The price is read out of #bid-price when the request is built, not
+             captured here at render time. `change` on a number input fires on
+             blur, so clicking this button right after typing a price starts a
+             /bid-check re-render; a value snapshotted at the last render would
+             re-solve at the PREVIOUS price and quote it confidently.
+           - A button, never hx-trigger="load". Two MILP solves is ~200ms, and
+             firing that per $0.1M increment is what puts a response back
+             inside the mousedown/mouseup window on Assign. #}
+        {% if cf_inline %}
+            <button type="button" class="btn btn-xs btn-outline"
+                    hx-get="/explain/{{ cf_player.name|urlencode }}?inline=1"
+                    hx-vals='js:{price: document.getElementById("bid-price").value}'
+                    hx-target="closest .counterfactual-card" hx-swap="outerHTML"
+                    hx-disabled-elt="this"
+                    title="Re-solve this card at the bid currently in the price box, instead of at the expected clearing price">Recompute</button>
+        {% endif %}
         {# closest(), never getElementById: this body is mounted twice, so an id
            lookup would close the FIRST counterfactual in the document rather
            than the one the button sits in — the same reason the class lives on
@@ -27,8 +67,9 @@
            the bid panel, where there is no #explanation ancestor and `closest`
            returns null. Hides the mount, never removes it — it is the target of
            every "?" link. #}
-        <button onclick="const c=this.closest('.counterfactual-card'),s=c.closest('#explanation');c.remove();if(s)s.hidden=true" class="btn btn-xs btn-ghost"
-                aria-label="Close the counterfactual" title="Close">&times;</button>
+            <button onclick="const c=this.closest('.counterfactual-card'),s=c.closest('#explanation');c.remove();if(s)s.hidden=true" class="btn btn-xs btn-ghost"
+                    aria-label="Close the counterfactual" title="Close">&times;</button>
+        </div>
     </div>
 
     <div class="grid grid-cols-2 gap-2 mt-2">

@@ -153,6 +153,56 @@ class TestCounterfactualDoesNotDisturbTheControls:
         assert len(seen) == 1, f"expected one /explain, got {len(seen)}: {seen}"
 
 
+class TestRecomputeUsesThePriceOnTheTable:
+    """The card loads at the forecast; Recompute re-solves it at the live bid.
+
+    Two properties only a browser can answer. The price is read out of
+    `#bid-price` when the request is BUILT — a value captured at render time
+    would re-solve at whatever was in the box when the card last loaded and
+    quote it as the price you are looking at, which is the blur race the Assign
+    button's `hx-vals` comment describes, one panel down. And the swap replaces
+    the CARD, not the mount: `#bid-counterfactual` is where the lazy load lands
+    on every whole-panel swap, so a recompute that consumed it would leave the
+    panel with no target — the `#bid-advice` failure, which looked like nothing
+    at all on screen.
+
+    The endpoint tests can prove the attributes are rendered
+    (`TestRecomputingAtTheLiveBid`); neither of these is visible from there.
+    """
+
+    def test_it_solves_at_the_price_typed_after_the_card_loaded(
+        self, page, live_server
+    ):
+        _open(page, live_server)
+        _start_bid(page, pool_top()[0], price="3.0")
+        page.wait_for_selector("#bid-panel .counterfactual-card")
+        assert "at market" in page.locator("#bid-panel .counterfactual-card").inner_text()
+
+        # Raise the bid AFTER the card is on screen. This is the whole test: a
+        # price captured when the card rendered is still holding 3.0.
+        page.fill("#bid-price", "7.4")
+        with page.expect_response(re.compile(r"/explain/.*price=")):
+            page.click("#bid-panel .counterfactual-card button:text-is('Recompute')")
+        page.wait_for_selector(
+            "#bid-panel .counterfactual-card:has-text('at your bid')"
+        )
+
+        text = page.locator("#bid-panel .counterfactual-card").inner_text()
+        assert "$7.4M" in text, (
+            f"the verdict is not conditioned on the bid that was on the table "
+            f"when Recompute was pressed:\n{text[:300]}"
+        )
+        assert "at market" not in text, "the basis marker still reads as a forecast"
+
+        assert page.locator("#bid-counterfactual").count() == 1, (
+            "the recompute swap consumed the mount — the bid panel's lazy load "
+            "has nowhere to land on the next whole-panel swap"
+        )
+        assert page.locator("#bid-panel .counterfactual-card").count() == 1, (
+            "the card was nested inside itself rather than replaced"
+        )
+
+
 class TestTheAssignClickSurvives:
     """The blur race, at the speed that made it dangerous.
 

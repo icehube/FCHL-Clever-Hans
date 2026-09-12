@@ -20,6 +20,94 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-12]
+
+### Added
+
+- **A Recompute button on the bid panel's counterfactual, so the card can be
+  re-solved at the price actually on the table.** Filed 2026-08-06 as an owner
+  finding and deferred "pending draft-day experience"; the owner asked for the
+  button on 2026-09-12, which is the trigger the entry named.
+
+  The card auto-loads at `_cf_price` — the market price, a *forecast* of the
+  clearing price — and that is what makes it cacheable per state epoch. It is
+  also what makes it go quietly out of date: bidding climbs, the forecast does
+  not move, and the verdict keeps answering a question about a price nobody is
+  offering any more. Re-solving it automatically is the one thing that must not
+  happen. Two MILP solves is ~200ms, and `bid_panel.html`'s own comment
+  records why that number is dangerous on this panel: a response landing
+  between mousedown and mouseup reflows the Assign button out from under the
+  pointer.
+
+  So `GET /explain/{player}` takes an optional `price=`, and the button asks
+  for it. Five things are load-bearing and each carries its comment:
+
+  - **The price goes through `_legal_salary`**, the same clamp-and-quantize the
+    typed salary fields use. The bid box auto-submits whatever was typed, so
+    the button can be handed a fat-fingered `46` or a `2.5476`; a verdict
+    reading "Skip him at $46.0M" would be conditioned on a price the CBA has no
+    room for. That quantization also keeps the cache key dense.
+  - **`_counterfactual_cache` is keyed on `(name, price)`**, not on the name. A
+    name-only key hands the second price the first price's answer while the
+    card quotes the second — a confident wrong number on the bidding path.
+    `_recompute()` still clears the whole dict, so the epoch semantics are
+    unchanged; the bound widens from "players bid on since the last sale" to
+    "players × deliberate clicks", which is still tiny because every entry
+    costs a click and two solves.
+  - **The button exists only in the bid panel's mount** (`cf_inline`). The
+    standalone `#explanation` mount is opened from the players table for an
+    arbitrary player, where `#bid-price` holds the price of somebody else
+    entirely. An undefined `cf_inline` is falsy in Jinja, so the fail-safe
+    direction is "no button" rather than one reading the wrong input.
+  - **`hx-target="closest .counterfactual-card"`, never `#bid-counterfactual`.**
+    The body is mounted twice and carries no id of its own — the rule the close
+    button already follows — and targeting the card means a response with no
+    card removes the card and leaves the mount standing. An `outerHTML` swap
+    into the mount consumes it, which is the `#bid-advice` failure: a target
+    that vanishes with its contents can be swapped exactly once, and nothing on
+    screen says so.
+  - **The price is read out of `#bid-price` when the request is built**, not
+    captured at render time. `change` on a number input fires on blur, so
+    pressing Recompute right after typing a price starts a `/bid-check`
+    re-render; a value snapshotted at the last render would re-solve at the
+    PREVIOUS price and quote it confidently.
+
+  The card also carries a one-word basis marker — `at market` / `at your bid` —
+  with a native `title`, never a DaisyUI `data-tip`: this body is mounted inside
+  panels that scroll, and a bubble in a horizontal scroller is clipped with no
+  flip logic to save it. Same job as `#proj-basis` on the Proj column, for the
+  same reason: the verdict names the dollars either way, so without the marker
+  the two cards are indistinguishable at a glance, and mid-auction the thing
+  worth knowing is whether you are reading a forecast or the table.
+
+  **What it deliberately does not do.** It does not re-sharpen on its own, and
+  the next whole-panel swap (a bidder toggle) reloads the card at the market
+  price. That is honest rather than stale, because the verdict sentence names
+  the price it was solved at and the marker names the basis — the operator can
+  always see which question was answered.
+
+  Seven endpoint tests in `tests/test_counterfactual_cache.py`
+  (`TestRecomputingAtTheLiveBid`) and one browser test
+  (`TestRecomputeUsesThePriceOnTheTable`). Nine mutants were run and all nine
+  died, including the two that matter most: quoting the asked price while
+  solving at the market one — caught by `test_a_higher_price_can_only_be_worse`,
+  which asserts the property rather than the string, since the figure on screen
+  comes from `cf_price` and not from the solution — and swapping the mount
+  instead of the card, which only the browser can see. One mutant did not apply
+  on its first run (`{% if cf_inline %}` matches two sites now, the gate and the
+  marker's tooltip) and was re-run with a unique anchor; a mutant that applies
+  to nothing prints green.
+
+### Changed
+
+- **`TestExplain::test_both_mounts_carry_a_close_button` now bans
+  `getElementById` in the click handlers rather than anywhere in the body.** The
+  blanket ban was correct when the card's only script was its close button;
+  the Recompute button reads `#bid-price` by id when it builds its request, so
+  the guard as written would have had to be deleted to let the feature through
+  — taking the close-by-id check with it. Verified by mutation that the
+  narrowed version still catches a close button resolving by id.
+
 ## [2026-09-11]
 
 ### Removed
@@ -2564,7 +2652,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1437 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1465 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -2669,7 +2757,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1437 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1465 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

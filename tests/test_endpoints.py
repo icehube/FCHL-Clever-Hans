@@ -984,7 +984,13 @@ class TestExplain:
             body = client.get(url).text
             assert "counterfactual-card" in body, url
             assert "this.closest('.counterfactual-card')" in body, url
-            assert "getElementById" not in body, (
+            # Scoped to the CLICK HANDLERS, not to the whole body: the inline
+            # mount's Recompute button legitimately reads #bid-price by id when
+            # it builds its request, and a blanket ban on the string would have
+            # to be deleted to let that through — taking this guard with it.
+            clicks = re.findall(r'onclick="([^"]*)"', body)
+            assert clicks, f"{url} renders no click handler at all"
+            assert not any("getElementById" in js for js in clicks), (
                 f"{url} closes by id — mounted twice, so that removes the FIRST "
                 f"counterfactual in the document, not the one clicked"
             )

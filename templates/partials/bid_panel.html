@@ -127,7 +127,6 @@
             <button type="button" class="btn btn-xs btn-ghost px-1" aria-label="Raise the bid by $0.1M" onclick="adjustPrice(0.1)">+</button>
         </div>
         <input type="hidden" name="bidders" id="bidders-hidden" value="{{ active_bidders|join(',') if active_bidders is defined else default_bidders }}">
-        <input type="hidden" name="highest_bidder" id="highest-bidder-hidden" value="{{ highest_bidder if highest_bidder is defined else '' }}">
     </form>
 
     {# Bidder grid: every non-done team (including BOT). Click toggles active. #}

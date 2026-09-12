@@ -1432,7 +1432,6 @@ async def bid_check(
     player: str = Form(...),
     bidders: str = Form(""),
     price: float = Form(0.5),
-    highest_bidder: str = Form(""),
 ):
     """Live bidding: get bid recommendation."""
     p = auction_state.available_players.get(player)
@@ -1465,15 +1464,30 @@ async def bid_check(
         # WIN verdict there would be nonsense.
         winner = bid_winner(bidder_list, auction_state.teams)
         live_ceil = compute_live_ceiling(bidder_list, auction_state.teams)
+        # The bidder identities are DERIVED here, not taken from the request.
+        # `highest_bidder` used to arrive as a form field that no JavaScript
+        # ever wrote, so it was permanently "" -> None while `demand_count`
+        # right below said there were bidders — and `highest_bid` carried the
+        # ceiling, which is the SECOND-highest max whenever BOT is only
+        # observing, so it did not describe `highest_bidder` either.
+        #
+        # Nothing outside tests reads any of the three, which is exactly why
+        # they have to be right: an inconsistent MarketInfo is a trap for
+        # whoever reads one next. Same reasoning `floor_demand` carries, and
+        # the same convention compute_market_ceiling uses — sort the eligible
+        # opponents by physical max, descending, and take the first two.
+        ranked = sorted(
+            ((code, auction_state.teams[code].physical_max_bid) for code in opponents),
+            key=lambda x: -x[1],
+        )
         live_info = MarketInfo(
             market_ceiling=live_ceil,
-            highest_bidder=highest_bidder or None,
-            highest_bid=live_ceil,
-            second_bidder=None,
+            highest_bidder=ranked[0][0] if ranked else None,
+            highest_bid=ranked[0][1] if ranked else 0.0,
+            second_bidder=ranked[1][0] if len(ranked) > 1 else None,
             demand_count=len(opponents),
             # Keep compute_market_ceiling's invariant: no demand means the
-            # player goes for the floor. Nothing reads it off this path today,
-            # but an inconsistent MarketInfo is a trap for whoever does next.
+            # player goes for the floor.
             floor_demand=not opponents,
         )
     else:
@@ -1493,7 +1507,6 @@ async def bid_check(
     ctx["bid_price"] = price
     ctx["active_bidders"] = bidder_list
     ctx["bid_winner"] = winner
-    ctx["highest_bidder"] = highest_bidder
     chart = _chart_context(player)
     if chart is not None:
         ctx.update(chart)

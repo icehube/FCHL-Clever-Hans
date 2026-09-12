@@ -22,6 +22,61 @@ rediscover the same non-problem.
 
 ## [2026-09-11]
 
+### Removed
+
+- **`/bid-check`'s `highest_bidder` form field, which was dead and looked
+  load-bearing.** Filed 2026-09-10 while answering "does it matter whose turn
+  it is to bid", deferred then as out of scope, and closed now. The field was a
+  closed loop: `bid_panel.html` rendered a hidden input from
+  `ctx["highest_bidder"]`, `/bid-check` read the form value straight back into
+  that same context key, and **no JavaScript anywhere wrote it** — `shortcuts.js`
+  never names it — so it arrived as `""` on every request the app has ever
+  made. It then became `MarketInfo.highest_bidder`, which `optimizer.py` does
+  not contain the string for: `compute_bid_recommendation` never read it.
+
+  **Why it was worth removing rather than leaving inert.** A `highest_bidder`
+  parameter on the bidding endpoint reads as though the advisor tracks who is
+  currently winning, which is exactly the trap the nomination turn had been —
+  a feature that looked load-bearing, gated nothing, and took a full audit to
+  disprove. `MarketInfo.highest_bidder` itself stays: `compute_market_ceiling`
+  populates it honestly and `tests/test_market.py` asserts on it. This was the
+  form field and its hidden input, four sites plus nine test payloads.
+
+### Fixed
+
+- **The live `MarketInfo` built by `/bid-check` now describes the bidders it
+  was given.** Removing the form field forced the question of what the
+  constructor should take instead, and the honest answer was not `None`.
+  Three of its fields were wrong on that path and had been all along:
+  `highest_bidder` was permanently `None` while `demand_count` in the same
+  struct said there were bidders; `highest_bid` carried the *ceiling*, which is
+  the SECOND-highest opponent max whenever BOT is only observing, so it did not
+  describe `highest_bidder` even when that was set; and `second_bidder` was a
+  flat `None`. They are now derived at the call site with
+  `compute_market_ceiling`'s own convention — sort the eligible opponents by
+  physical max descending, take the first two, and fall back to
+  `None`/`None`/`0.0` when there are none.
+
+  **Nothing outside tests reads any of the three, which is the reason to fix
+  them rather than the reason not to.** That is the reasoning the neighbouring
+  `floor_demand` comment already carried — an inconsistent `MarketInfo` is a
+  trap for whoever reads one next — and it was being applied to one field of
+  six. No behaviour changes: `compute_bid_recommendation` takes
+  `market_ceiling` and `floor_demand`, neither of which moved.
+
+  **The first version of the guard was equivalent-mutant green, and the data is
+  why.** Every team sits at `physical_max_bid == MAX_SALARY` on a fresh league,
+  so "richest named bidder" and "poorest named bidder" are the same team:
+  reversing the sort order passed all three tests. The suite now gives each of
+  three opponents one max-salary pick to separate their budgets, asserts the
+  three maxes are **distinct** as an explicit precondition (a refreshed
+  `players.csv` moves the keeper salaries this relies on, and the failure says
+  so), and reads the expected ordering off live state rather than hard-coding
+  it. Three mutants die: reverting to always-`None`, sorting ascending, and
+  putting `highest_bid` back to the ceiling. The fields never reach the
+  response, so the tests capture the struct by patching
+  `main.compute_bid_recommendation`.
+
 ### Added
 
 - **A Clear control on the nomination panel.** `/nominate` returned an RFA and

@@ -27,7 +27,7 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 - [2026-09-11] [grill] `tests/test_browser_ui.py:1196 (test_no_tooltip_renders_outside_the_scrollable_content)` — **the `counted >= 10` floor now sits at exactly 10**, with zero slack: the 2026-09-11 removal of the league-table `data-tip` took the measured count from 11 to 10, so the next tooltip deleted anywhere in the app fails this rather than the named `required` inventory, and the failure message ("the page must render the bid panel's four and the team panel's stat tiles") will not describe what actually happened — deferred because that is the tripwire working as designed and the STATES are deterministic, so it is not flaky; revisit only if a legitimate removal trips it, at which point the fix is to re-derive the floor from the `required` inventory rather than to lower a magic number
 
-- [2026-09-11] [grill] `main.py:1762 (trade_execute)` — **a trade whose form
+- [2026-09-11] [grill] `main.py:1773 (trade_execute)` — **a trade whose form
   has been edited since the evaluate is still executable if JavaScript does not
   run.** `/trade-execute` posts only `trade_id` and acts on the server's
   `last_trade_eval`, so the *only* thing standing between a modified selection
@@ -39,19 +39,6 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
   means posting the give/receive lists to `/trade-execute` and comparing them to
   `last_trade_eval`, which is a second serialisation of the receive side (JSON
   blobs) purely to re-derive something the server already knows.
-
-- [2026-09-10] [owner-question] `main.py:1435 (bid_check)` — **the
-  `highest_bidder` form field is dead and looks load-bearing.** Surfaced while
-  answering "does it matter whose turn it is to bid": no JavaScript ever writes
-  it (`bid_panel.html`'s hidden input is round-tripped from `ctx` and
-  `shortcuts.js` never touches it, so in practice it is always `""`), it lands
-  in `MarketInfo.highest_bidder`, and `compute_bid_recommendation` never reads
-  that field. `compute_market_ceiling` *does* populate it and `tests/test_market.py`
-  asserts on it, so the dataclass field stays either way — this is about the
-  form field and its hidden input. Deferred because removing it edits eight
-  `tests/test_endpoints.py` payloads for no behavioural change, and it was out
-  of scope for a question about turn order.
-
 
 - [2026-09-10] [design-review] `state.py:810 (_searchable)` — **two different
   people sharing one name yield one search hit, and the pool copy is the one
@@ -97,10 +84,12 @@ reproduced at that moment — but four were closed later the SAME DAY by the wor
 that followed (`d89e4ba` the `nhl_logo_src` UTA case, `8ca89f4` `_driver_rows`
 and `floor_logit_delta`, `5b8aacc` the Tailwind Play question), taking it to
 fifteen, and the grill that closed that day's batch filed one more — so the
-list is **sixteen**. Re-audited 2026-09-11 end to end: all still reproduce, all
-`file:line (symbol)` references still resolve, and nothing in the file has
-already been fixed. Keep the count and the file in step: it has now been wrong
-twice, both times because an entry was added without the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
+list went to sixteen — and the dead `highest_bidder` form field was removed
+the same day, so it is **fifteen**. Re-audited 2026-09-11 end to end: all still
+reproduce, all `file:line (symbol)` references still resolve, and nothing in
+the file has already been fixed. Keep the count and the file in step: it has
+now been wrong three times, every one of them an entry added or closed without
+the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
 four regions now, not three; `bid_limits` is 705 rows, not 704; the exact
 standings entry under **Ideas** described a button-only feature that had
 auto-solved on every pick since 2026-09-10; and the previous triage note ended

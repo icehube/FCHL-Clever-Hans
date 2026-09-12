@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from config import (
+    MAX_SALARY,
     MIN_SALARY,
     MINOR_CAP_GROUPS,
     MY_TEAM,
@@ -101,7 +102,6 @@ class TestBidCheck:
             "player": pool_top(1)[0],
             "bidders": "SRL,MAC",
             "price": "2.0",
-            "highest_bidder": "SRL",
         })
         assert r.status_code == 200
 
@@ -110,7 +110,6 @@ class TestBidCheck:
             "player": "Nobody",
             "bidders": "",
             "price": "0.5",
-            "highest_bidder": "",
         })
         assert r.status_code == 200
 
@@ -124,7 +123,6 @@ class TestBidCheck:
             "player": pool_top(1)[0],
             "bidders": "BOT",
             "price": "2.5",
-            "highest_bidder": "BOT",
         })
         assert r.status_code == 200
         assert "bid-win" in r.text
@@ -142,7 +140,6 @@ class TestBidCheck:
             "player": pool_top(1)[0],
             "bidders": "BOT,SRL,MAC",
             "price": "2.5",
-            "highest_bidder": "SRL",
         })
         assert r.status_code == 200
         assert "bid-win" not in r.text
@@ -161,7 +158,6 @@ class TestBidCheck:
                 "player": pool_top(1)[0],
                 "bidders": "BOT,HSM",
                 "price": "2.5",
-                "highest_bidder": "BOT",
             })
             assert r.status_code == 200
             assert "bid-win" in r.text, "should be a WIN — HSM cannot raise the price"
@@ -186,7 +182,6 @@ class TestBidCheck:
             "player": pool_top(1)[0],
             "bidders": ",".join(codes),
             "price": str(MIN_SALARY),
-            "highest_bidder": main.MY_TEAM,
         })
         # `data-team` exists only on the bidder grid's buttons, and the grid ships
         # with the advice — a fresh GET / has no bidding session to render one.
@@ -211,7 +206,6 @@ class TestBidCheck:
             "player": pool_top(1)[0],
             "bidders": "BOT",
             "price": "11.4",
-            "highest_bidder": "BOT",
         })
         assert r.status_code == 200
         assert "bid-drop" in r.text
@@ -242,7 +236,6 @@ class TestAssignSalaryIsLive:
                 "player": pool_top(1)[0],
                 "bidders": "BOT,HSM",
                 "price": "2.5",
-                "highest_bidder": "BOT",
             })
             assert r.status_code == 200
             assert 'name="team" value="BOT"' in r.text, "Assign form must render"
@@ -1270,7 +1263,7 @@ class TestPlayerChart:
         name = pool_top()[0]
 
         r = client.post("/bid-check", data={
-            "player": name, "bidders": "SRL", "price": 1.0, "highest_bidder": "",
+            "player": name, "bidders": "SRL", "price": 1.0,
         })
 
         assert "Price Model" in r.text, "the inline chart did not render"
@@ -5926,6 +5919,131 @@ class TestTheStandingsResolveThemselvesAfterAPick:
         only on a pick, and every other mutation still degrades the column."""
         assert 'hx-get="/solve-standings"' in section_of(
             client.get("/").text, "league-state"
+        )
+
+
+class TestTheLiveMarketInfoDescribesTheNamedBidders:
+    """The bidder triple on /bid-check's MarketInfo is derived, and consistent.
+
+    It used to come from a `highest_bidder` form field that no JavaScript ever
+    wrote, so it arrived as "" on every request and became None while
+    `demand_count` in the same struct said there were bidders. Nothing outside
+    tests reads any of the three fields — which is why they need a guard rather
+    than why they do not: the comment in `bid_check` asserts they are right for
+    whoever reads one next, and a comment is not an assertion.
+
+    Captured through a patch because the fields never reach the response.
+
+    THE BUDGETS HAVE TO BE MADE UNEQUAL FIRST. Every team sits at
+    `physical_max_bid == MAX_SALARY` on a fresh league, so "richest named
+    bidder" and "poorest named bidder" are the same team and a sort-order
+    mutant is equivalent — measured, reversing the sort passed the first draft
+    of this class. One max-salary pick each separates them, and the ordering is
+    read off live state rather than hard-coded, because `players.csv` is
+    replaced before every draft and the keeper salaries set the starting point.
+    """
+
+    def _capture(self, client, monkeypatch, bidders):
+        import main
+
+        seen = {}
+        real = main.compute_bid_recommendation
+
+        def spy(*args, **kwargs):
+            # live_info is positional arg 5 at the one call site.
+            seen["info"] = args[4]
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(main, "compute_bid_recommendation", spy)
+        name = next(iter(main.auction_state.available_players))
+        r = client.post("/bid-check", data={
+            "player": name, "bidders": ",".join(bidders), "price": "2.0",
+        })
+        assert r.status_code == 200
+        return seen["info"]
+
+    def _three_unequal_opponents(self, client):
+        """Three opponents with strictly different physical maxes, richest first."""
+        import main
+
+        opponents = [c for c in main.auction_state.nomination_order
+                     if c != main.MY_TEAM][:3]
+        pool = iter(list(main.auction_state.available_players))
+        for code in opponents:
+            assign(client, next(pool), code, MAX_SALARY)
+
+        maxes = {c: main.auction_state.teams[c].physical_max_bid for c in opponents}
+        ranked = sorted(opponents, key=lambda c: -maxes[c])
+        assert len(set(maxes.values())) == 3, (
+            f"the three opponents' physical maxes are not distinct ({maxes}) — "
+            f"a refreshed pool moved the keeper salaries this arrangement "
+            f"relies on, so richest and poorest may now be the same team and "
+            f"the sort order below would be untestable"
+        )
+        assert all(v >= MIN_SALARY for v in maxes.values()), (
+            f"an opponent was priced out entirely ({maxes}); live_opponents "
+            f"would drop them and this tests a shorter list than it means to"
+        )
+        return ranked, maxes
+
+    def test_the_highest_bidder_is_the_richest_named_opponent(
+        self, client, monkeypatch
+    ):
+        ranked, maxes = self._three_unequal_opponents(client)
+        info = self._capture(client, monkeypatch, ranked)
+
+        assert info.highest_bidder == ranked[0], (
+            f"the live MarketInfo named {info.highest_bidder} as highest "
+            f"bidder; the richest of {maxes} is {ranked[0]}. It is derived "
+            f"from the named bidders' physical max, not taken from the request"
+        )
+        assert info.highest_bid == pytest.approx(maxes[ranked[0]]), (
+            "highest_bid must be THAT team's max, not the ceiling — the "
+            "ceiling is the SECOND-highest whenever BOT is only observing"
+        )
+        assert info.second_bidder == ranked[1], (
+            f"second_bidder is {info.second_bidder}, not {ranked[1]}"
+        )
+        assert info.demand_count == 3
+
+    def test_the_order_the_bidders_were_named_in_does_not_matter(
+        self, client, monkeypatch
+    ):
+        """Identity enters only as a way to look up a budget (pricing-pipeline)."""
+        ranked, _ = self._three_unequal_opponents(client)
+        forward = self._capture(client, monkeypatch, ranked)
+        reverse = self._capture(client, monkeypatch, list(reversed(ranked)))
+
+        assert forward.highest_bidder == reverse.highest_bidder
+        assert forward.second_bidder == reverse.second_bidder
+        assert forward.highest_bid == pytest.approx(reverse.highest_bid)
+
+    def test_a_lone_bot_bidder_names_nobody(self, client, monkeypatch):
+        """BOT is excluded, so toggling only BOT leaves no opponent to name."""
+        import main
+
+        info = self._capture(client, monkeypatch, [main.MY_TEAM])
+        assert info.highest_bidder is None
+        assert info.highest_bid == 0.0
+        assert info.second_bidder is None
+        assert info.demand_count == 0
+        assert info.floor_demand is True, (
+            "no eligible opponent means the player goes for the floor — the "
+            "invariant compute_market_ceiling keeps"
+        )
+
+    def test_the_form_field_is_gone_and_is_not_required(self, client):
+        """Posting without it must work; the hidden input must not come back."""
+        import main
+
+        name = next(iter(main.auction_state.available_players))
+        r = client.post("/bid-check", data={
+            "player": name, "bidders": "", "price": "0.5",
+        })
+        assert r.status_code == 200
+        assert "highest_bidder" not in r.text, (
+            "the dead hidden input is back in the bid panel — it round-trips "
+            "a value nothing writes and nothing reads"
         )
 
 

@@ -95,10 +95,12 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 rather than the prose. Nothing was closed by the walk — all nineteen findings
 reproduced at that moment — but four were closed later the SAME DAY by the work
 that followed (`d89e4ba` the `nhl_logo_src` UTA case, `8ca89f4` `_driver_rows`
-and `floor_logit_delta`, `5b8aacc` the Tailwind Play question), so the list is
-**fifteen** now. Re-audited 2026-09-11 end to end: all fifteen still reproduce,
-all fifteen `file:line (symbol)` references still resolve, and nothing in the
-file has already been fixed. The walk also corrected four claims: `.table-scroll-x` is
+and `floor_logit_delta`, `5b8aacc` the Tailwind Play question), taking it to
+fifteen, and the grill that closed that day's batch filed one more — so the
+list is **sixteen**. Re-audited 2026-09-11 end to end: all still reproduce, all
+`file:line (symbol)` references still resolve, and nothing in the file has
+already been fixed. Keep the count and the file in step: it has now been wrong
+twice, both times because an entry was added without the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
 four regions now, not three; `bid_limits` is 705 rows, not 704; the exact
 standings entry under **Ideas** described a button-only feature that had
 auto-solved on every pick since 2026-09-10; and the previous triage note ended

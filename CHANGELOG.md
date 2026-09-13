@@ -20,6 +20,127 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-13]
+
+### Added
+
+- **`tests/measure_replay.py` — replay a finished draft and measure what the
+  ceiling did to the whole POOL.** `measure_spend.py` was written in August for
+  exactly the question `BACKLOG.md` had parked on "needs a real draft's
+  numbers", and it could not answer it. It reads `market_price < model_price`
+  off the transaction log, so it speaks only for players who **sold** — but the
+  MILP plans over everything still available, so the ceiling can be cutting six
+  unsold stars for fifty picks and that file correctly reports nothing.
+  `measure_ceiling.py` measures the pool-wide quantity but only over an auction
+  it simulates itself. Real draft, whole pool, was the missing corner.
+
+  The instrument rebuilds the starting state from the pool CSV and drives it
+  through the saved log, sampling `market.compute_market_ceiling` before every
+  pick. Four things are load-bearing:
+
+  - **The change log is not optional and omitting it fails silently.**
+    `team-done` moves teams in and out of the set the ceiling reads — the
+    2026-09-13 draft flipped it 19 times, four of them back to *still
+    drafting*, which is why the reconstructed ceiling rises at four points — and
+    `move-to-minors` changes `total_spots_remaining`, hence `physical_max_bid`.
+    Transactions alone give a different ceiling and no error.
+  - **Descriptions are parsed, which couples the file to `main._log_change`'s
+    wording.** `ChangeRecord` has no player field; the name exists only inside a
+    human sentence. `adjust-salary` is the trap — it contains ` → ` like the
+    other four grammars, so the obvious `rsplit` returns the name with the old
+    salary glued on, and the draft contains zero of those records, so the data
+    cannot catch it. `test_the_descriptions_main_emits_still_parse` walks
+    `main.py`'s ast and compares the f-strings' constant fragments instead.
+  - **Two self-checks, printed unconditionally.** Every drafted player's model
+    price recomputed from the pool must equal what the app logged at the time
+    (exact on all 139), and every team's final roster, minors and budget must
+    equal the saved end state (all eleven match). Being pointed at the wrong CSV
+    is the likeliest failure, and a pool-size count does not catch it — several
+    wrong pools have the right length — while a per-player price comparison
+    does. The fidelity block prints even when it passes, because a check nobody
+    sees is a check nobody trusts.
+  - **The sensitivity sweep ships with the number.** See the *Investigated*
+    entry below for why a result measured on `players-25.csv` needs one.
+
+  Nine mutants, nine dead — including counting only the player who sold,
+  dropping the change log, a raw `>` in place of `market.is_capped`, a
+  `ceiling_steps` that records only falls, a `fidelity` that ignores the budget,
+  and rewording the minors description in `main.py`. It never imports `main`, so
+  it cannot touch `STATE_DIR`; it does import the engine, which
+  `measure_spend.py` deliberately does not, and its docstring says so rather
+  than letting the next reader assume the stronger guarantee carried over.
+
+### Investigated
+
+- **The planning ceiling is inert, measured over a real 139-pick draft — and the
+  entry stays closed with `min(model_price, market_ceiling)` untouched.** Filed
+  2026-08-16 as an open design question: `compute_market_ceiling` is
+  second-highest-of-ten, two rich teams pin it at `MAX_SALARY`, and the two
+  simulated spending models were so far apart (0 of 165 binds when buyers pay
+  the tool's own market price, 122 of 165 when they pay what the reserve rule
+  allows) that the entry could only say "a real draft's spending decides it".
+
+  The owner ran one on 2026-09-12/13. **The ceiling capped nothing, on any pick,
+  pool-wide**: 0 of 139, and not merely 0 among the players who sold.
+
+  | | picks | ceiling below `MAX` | changed a price | cap unspent |
+  |---|---|---|---|---|
+  | pay the market price (sim) | 165 | 0 | 0, never | 18% |
+  | pay what the reserve allows (sim) | 165 | 133 | 122, from pick 44 | 0% |
+  | **the real draft** | **139** | **76** | **0, never** | **2.0%** |
+
+  The real row is the one that separates those two columns hardest. The ceiling
+  stepped `11.4M@1 -> 10.3M@64 -> 7.4M@69 -> 6.7M@78 -> 6.2M@81 -> 4.5M@91 ->
+  ... -> 1.3M@139`, so it was **below the cap on 76 of 139 picks and still
+  changed nothing** — the "133 overstates when the layer started mattering"
+  lesson in its extreme form. By the time the ceiling descended past $6M at pick
+  78, a top-down draft had already sold everyone it would have caught.
+
+  **The entry predicted "somewhere between" the two simulations and it landed
+  past the far end.** That is the part worth keeping, because the obvious
+  reading of *why* is wrong: the league did not underspend. It finished with
+  **2.0%** of the cap unspent, every team at 24 players, and paid **$308.0M
+  against a model total of $242.9M**. Spending hard does not bind a
+  second-highest-of-ten ceiling; only two teams going broke does, and in a draft
+  where everyone fills a roster nobody is broke until the end, when what is left
+  is cheap anyway.
+
+  **It is not inert by a mile, and the sweep is why that is quotable.** Median
+  headroom over the dearest player still in the pool was **2.16x**, worst
+  **1.01x** at the final pick, under 2x on 45 picks. And the pool prices low:
+  `players-25.csv` carries no prior salary on any of its 649 biddables, so
+  `has_lag` is 0 pool-wide and the model's top compresses to **$6.40M** against
+  the live `players.csv`'s **$11.36M** (p99 $5.00M against $6.76M, 324 of 705
+  players with a lag against none). Scaling every model price by 1.77x to match
+  that top, the ceiling would have capped something on **32 of 139** picks
+  (first at 69) — but at most **5 of ~580** pool prices at once. So the
+  magnitude survives the compression, which is what makes the decision safe on a
+  rehearsal pool.
+
+  Owner decision 2026-09-13: keep `min(model_price, market_ceiling)`, file no
+  demand-aware replacement. Being inert for planning is not a defect — it is a
+  safety rail that costs one `min()` — and the ceiling that does the work is the
+  **live** one, a different computation over a different set, which
+  `compute_live_ceiling` puts below `MAX_SALARY` in 7 of 10 single-rival
+  matchups by mid-draft.
+
+  **What must not be read out of this draft.** The +26.8% overspend is *not*
+  evidence about the price model and closes nothing under *Price model (Layer
+  1)*. With `has_lag = 0` pool-wide the model's own predictions are known to
+  compress at the top, and this pool's prices sum to **$505M** against a league
+  cap of **$624.8M** — the money had to end up somewhere above the model.
+  Neither is the per-third shape (1.29x / 1.36x / 0.99x) an "auction position
+  effect": the last third is not cheap because late picks are overvalued, it is
+  cheap because the money is gone.
+
+  The entry also leaves a lesson about its own deferral. Its condition had been
+  "run `tests/measure_spend.py` after the draft" since August, and that file
+  cannot see the quantity the entry is about. **When an entry names the
+  instrument that will close it, check the instrument measures the entry's
+  quantity** — this one was satisfiable by a reader that could not answer it,
+  and nobody noticed for four weeks. `tests/measure_replay.py` is the fix.
+
+
 ## [2026-09-12]
 
 ### Added

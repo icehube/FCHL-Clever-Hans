@@ -53,7 +53,11 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
   the fix changes the index value to a list, which moves `total`, the tier
   ranking and four tests. `players.csv` is replaced before every draft and the
   next projection refresh removes that cover, so re-check this at refresh time
-  rather than waiting for it to be reported.
+  rather than waiting for it to be reported. Re-checked 2026-09-13 against the
+  pool a full draft was actually run on (`players-25.csv`): **0** pool/roster
+  name collisions and 0 zero-point pool players, so it did not reproduce there
+  either — which is a second pool agreeing, not evidence the bug is gone. The
+  trigger stays the refresh.
 
 - [2026-09-07] [nhl-team-join] `data/players.csv` (data, no symbol — line numbers
   drift on every refresh) — **15 player names are corrupted by two careless
@@ -89,11 +93,11 @@ the same day, so it was **fifteen**. **2026-09-12 took it to twelve**: the
 owner walked the draft-day items and answered all of them — the stale
 counterfactual was closed by building the Recompute button, and the cold
 `/bid-check` and the opponent-edit exposure were closed as decisions
-(`CHANGELOG.md`). Re-audited 2026-09-11 end to end: all still
-reproduce, all `file:line (symbol)` references still resolve, and nothing in
-the file has already been fixed. Keep the count and the file in step: it has
-now been wrong three times, every one of them an entry added or closed without
-the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
+(`CHANGELOG.md`). **2026-09-13 took it to eleven**: the owner ran a full
+139-pick draft and the planning-ceiling entry, the only one genuinely waiting on
+an auction rather than on an opinion, closed on the numbers it asked for. Keep
+the count and the file in step: it has now been wrong three times, every one of
+them an entry added or closed without the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
 four regions now, not three; `bid_limits` is 705 rows, not 704; the exact
 standings entry under **Ideas** described a button-only feature that had
 auto-solved on every pick since 2026-09-10; and the previous triage note ended
@@ -101,19 +105,26 @@ auto-solved on every pick since 2026-09-10; and the previous triage note ended
 draft-day items were filed.
 
 **What the shape of this list means.** Most of what is below is parked on a
-**reason that has to expire before the entry is actionable**, and the reason is
-usually *a real draft*. **Three of those four expired on 2026-09-12**, when the
-draft-day list was put to the owner directly rather than waiting for the draft
-to produce an opinion: the stale counterfactual became a feature, and the
-cold-`/bid-check` stall and the opponent-edit exposure became decisions. What
-is left on that footing is the **planning ceiling**, which is the one that
-genuinely needs the numbers a real auction produces — `tests/measure_spend.py`
-reads them back off the transaction log, so the instruction is "run the reader
-after the draft". Two more are parked on the next `players.csv` refresh. So a
-quiet backlog here does not mean a healthy one — it means the cheap items are
-gone and what is left is waiting on events. **Asking is also a way to expire
-one**, which is what 2026-09-12 measured: four of seven draft-day items needed
-a sentence from the operator, not an auction.
+**reason that has to expire before the entry is actionable**, and the reason was
+usually *a real draft*. **That whole class is now empty.** Three of the four
+expired on 2026-09-12, when the draft-day list was put to the owner directly
+rather than waiting for the draft to produce an opinion; the fourth — the
+planning ceiling — expired on 2026-09-13 when the draft was actually run and
+`tests/measure_replay.py` answered it at **0 of 139 picks**. What is left is
+parked on two different kinds of thing: the next `players.csv` refresh (two
+entries), and ordinary cost-versus-benefit. **Asking is a way to expire one and
+so is doing it**, and the ratio is worth knowing — four of seven draft-day items
+needed a sentence from the operator, one needed the auction, and the auction
+then took eleven hours and produced a single closed entry.
+
+The lesson the ceiling entry leaves behind is about the *instrument*, not the
+answer. It had been parked since 2026-08-16 on "needs a real draft's numbers",
+and `tests/measure_spend.py` was written in August specifically to read them
+back — but it reads the transaction log, which only contains players who
+**sold**, while the question was about the prices the MILP plans over. The
+entry's condition was satisfiable by a file that could not actually answer it,
+and nobody noticed for four weeks. **When an entry names the instrument that
+will close it, check that the instrument measures the entry's quantity.**
 
 **Trust the measurements, not the deferral reasons.** Three entries have now been
 found deferred on a diagnosis that was wrong rather than merely stale: one
@@ -126,7 +137,6 @@ hypothesis unless it says what was measured.
 
 ### engine/market
 
-- [2026-08-16] [investigation] market.py:43 (compute_market_ceiling) — **the planning ceiling is second-highest-of-ten, and two rich teams pin it at `MAX_SALARY` for as long as they stay rich.** Open design question, **not a correctness bug**: `min(model_price, market_ceiling)` is never *wrong*, it is only sometimes inert. Measured 2026-08-16 with `tests/measure_ceiling.py` over a full 165-pick auction, and the two spending models are far apart — buyers paying the tool's own market price never bind it (0/165 picks, 18% of the league cap unspent, three teams — JHN $19.8M, GVR $14.1M, VPP $12.0M — finishing above the line the rule needs two of), buyers paying what the reserve rule allows bind it on 133/165, stepping `11.4M@1 -> 7.3M@33 -> 4.5M@41 -> 0.5M@44` (1-based ordinals; the instrument printed 0-based indices until 2026-08-17). So the layer works as designed and the question is empirical: a real draft's spending decides whether Layer 2 contributes anything to *planning*, and if it lands near the model-price end, a demand-aware price (how many teams need the position, how much money is chasing this tier) would do more than a ceiling nobody reaches. Deferred because changing how planning prices are derived moves every bid recommendation in the tool and there is a draft coming. **The blocker is no longer collection** — `TransactionRecord` has logged `model_price` and `market_price` on every pick all along, and `tests/measure_spend.py` (2026-08-17) reads them back, so the condition on this entry is now "run the reader after the draft", not "find a way to get the numbers". Note the reader measures the sharper quantity: `market_price < model_price` (the ceiling changed a planning price) rather than `ceiling < MAX_SALARY`. On the drain run those are 122 and 133, and the 122 all start at pick 44 when the ceiling hit the floor — the intermediate steps capped nothing. The threshold is pinned meanwhile by `tests/test_market.py::TestWhenTheCeilingLeavesTheCap`. Note this is the **idle** ceiling only; the live one the advisor uses is below `MAX_SALARY` in 7/10 single-rival matchups by mid-draft and needs nothing. As of 2026-08-18 the mid-range case is also **loadable**: `scenarios.load("drained-late-draft")` puts the idle ceiling at $3.3M with 25 of 597 pool prices capped, so the question of what the layer contributes to planning can be looked at on screen rather than only in an instrument — the entry stays open because the condition is still a real draft's spending
 - [2026-07-05] [review] optimizer.py:282 (solve_optimal_roster) — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in `templates/partials/bid_panel.html:15 (milp.status != "Optimal")` so it's no longer silent, and pinned in both directions 2026-08-13 by `tests/test_endpoints.py::TestRenderingWhenTheOptimizerFails`; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — deferred, and **probably not worth building**: measured 2026-08-06, position slack on the live pool is F +333 / D +197 / G +53 against league-wide open needs, so the pool-too-small trigger is unreachable, and the budget-too-tight trigger is unreachable through **bidding** (the commissioner-prevented case, closed 2026-08-06 — see `CHANGELOG.md`) though NOT through play: buyout penalties, `/trade-between` and `/adjust-salary` all raise cap load and warn rather than refuse, and $20.5M of penalties on a fresh BOT reaches it (measured 2026-08-13). Left open only because a future pool could be thinner; re-measure before building anything — and note 2026-08-20 measured the **adjacent** idea, shrinking the pool handed to a solve that is otherwise fine, and found it silently wrong once BOT's budget per open spot drops toward the reserve floor (see the cold-`/bid-check` write-up in `CHANGELOG.md` under 2026-09-12, and `tests/measure_marginal.py --sweep`). That is the same regime this entry is about, so a short-roster path has to be exact rather than a heuristic over "the N players you CAN buy"
 
 
@@ -134,11 +144,11 @@ hypothesis unless it says what was measured.
 
 - [2026-08-13] [grill] templates/partials/league_state.html:61 (table-scroll-x) — **the four `.table-scroll-x` regions cannot be scrolled by keyboard** (no `tabindex`, so they are not focusable; WCAG 2.1.1). Introduced 2026-08-11 with the grid fix, which made the League State and roster tables scroll inside their own panels rather than paint across the next one — so their right-hand columns are now reachable only with a pointer or a trackpad gesture. Deferred deliberately rather than overlooked: `tabindex="0"` on four wrappers adds four tab stops to the panels you tab through while a bid is live, and the draft is a single operator on a mouse. The content is not lost, it is one drag away. Revisit if the draft is ever run from the keyboard, or if a screen reader is ever in play — at which point the fix is `tabindex="0"` plus `role="region"` and an `aria-label` naming the table, not tabindex alone. **Premise confirmed by the owner 2026-09-12** ("I'll be using a mouse"), so the deferral is a decision rather than an assumption — it stays open because it is a real WCAG 2.1.1 gap and the next operator may not be this one
 - [2026-08-08] [review] main.py:164 (_backfill_keeper_flags) — **the backfill repairs the live state but not the undo chain**, so after booting a pre-`is_keeper` save file, undoing back past everything done this session restores minors with no provenance and the next recall of one colours him as a purchase again. `AuctionState._snapshots` is a list of whole JSON documents rather than of dicts, so repairing them from `main.py` means hard-coding a second copy of the state's JSON key names — a wrong key would silently do nothing, which is worse than the bug. Deferred as narrow and cosmetic: it needs a legacy file, an undo past the whole session, and it costs a row colour. If it ever matters, the fix belongs in `state.py` as a `from_json` hook, not here
-- [2026-08-08] [grill] templates/partials/bid_limits.html:64 (tooltip-left) — **8 of the 20 `data-tip` tooltips are never placement-checked**, so the 2026-08-08 CSS block's guarantee is narrower than it reads. `TestTooltipsStayInsideTheirPanel` measures whatever the page renders in one state (fresh reset + live bid) and that is ~12: the five `stop_status` branches are mutually exclusive so only one is ever on screen, the Penalty tile needs `penalties > 0`, and this line — the only `tooltip-left` in the app — renders only when the market ceiling caps a model price, which never happens on a fresh state because every team starts at `MAX_SALARY`. **Not a regression risk from that change**: the global rule is `max-width`, which can only make a bubble narrower and therefore reduce horizontal overflow. The one real exposure is vertical — narrower means taller, and this tooltip is the only one living inside a `.scroll-container` with `overflow-y: auto` — `templates/partials/bid_limits.html:30 (scroll-container)` — which clips. **Partly closed 2026-08-13**: `POST /load-scenario` grew `endgame-ceiling-binds`, and `TestTooltipsStayInsideTheirPanel` now runs against it at 375/1024/1280 with the capped tip required BY NAME, so the `tooltip-left` is placement-checked on the horizontal axis for the first time and passes. The **vertical** exposure this entry predicted is real but bounded, and was measured rather than asserted: the bubble is 99px tall against ~64px rows, so on the last row visible inside the 405px `.scroll-container` it overhangs the bottom edge by **~25px** — and scrolling one row cures it, which is why no assertion was added (a naive check flags every row below the fold as clipped, since an unscrolled row is trivially outside the client box). Still open for the remaining tips: the five `stop_status` branches are mutually exclusive and the Penalty tile needs `penalties > 0`, so ~4 are still never measured. Deferred: each needs its own page state for a cosmetic property
+- [2026-08-08] [grill] templates/partials/bid_limits.html:64 (tooltip-left) — **8 of the 20 `data-tip` tooltips are never placement-checked**, so the 2026-08-08 CSS block's guarantee is narrower than it reads. `TestTooltipsStayInsideTheirPanel` measures whatever the page renders in one state (fresh reset + live bid) and that is ~12: the five `stop_status` branches are mutually exclusive so only one is ever on screen, the Penalty tile needs `penalties > 0`, and this line — the only `tooltip-left` in the app — renders only when the market ceiling caps a model price, which never happens on a fresh state because every team starts at `MAX_SALARY`. **Not a regression risk from that change**: the global rule is `max-width`, which can only make a bubble narrower and therefore reduce horizontal overflow. The one real exposure is vertical — narrower means taller, and this tooltip is the only one living inside a `.scroll-container` with `overflow-y: auto` — `templates/partials/bid_limits.html:30 (scroll-container)` — which clips. **Partly closed 2026-08-13**: `POST /load-scenario` grew `endgame-ceiling-binds`, and `TestTooltipsStayInsideTheirPanel` now runs against it at 375/1024/1280 with the capped tip required BY NAME, so the `tooltip-left` is placement-checked on the horizontal axis for the first time and passes. The **vertical** exposure this entry predicted is real but bounded, and was measured rather than asserted: the bubble is 99px tall against ~64px rows, so on the last row visible inside the 405px `.scroll-container` it overhangs the bottom edge by **~25px** — and scrolling one row cures it, which is why no assertion was added (a naive check flags every row below the fold as clipped, since an unscrolled row is trivially outside the client box). Still open for the remaining tips: the five `stop_status` branches are mutually exclusive and the Penalty tile needs `penalties > 0`, so ~4 are still never measured. Deferred: each needs its own page state for a cosmetic property. **Sharpened 2026-09-13**: this tip needs `market.is_capped` to be true of a pool player, and `tests/measure_replay.py` shows that happened **zero times in a 139-pick draft** — pool-wide, not merely among the players who sold. So it is not an under-measured tooltip, it is one a whole real auction never drew, which is the strongest argument yet that the remaining four are cheaper to delete than to place-check
 
 ### code quality
 
-- [2026-08-06] [grill] main.py:1184 (_context) — every endpoint builds the full context (~8.5ms, including a `bid_limits` list of the whole pool — 705 rows today — for the available-players table) regardless of how small a fragment it renders. `/bid-check`, `/nominate` and now `/explain?inline=1` reference a handful of its 23 keys and none touches `bid_limits`. `/explain` made this sharper on 2026-08-06: it fires on every bidder toggle and its warm response is ~9ms, essentially all of it this context build for a fragment that uses three keys. Pre-existing — the old whole-panel `auction_control.html` didn't use it either — but the 2026-08-06 panel split made fragments narrower and the waste correspondingly larger. Deferred: small next to the binary search over MILP solves that dominates `/bid-check`, and fixing it properly means a per-panel context builder, which is a cross-endpoint refactor
+- [2026-08-06] [grill] main.py:1184 (_context) — every endpoint builds the full context (~8.5ms, including a `bid_limits` list of the whole pool — 705 rows today — for the available-players table) regardless of how small a fragment it renders. `/bid-check`, `/nominate` and now `/explain?inline=1` reference a handful of its 23 keys and none touches `bid_limits`. `/explain` made this sharper on 2026-08-06: it fires on every bidder toggle and its warm response is ~9ms, essentially all of it this context build for a fragment that uses three keys. Pre-existing — the old whole-panel `auction_control.html` didn't use it either — but the 2026-08-06 panel split made fragments narrower and the waste correspondingly larger. Deferred: small next to the binary search over MILP solves that dominates `/bid-check`, and fixing it properly means a per-panel context builder, which is a cross-endpoint refactor. **Cost measured against a real draft 2026-09-13**, which is the rule this file states for a deferral parked on "if it bites again": the median gap between picks over 139 sales was **27.2 seconds**, so an 8.5ms context build is ~0.03% of the operator's own cadence and the owner reported no stall ("It's not slow at all", 2026-09-12). Still real waste and still worth removing with the refactor; it is not worth a smaller fix
 
 
 ### test infrastructure
@@ -184,16 +194,33 @@ Two things in that batch were deliberately **not** built and are still open:
   re-render mid-scan and drop whatever the operator had selected. The roster
   table's dots answer "who"; the picker answers "what would it cost". Follow-up
   only if the picker ever reads as thin.
-- **A search box over the trade form's 49 give rows.** The height cap plus
-  full-width labels is the measured fix; revisit only if scrolling still bites in
-  a real break. One accepted rough edge, measured rather than assumed: at 1024px
-  the widest Give row wants 305px against a 293px list and scrolls 12px inside
-  it. The draft runs at 1280–1600, where everything fits.
-  **Owner, 2026-09-12: "the trade form will need some work."** Kept here rather
-  than closed, but do not treat the search box as the agreed fix — the want is
-  now the form as a whole, and a search box bolted onto a shape that is about to
-  change is the kind of work that gets thrown away. Wait for the specific
-  complaint.
+- **The trade form needs work, and since 2026-09-13 the want is specific.** The
+  owner said on 2026-09-12 that it "will need some work" and this entry was
+  parked waiting for the particular complaint; the 2026-09-13 draft supplied one,
+  having run **eight** `/trade-between` calls (nine player moves — one call sent
+  a player each way) and one `/trade-execute` moving six. Two things, named by
+  the owner:
+
+  1. **Finding players in the lists.** The give list is 49 rows and the receive
+     list is whatever the partner has; there is no way to search either, so
+     picking a known player means scrolling for him. The 2026-08-15 rebuild
+     (checkboxes replacing `<select multiple>`) fixed *width* and *affordance*
+     and deliberately left this — "the height cap plus full-width labels is the
+     measured fix; revisit only if scrolling still bites in a real break". It
+     bit in a real break.
+  2. **The evaluate-then-execute flow.** `/trade-execute` acts on the server's
+     `last_trade_eval` rather than on the form, so `markTradeEvalStale` disables
+     the submit on any change and the verdict has to be re-earned before
+     Execute comes back. That is correct — it is what stops you executing a
+     trade you did not evaluate — but it makes narrowing a proposal a loop of
+     tick, re-evaluate, tick.
+
+  Neither has an agreed fix yet, and the search box in particular is **not** it
+  by default: point 2 is about the shape of the interaction, and bolting a
+  search box onto a form that may change shape is the work that gets thrown
+  away. One accepted rough edge is still on the record and still small: at
+  1024px the widest Give row wants 305px against a 293px list and scrolls 12px
+  inside it, and the draft runs at 1280–1600 where everything fits.
 
 ---
 

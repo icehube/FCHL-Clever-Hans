@@ -10,6 +10,7 @@ import os
 import re
 from datetime import datetime
 
+from collections import Counter
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
@@ -28,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from config import (
     BENCH_SIZE,
     BUYOUT_PENALTY_RATE,
+    DEFAULT_TEAM_PROBABILITY,
     MAX_SALARY,
     MIN_SALARY,
     MY_TEAM,
@@ -376,6 +378,7 @@ async def lifespan(app: FastAPI):
     )
     os.makedirs(STATE_DIR, exist_ok=True)
     model_params = load_model_params()
+    _load_nhl_odds()
     _startup_warnings.clear()  # this boot's story, not the previous one's
     _untrusted_current_file = False
     # Recovery ladder: current -> backup -> fresh. A fresh state is 150 picks
@@ -581,6 +584,13 @@ templates.env.globals["asset_version"] = _asset_version
 
 
 buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
+
+# Stanley Cup odds per NHL club, as PERCENT, for the navbar's odds view. Loaded
+# in `lifespan` INDEPENDENTLY of the state, because `build_initial_state` — the
+# only other caller — runs on a fresh boot only, so a restored draft would
+# otherwise have no odds at all. Carries the alias keys `load_team_odds` adds
+# (`UTH` alongside `UTA`), so anything iterating it for display has to drop them.
+nhl_odds: dict[str, float] = {}
 
 # Exact projected points per LIVE OPPONENT, from a real MILP solve, filled only
 # by GET /solve-standings and cleared by _recompute(). Empty means "nobody has
@@ -1672,6 +1682,120 @@ def _search_rows(query: str) -> dict:
         "search_total": result.total,
         "search_more": result.total - len(rows),
     }
+
+
+def _load_nhl_odds() -> None:
+    """Read the Cup odds for the navbar view, degrading to none.
+
+    Not fatal, deliberately, and it is the one data file that can afford that:
+    a saved state boots today without `team_odds.json` ever being opened (the
+    odds are already baked into each `Player.team_probability`), so raising here
+    would make startup stricter than it was for a reference table. A fresh boot
+    still fails loudly — `build_initial_state` reads the same file and raises.
+    """
+    global nhl_odds
+    try:
+        nhl_odds = data_loader.load_team_odds()
+    except (OSError, ValueError, KeyError) as e:
+        nhl_odds = {}
+        logging.getLogger("uvicorn.error").warning(
+            "No NHL odds (%s: %s) — the odds view will say so", type(e).__name__, e
+        )
+
+
+def _club_counts() -> tuple[Counter, Counter]:
+    """Players per NHL club — still in the pool, and already rostered.
+
+    **Folded through `_nhl_canonical`, which is the whole subtlety.**
+    `players.csv` spells Utah `UTH` on 78 rows and `team_odds.json` spells it
+    `UTA`; a raw `Counter` on `p.nhl_team` splits one club across two rows, one
+    of which then finds no odds. Same fold the badge and the label already go
+    through — see `_nhl_logo_src`.
+
+    One function rather than a copy in each caller, because the table and the
+    "no odds entry" footer have to agree about what a club IS: a drifted second
+    fold would list the same club in both at once.
+
+    `rostered` reads `all_players`, not `roster_players` — a minor is drafted
+    and off the board, so counting him as still available would say a contender
+    has players left when it does not.
+    """
+    pool = Counter(
+        _nhl_canonical(p.nhl_team)
+        for p in auction_state.available_players.values() if p.nhl_team
+    )
+    rostered = Counter(
+        _nhl_canonical(p.nhl_team)
+        for team in auction_state.teams.values()
+        for p in team.all_players if p.nhl_team
+    )
+    return pool, rostered
+
+
+def _odds_rows() -> list[dict]:
+    """One row per NHL club: odds, players left in the pool, players rostered.
+
+    Alias keys are dropped from the odds dict for the reason `_club_counts`
+    folds the pool: `load_team_odds` carries `UTH` AND `UTA` pointing at one
+    number, so iterating it raw prints Utah twice with the pool split between
+    them.
+    """
+    pool, rostered = _club_counts()
+    rows = [
+        {
+            "code": code,
+            "odds": odds,
+            "in_pool": pool.get(code, 0),
+            "rostered": rostered.get(code, 0),
+        }
+        for code, odds in nhl_odds.items()
+        if _nhl_canonical(code) == code
+    ]
+    rows.sort(key=lambda r: (-r["odds"], r["code"]))
+    return rows
+
+
+def _odds_unlisted() -> list[dict]:
+    """Clubs the pool uses that the odds file does not name.
+
+    `players.csv` puts the FCHL placeholder `UFA` in the NHL TEAM column on 9
+    rows, and `_get_team_probability` answers for it with
+    `DEFAULT_TEAM_PROBABILITY` — silently. Showing them is the point: a club
+    RESPELLED by a data refresh lands here too, and it would otherwise price a
+    whole roster at the default with nothing on screen to say so.
+    """
+    pool, rostered = _club_counts()
+    seen = pool + rostered
+    return sorted(
+        ({"code": code, "count": n} for code, n in seen.items() if code not in nhl_odds),
+        key=lambda r: r["code"],
+    )
+
+
+@app.get("/nhl-odds", response_class=HTMLResponse)
+async def nhl_odds_view(request: Request):
+    """Stanley Cup odds per club, with what is left of each on the board.
+
+    The odds are a price-model input — `team_probability`, one of the five
+    drivers `decompose_price` reports — and nothing else in the app shows them.
+    The counts are why this is a request rather than markup baked into
+    `base.html`: they move with every pick, and a table rendered at page load
+    would be wrong by the second nomination while looking authoritative.
+
+    Builds its own context, taking `_render`'s short-circuit for the reason
+    `/find-player` documents: `_context` costs ~8.5ms and a 705-row `bid_limits`
+    for a fragment that reads neither.
+    """
+    return _render(request, "partials/nhl_odds.html", {
+        "request": request,
+        "odds_rows": _odds_rows(),
+        "odds_unlisted": _odds_unlisted(),
+        # Read off the module, never from-imported: `last_odds_season` is a
+        # REBIND, which is the exact hazard the `import data_loader` comment at
+        # the top of this file names.
+        "odds_season": data_loader.last_odds_season,
+        "odds_default": DEFAULT_TEAM_PROBABILITY,
+    })
 
 
 @app.get("/find-player", response_class=HTMLResponse)

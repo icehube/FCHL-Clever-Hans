@@ -26,7 +26,13 @@ from pathlib import Path
 
 import pytest
 
-from config import MIN_SALARY, NHL_TEAM_ALIASES, ROSTER_SIZE, SALARY_CAP
+from config import (
+    DEFAULT_TEAM_PROBABILITY,
+    MIN_SALARY,
+    NHL_TEAM_ALIASES,
+    ROSTER_SIZE,
+    SALARY_CAP,
+)
 from data_loader import (
     build_initial_state,
     load_goalie_wins,
@@ -399,6 +405,40 @@ class TestLiveDataInvariants:
         assert not missing, (
             f"{pool.name} names {len(missing)} NHL club(s) with no logo in "
             f"{LOGO_DIR.name}/: {missing}"
+        )
+
+    # The same sweep in the PRICING column, and it is the more expensive miss of
+    # the two. A club with no logo is 30 broken images — loud. A club with no
+    # odds entry is `_get_team_probability` falling through to
+    # DEFAULT_TEAM_PROBABILITY on every one of its players, silently, which
+    # moves their model price with nothing on screen to say so.
+    @pytest.mark.parametrize("pool", POOL_CSVS, ids=lambda p: p.name)
+    def test_every_nhl_club_in_every_pool_has_cup_odds(self, pool):
+        """A respelled club prices its whole roster at the default.
+
+        Resolved through NHL_TEAM_ALIASES, like the logo sweep above and for the
+        same reason: `team_odds.json` is canonical (`UTA`) and data/players.csv
+        is not (`UTH` on 78 rows).
+
+        `UFA` is allowed and is the ONE exception — it is the FCHL's own
+        placeholder for an unsigned player, on 9 rows of data/players.csv, not a
+        club that could ever have odds. Named explicitly rather than skipped by
+        a rule, so a second placeholder appearing in a refresh fails here
+        instead of joining it.
+        """
+        with open(pool) as f:
+            reader = csv.DictReader(f)
+            if "NHL TEAM" not in (reader.fieldnames or []):
+                pytest.skip(f"{pool.name} is the legacy schema — no NHL TEAM column")
+            codes = {(r["NHL TEAM"] or "").strip() for r in reader}
+        codes -= {"", "UFA"}
+
+        odds = load_team_odds()
+        missing = sorted(c for c in codes if NHL_TEAM_ALIASES.get(c, c) not in odds)
+        assert not missing, (
+            f"{pool.name} names {len(missing)} NHL club(s) with no entry in "
+            f"team_odds.json: {missing} — every one of their players prices at "
+            f"the {DEFAULT_TEAM_PROBABILITY}% default"
         )
 
 

@@ -112,6 +112,22 @@
                        hx-target="#player-search-results" hx-swap="innerHTML">
                 <div id="player-search-results"></div>
             </div>
+            {# Cup odds per NHL club. `team_probability` is one of the five
+               price drivers and nothing else in the app shows it.
+
+               The fetch and the open fire on the same click — htmx does not
+               swallow an inline onclick — so the box opens on its placeholder
+               and fills a moment later. Fetched on EVERY open rather than
+               rendered into this page once, because the "in pool" and
+               "rostered" counts move with every pick: markup baked in here
+               would be wrong by the second nomination and look authoritative
+               doing it. #}
+            <button type="button" class="btn btn-xs btn-outline"
+                    title="Stanley Cup odds per NHL club, and how many of each are left"
+                    hx-get="/nhl-odds" hx-target="#nhl-odds-body" hx-swap="innerHTML"
+                    onclick="document.getElementById('nhl-odds-modal').showModal()">
+                🏒 Odds
+            </button>
             <button type="button" class="btn btn-xs btn-outline" title="Keyboard shortcuts"
                     onclick="document.getElementById('shortcuts-modal').showModal()">
                 ⌨ Shortcuts
@@ -119,7 +135,19 @@
             <button hx-post="/undo" hx-target="#app" hx-swap="innerHTML" class="btn btn-xs btn-outline btn-info" title="Undo (Ctrl+Z)">
                 ↩ Undo
             </button>
-            <select class="select select-xs select-bordered bg-base-300"
+            {# Capped, because a <select> is sized by its WIDEST OPTION and
+               these are sentences: measured at 1024 it rendered 469px — 46% of
+               the viewport for a control whose closed state only ever reads
+               "Scenario...", and the 3px that put the navbar over the edge when
+               the odds button was added. Clipping the box is free HERE and was
+               not in the trade forms (2026-08-15), because there the clipped
+               text WAS the selection: option 0 is `disabled selected` and
+               `hx-on::after-request` puts the index back to it after every
+               load, so this control has no other closed state to read. The open
+               list is the browser's own popup, not this box; if an option ever
+               has to be read in full, widen the cap rather than dropping it —
+               the bar has 268px of slack at 1024 with it and none without. #}
+            <select class="select select-xs select-bordered bg-base-300 max-w-[10rem]"
                     hx-post="/load-scenario" hx-target="#app" hx-swap="innerHTML"
                     hx-confirm="Load this scenario? Current auction state will be replaced."
                     hx-trigger="change" name="name"
@@ -191,6 +219,26 @@
        `TestShortcutsModal` asserts the two sets are equal in both directions —
        a shortcut list that quietly falls out of step with the handler is worse
        than no list, because it is believed. #}
+    {# Outside #app for the same reason as the shortcuts modal and the two
+       banners: every panel swap replaces #app's innerHTML, so a modal mounted
+       inside it would be torn out mid-read the moment a pick landed.
+
+       No `data-shortcut-key` and no key binding — `TestShortcutsModal` asserts
+       the modal's rows and the keys `shortcuts.js` binds are equal in BOTH
+       directions, and a navbar button is not a shortcut. #}
+    <dialog id="nhl-odds-modal" class="modal">
+        <div class="modal-box bg-base-200">
+            <h3 class="text-base font-bold text-accent mb-3">NHL Cup odds</h3>
+            {# Unconditional and non-empty: a swap into a missing target is a
+               dead swap (explanation.html's rule), and an empty box would flash
+               as "nothing to show" on every open. #}
+            <div id="nhl-odds-body"><p class="text-sm opacity-60">Loading…</p></div>
+            <div class="modal-action">
+                <form method="dialog"><button class="btn btn-sm btn-outline">Close</button></form>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
     <dialog id="shortcuts-modal" class="modal">
         <div class="modal-box bg-base-200">
             <h3 class="text-base font-bold text-accent mb-3">Keyboard shortcuts</h3>

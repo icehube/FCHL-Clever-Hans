@@ -42,6 +42,14 @@ last_disambiguations: dict[str, list[str]] = {}
 loaded_disambiguations: dict[str, list[str]] = {}
 
 
+# The season the most recent load_team_odds() read, e.g. "2025-2026". Module
+# level for the reason `last_disambiguations` is: both callers of
+# `load_team_odds` unpack a plain dict and neither wants a tuple, and the
+# alternative — a second read of the same file from main.py — is two readers
+# that can disagree about which file they described.
+last_odds_season: str = ""
+
+
 def load_team_metadata(path: str = "data/fchl_teams.json") -> dict:
     """Load team configs, nomination order, and penalties."""
     with open(path) as f:
@@ -55,8 +63,10 @@ def load_team_odds(path: str = "data/team_odds.json") -> dict[str, float]:
     team_odds.json stores fractions; the price model was trained on
     vig-removed percentages (each season sums to 100), so convert here.
     """
+    global last_odds_season
     with open(path) as f:
         data = json.load(f)
+    last_odds_season = data.get("season", "")
     odds = {team: prob * 100.0 for team, prob in data["odds"].items()}
     # Apply aliases so lookups work with either name
     for alias, canonical in NHL_TEAM_ALIASES.items():

@@ -3149,6 +3149,146 @@ class TestBuyingOutAnotherTeamsPlayer:
         assert 'id="bo-' not in html[start:html.index("</form>", start)]
 
 
+def _odds_table(html: str) -> dict[str, tuple[float, str, str]]:
+    """The odds view as {club: (odds, in_pool, rostered)}, counts left as text.
+
+    Counts stay strings because the template prints an em dash for zero — "0"
+    in a column of counts reads as a measurement when what it means is that a
+    contender has been picked clean — and a parser that coerced them would hide
+    which of the two it saw.
+    """
+    rows = re.findall(
+        r'<span class="font-mono[^"]*">([A-Z]+)</span></td>\s*'
+        r'<td[^>]*>([\d.]+)%</td>\s*'
+        r'<td[^>]*>([^<]+)</td>\s*'
+        r'<td[^>]*>([^<]+)</td>',
+        html,
+    )
+    return {c: (float(o), a.strip(), b.strip()) for c, o, a, b in rows}
+
+
+class TestTheNhlOddsView:
+    """Cup odds per club, with what is left of each on the board.
+
+    `team_probability` is one of the five drivers `decompose_price` reports and
+    nothing else in the app shows it. The counts are what make it a request
+    rather than markup in `base.html`: they move with every pick.
+    """
+
+    def test_every_club_appears_exactly_once(self, client):
+        import main
+
+        table = _odds_table(client.get("/nhl-odds").text)
+        canonical = {c for c in main.nhl_odds if main._nhl_canonical(c) == c}
+        assert set(table) == canonical
+        assert len(canonical) == 32, f"{len(canonical)} clubs, not 32"
+
+    def test_the_alias_is_folded_into_one_row(self, client):
+        """`team_odds.json` says `UTA` and players.csv says `UTH` on 78 rows.
+
+        Two failure modes, one row: iterating the odds dict raw prints Utah
+        TWICE (the loader adds the alias key pointing at the same number), and
+        counting `p.nhl_team` without folding leaves the canonical row at zero
+        while the players sit under a code that was dropped as an alias. The
+        club that has this property is the one to assert on.
+        """
+        import main
+
+        alias, canonical = next(iter(main.NHL_TEAM_ALIASES.items()))
+        table = _odds_table(client.get("/nhl-odds").text)
+        assert alias not in table, f"{alias} is an alias of {canonical}, not a club"
+        assert canonical in table
+
+        spelled_in_pool = sum(
+            1 for p in main.auction_state.available_players.values()
+            if main._nhl_canonical(p.nhl_team) == canonical
+        )
+        assert spelled_in_pool, f"no {canonical} players in the pool — pick another probe"
+        assert table[canonical][1] == str(spelled_in_pool), (
+            f"{canonical} shows {table[canonical][1]} in the pool against "
+            f"{spelled_in_pool} actually there — the alias fold is not happening"
+        )
+
+    def test_the_odds_are_the_loaded_odds(self, client):
+        import main
+
+        table = _odds_table(client.get("/nhl-odds").text)
+        for code, (odds, _, _) in table.items():
+            assert odds == pytest.approx(round(main.nhl_odds[code], 2), abs=0.005)
+
+    def test_the_counts_follow_the_draft(self, client):
+        """The whole reason this is fetched on every open.
+
+        A table rendered once into base.html would still show a drafted player
+        as available, for the rest of the auction, while looking authoritative.
+        """
+        import main
+
+        name = pool_top()[0]
+        club = main._nhl_canonical(main.auction_state.available_players[name].nhl_team)
+        before = _odds_table(client.get("/nhl-odds").text)[club]
+
+        assign(client, name, main.MY_TEAM, 1.0)
+
+        after = _odds_table(client.get("/nhl-odds").text)[club]
+        assert int(after[1]) == int(before[1]) - 1, f"{club} pool count: {before} -> {after}"
+        assert int(after[2]) == int(before[2]) + 1, f"{club} rostered: {before} -> {after}"
+
+    def test_a_club_with_no_odds_entry_is_named(self, client):
+        """`_get_team_probability` falls through to the default SILENTLY.
+
+        players.csv carries the FCHL placeholder `UFA` in the NHL TEAM column on
+        9 rows; a club RESPELLED by a refresh lands in the same footer, which is
+        the point — it would otherwise price a whole roster at 3.1% with nothing
+        on screen. `tests/test_data_loader.py` fails the refresh itself.
+        """
+        import main
+
+        body = client.get("/nhl-odds").text
+        unlisted = {r["code"] for r in main._odds_unlisted()}
+        assert unlisted, "no unlisted club today — this test proves nothing"
+        for code in unlisted:
+            assert code in body, f"{code} is priced at the default and is not shown"
+        assert f"{main.DEFAULT_TEAM_PROBABILITY:.1f}% default" in body
+
+    def test_the_footer_names_the_season_the_odds_came_from(self, client):
+        """The one reason `load_team_odds` records a season at all.
+
+        It writes a module global rather than returning a tuple, because both
+        of its callers unpack a plain dict — and the alternative, reading the
+        file a second time from main.py, is two readers that can disagree about
+        which file they described. Unasserted, that recording is dead code that
+        reads as live.
+        """
+        import data_loader
+
+        assert data_loader.last_odds_season, "the loader recorded no season"
+        assert data_loader.last_odds_season in client.get("/nhl-odds").text
+
+    def test_the_navbar_offers_it_and_the_mount_is_never_empty(self, client):
+        """An `innerHTML` swap needs a target that is already there, and a box
+        that opened on nothing would flash as "no odds" on every click.
+        """
+        html = client.get("/").text
+        assert 'hx-get="/nhl-odds"' in html
+        assert 'id="nhl-odds-body"' in html
+        start = html.find('id="nhl-odds-body"')
+        assert "Loading" in html[start:start + 200]
+
+    def test_a_missing_odds_file_says_so(self, client, monkeypatch):
+        """A saved state boots without ever opening team_odds.json — the odds
+        are already baked into each `Player.team_probability` — so this view is
+        the only thing a missing file costs, and it must not answer with an
+        empty table that reads as "no clubs".
+        """
+        import main
+
+        monkeypatch.setattr(main, "nhl_odds", {})
+        body = client.get("/nhl-odds").text
+        assert "<table" not in body
+        assert "team_odds.json" in body
+
+
 class TestRoundThreeMutators:
     """Round 3 mutators: minors movement, scenario load, change_log + cascade."""
 

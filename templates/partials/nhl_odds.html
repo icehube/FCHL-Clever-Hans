@@ -1,0 +1,65 @@
+{% from "macros/nhl.html" import nhl_logo %}
+{# Stanley Cup odds per NHL club — a price-model input made visible.
+
+   `team_probability` is one of the five drivers `decompose_price` reports and
+   nothing else in the app shows it, so this is the only place to answer "how
+   good is his team" without reading data/team_odds.json.
+
+   The counts are the half that earns the request: the odds are fixed for the
+   season, but who is LEFT from a contender moves with every pick. Baking this
+   into base.html would render it once at page load and let it go quietly wrong.
+
+   Badges through the macro, never a hand-built /nhl_logos path — the whole
+   reason that macro exists is that six templates pasted the path and the alias
+   decided whether Utah had a logo.
+
+   `.scroll-container` rather than letting .modal-box scroll: 32 rows is taller
+   than the box, and the container's sticky thead keeps the column headings
+   visible while the odds run out. #}
+{% if odds_rows %}
+<div class="scroll-container">
+    <table class="table table-xs">
+        <thead>
+            <tr>
+                <th>Club</th>
+                <th class="text-right" title="Stanley Cup probability, vig removed — the price model's team_probability feature, in percent">Cup odds</th>
+                <th class="text-right" title="Players from this club still undrafted">In pool</th>
+                <th class="text-right" title="Players from this club already on an FCHL roster, including minors">Rostered</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in odds_rows %}
+        <tr>
+            <td class="flex items-center gap-2">{{ nhl_logo(row.code) }}<span class="font-mono text-xs">{{ row.code }}</span></td>
+            <td class="text-right font-semibold">{{ "%.2f"|format(row.odds) }}%</td>
+            {# Zero is worth showing as a dash: "0" in a column of counts reads
+               as a measurement, and what it means here is that a contender has
+               been picked clean. #}
+            <td class="text-right{% if not row.in_pool %} opacity-40{% endif %}">{{ row.in_pool or "—" }}</td>
+            <td class="text-right{% if not row.rostered %} opacity-40{% endif %}">{{ row.rostered or "—" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% if odds_unlisted %}
+{# Clubs the pool uses that the odds file does not name. `players.csv` carries
+   the FCHL placeholder `UFA` on 9 rows, and `_get_team_probability` answers for
+   it with the default — silently. A club RESPELLED by a data refresh lands here
+   too, which is the UTA/UTH failure in the pricing column rather than the logo
+   one, so this row is a tripwire and not a footnote. #}
+<p class="text-xs opacity-70 mt-2">
+    Priced at the {{ "%.1f"|format(odds_default) }}% default (no odds entry):
+    {% for row in odds_unlisted %}<span class="font-mono">{{ row.code }}</span> ({{ row.count }}){% if not loop.last %}, {% endif %}{% endfor %}
+</p>
+{% endif %}
+<p class="text-xs opacity-60 mt-1">
+    {% if odds_season %}{{ odds_season }} season. {% endif %}Vig removed, so the
+    listed clubs sum to {{ "%.2f"|format(odds_rows|sum(attribute='odds')) }}%.
+</p>
+{% else %}
+{# Reachable: a saved state boots without ever opening team_odds.json, so a
+   missing file costs this view and nothing else. Say which file, because the
+   answer is to put it back rather than to re-run the draft. #}
+<p class="text-sm opacity-70">No odds loaded — <span class="font-mono">data/team_odds.json</span> was missing or unreadable at startup.</p>
+{% endif %}

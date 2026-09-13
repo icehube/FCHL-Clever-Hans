@@ -81,6 +81,53 @@ rediscover the same non-problem.
   was unambiguous only while one roster could be touched, and with no confirm
   dialog it is the only confirmation there is.
 
+- **An NHL Cup odds view in the navbar, with what is left of each club.**
+  `team_probability` is one of the five drivers `decompose_price` reports — it
+  is why a 60-point forward on EDM prices above the same forward on SJS — and
+  nothing in the app showed it. `data/team_odds.json` was read once at startup,
+  folded into every `Player.team_probability`, and never surfaced.
+
+  `GET /nhl-odds` renders all 32 clubs by odds descending with two columns that
+  are the actual reason to open it mid-draft: how many of that club are still in
+  the pool, and how many are already rostered. Those counts are why it is a
+  request on every open rather than markup baked into `base.html` — a table
+  rendered at page load is wrong by the second nomination and looks
+  authoritative doing it. It builds its own context, taking `_render`'s
+  short-circuit for the reason `/find-player` documents.
+
+  **Two folds are load-bearing, and they are the same bug in two costumes.**
+  `players.csv` spells Utah `UTH` on 78 rows while `team_odds.json` spells it
+  `UTA`, so counting `p.nhl_team` raw splits one club across two rows — the
+  canonical one showing zero players. And `load_team_odds` adds the alias key
+  beside the canonical one pointing at a single number, so iterating the dict
+  raw prints Utah twice. Rows are counted through `_nhl_canonical` and alias
+  keys are dropped; `test_the_alias_is_folded_into_one_row` asserts both on the
+  one club that has the property. The fold lives in **one** function,
+  `_club_counts`, feeding both the table and the unlisted-clubs footer — a
+  second copy that drifted would list the same club in both at once.
+
+  **The footer of clubs with no odds entry is a tripwire, not a footnote.**
+  `_get_team_probability` falls through to `DEFAULT_TEAM_PROBABILITY` (3.1%)
+  **silently**, so a club respelled by a data refresh would price its whole
+  roster at the default with nothing on screen. Today the list is the FCHL's own
+  `UFA` placeholder, on 9 rows. `tests/test_data_loader.py` now fails the
+  refresh itself:
+  `test_every_nhl_club_in_every_pool_has_cup_odds`, parametrized over every
+  `data/players*.csv` exactly like the logo sweep beside it — and it is the more
+  expensive of the two misses, since a missing logo is 30 broken images while a
+  missing odds entry is a quietly wrong price.
+
+  `load_team_odds` records the file's season in a module-level
+  `last_odds_season`, the `last_disambiguations` idiom: both callers unpack a
+  plain dict and neither wants a tuple, and the alternative — reading the file a
+  second time from `main.py` — is two readers that can disagree about which file
+  they described. `lifespan` loads the odds independently of the state path,
+  because `build_initial_state` runs on a **fresh** boot only and a restored
+  draft would otherwise have no odds at all; a missing file degrades to an empty
+  view naming the file rather than failing startup, since a saved state boots
+  without ever opening it. Six mutants, six dead — including the two folds, the
+  hidden footer, and the empty mount.
+
 - **A Recompute button on the bid panel's counterfactual, so the card can be
   re-solved at the price actually on the table.** Filed 2026-08-06 as an owner
   finding and deferred "pending draft-day experience"; the owner asked for the
@@ -156,6 +203,27 @@ rediscover the same non-problem.
   to nothing prints green.
 
 ### Changed
+
+- **The scenario `<select>` is capped at `10rem`, because the odds button had
+  nowhere to go.** Adding a sixth navbar control put the bar 3px over at 1024px
+  and failed both layout guards — `test_the_navbar_stays_one_row_with_the_search_box`
+  and `test_the_grid_never_overflows_its_own_width`. Measured at that width the
+  fixed group was 1009px of a 1024px viewport and the title group had already
+  shrunk to **0**, so the 3px had to come out of a control. The scenario picker
+  was 469px of that 1009 — 46% of the viewport — because **a `<select>` is sized
+  by its widest option** and these options are sentences ("Late draft (money
+  gone, rosters not full — ceiling binds mid-range)").
+
+  That is the same property that made `<select multiple>` wrong for the trade
+  forms on 2026-08-15, and the reason capping is right *here* and was wrong
+  *there*: in the trade form the clipped text was the selection itself, whereas
+  this control's option 0 is `disabled selected` and its
+  `hx-on::after-request` puts the index back to it after every load — so its
+  closed state only ever reads "Scenario...", which is ten characters. The
+  choice was between clipping a label nobody reads closed and shrinking the new
+  button to an icon, which would have left the bar at 55px of slack instead of
+  **268px**. Re-measured after the change: `scrollWidth` 1027 → 1024 at 1024px,
+  with the title group back from 0 to 268.
 
 - **`TestExplain::test_both_mounts_carry_a_close_button` now bans
   `getElementById` in the click handlers rather than anywhere in the body.** The
@@ -2025,11 +2093,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:77 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:79 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
   to remember; `FCHL_STATE_DIR` overrides it explicitly.
-  `main.py:138 (_backfill_nhl_teams)` and
-  `main.py:162 (_backfill_keeper_flags)` follow the
+  `main.py:140 (_backfill_nhl_teams)` and
+  `main.py:164 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -2223,7 +2291,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:315 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:317 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup
@@ -2771,7 +2839,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1465 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1475 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -2876,7 +2944,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1465 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1475 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

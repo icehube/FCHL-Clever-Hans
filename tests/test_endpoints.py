@@ -22,6 +22,7 @@ from tests.helpers import (
     a_roster_player,
     assign,
     buyout_options,
+    team_buyout_options,
     pool_top,
     set_headroom,
     trade_choices,
@@ -2950,6 +2951,204 @@ class TestTheBuyoutPicker:
         assert 'id="bo-' not in panel
 
 
+class TestBuyingOutAnotherTeamsPlayer:
+    """The team panel's picker, which records what the LEAGUE did.
+
+    CBA 11.4 is not a BOT-only rule and this tool is the record of all eleven
+    rosters, so an opponent's buyout has to be enterable — until 2026-09-12 it
+    was not, at any layer. It is deliberately not the Buyout Analyzer: that one
+    is advice, scored against BOT's MILP total, and it offers Execute only when
+    the verdict is "buyout".
+    """
+
+    def _eligible_on(self, code):
+        import main
+
+        return next(
+            p for p in main.auction_state.teams[code].all_players
+            if p.can_be_bought_out
+        )
+
+    def test_the_penalty_lands_on_that_team(self, client):
+        import main
+
+        victim = self._eligible_on("SRL")
+        before = (
+            main.auction_state.teams["SRL"].penalties,
+            main.auction_state.teams[main.MY_TEAM].penalties,
+        )
+
+        r = client.post("/buyout", data={"player": victim.name, "team_code": "SRL"})
+        assert toast_of(r).get("type") == "success", toast_of(r)
+
+        srl = main.auction_state.teams["SRL"]
+        assert srl.find_player(victim.name) is None
+        assert srl.penalties == pytest.approx(before[0] + victim.salary * 0.5)
+        assert main.auction_state.teams[main.MY_TEAM].penalties == before[1], (
+            "the penalty landed on BOT's cap"
+        )
+
+    def test_the_toast_names_the_team_and_the_dead_cap(self, client):
+        """"Bought out X" was unambiguous while only one roster could be touched.
+
+        It is the only confirmation there is — this control has no confirm
+        dialog by owner decision — so it has to say whose cap just changed and
+        by how much.
+        """
+        victim = self._eligible_on("SRL")
+        message = toast_of(
+            client.post("/buyout", data={"player": victim.name, "team_code": "SRL"})
+        ).get("message", "")
+        assert "SRL" in message, message
+        assert f"{victim.salary * 0.5:.1f}" in message, (
+            f"the penalty is not in the toast: {message}"
+        )
+
+    def test_the_transaction_is_logged_against_that_team(self, client):
+        """The Logs panel, the header search's bought-out tier and `/undo`'s
+        view mirror all read `txn.team_code` — a buyout logged as BOT's would
+        put a rival's dead cap in your own record in three places at once.
+        """
+        import main
+
+        victim = self._eligible_on("SRL")
+        client.post("/buyout", data={"player": victim.name, "team_code": "SRL"})
+
+        txn = main.auction_state.transaction_log[-1]
+        assert (txn.transaction_type, txn.player_name) == ("buyout", victim.name)
+        assert txn.team_code == "SRL"
+
+    def test_the_view_follows_the_roster_that_changed(self, client):
+        """2026-08-08 policy. Your own buyout still shows you — pinned by
+        `TestTheViewFollowsTheAction::test_a_buyout_shows_my_team`.
+        """
+        victim = self._eligible_on("SRL")
+        r = client.post("/buyout", data={"player": victim.name, "team_code": "SRL"})
+        assert "(SRL)" in section_of(r.text, "team-panel")
+
+    def test_undo_puts_him_back_on_that_team(self, client):
+        import main
+
+        victim = self._eligible_on("SRL")
+        before = main.auction_state.teams["SRL"].penalties
+        client.post("/buyout", data={"player": victim.name, "team_code": "SRL"})
+
+        r = client.post("/undo")
+        srl = main.auction_state.teams["SRL"]
+        assert srl.find_player(victim.name) is not None, "the undo did not restore him"
+        assert srl.penalties == pytest.approx(before)
+        assert "(SRL)" in section_of(r.text, "team-panel"), (
+            "the undo mirrored the view to BOT — it must name the reverted record's team"
+        )
+
+    def test_a_player_on_another_roster_is_refused(self, client):
+        """Asking SRL to buy out one of BOT's players must fail, loudly.
+
+        A lookup that searched the league instead of the named team would take
+        the right player off the wrong cap and toast success — two teams
+        corrupted, nothing on screen to say so.
+        """
+        import main
+
+        mine = a_buyout_candidate()
+        before = main.auction_state.teams["SRL"].penalties
+
+        r = client.post("/buyout", data={"player": mine.name, "team_code": "SRL"})
+        assert toast_of(r).get("type") == "error", toast_of(r)
+        assert "SRL" in toast_of(r).get("message", "")
+        assert main.auction_state.teams[main.MY_TEAM].find_player(mine.name) is not None
+        assert main.auction_state.teams["SRL"].penalties == pytest.approx(before)
+
+    def test_an_unknown_team_changes_nothing(self, client):
+        import main
+
+        before = len(main.auction_state.transaction_log)
+        r = client.post("/buyout", data={
+            "player": self._eligible_on("SRL").name, "team_code": "NOPE",
+        })
+        assert toast_of(r).get("type") == "error", toast_of(r)
+        assert len(main.auction_state.transaction_log) == before
+
+    def test_it_offers_exactly_that_teams_eligible_set(self, client):
+        """The set equality CLAUDE.md asks for, asserted on an OPPONENT.
+
+        That is what also makes it a panel-isolation guard: a picker reading
+        `team` instead of `viewed_team` renders BOT's fifteen candidates under
+        SRL's heading, which is the 2026-08-05 leak in a new control — and on
+        BOT's own panel the two expressions agree, so it would look perfect.
+        """
+        import main
+
+        html = client.get("/team-view/SRL").text
+        offered = set(team_buyout_options(html, "SRL"))
+        srl = main.auction_state.teams["SRL"]
+        eligible = {p.name for p in srl.all_players if p.can_be_bought_out}
+        assert eligible, "SRL has no eligible player — the fixture is wrong"
+        assert offered == eligible, (
+            f"missing: {sorted(eligible - offered)}; "
+            f"offered illegally: {sorted(offered - eligible)}"
+        )
+        bot_only = {
+            p.name for p in main.auction_state.teams[main.MY_TEAM].all_players
+            if p.can_be_bought_out
+        } - eligible
+        assert not (offered & bot_only), (
+            f"BOT's players are offered on SRL's panel: {sorted(offered & bot_only)}"
+        )
+
+    def test_the_first_option_is_an_empty_placeholder(self, client):
+        """Nothing is pre-selected, so a stray submit cannot buy anyone out.
+
+        The Analyzer needed this because choosing the pre-selected top candidate
+        fires no `change`; here the stake is higher — the form has a submit
+        button, so a pre-selected option is a one-click buyout of whoever sorts
+        first.
+        """
+        html = client.get("/team-view/SRL").text
+        start = html.find('aria-label="Buy out a player on SRL"')
+        select = html[start:html.index("</select>", start)]
+        first = re.search(r"<option[^>]*>", select).group(0)
+        assert 'value=""' in first and "disabled" in first and "selected" in first, (
+            f"the first option is not an inert placeholder: {first!r}"
+        )
+
+    def test_a_team_with_nothing_eligible_says_so(self, client):
+        """The `{% else %}` branch, and the generator guard behind it.
+
+        `selectattr` returns a GENERATOR and `{% if %}` on one is always truthy,
+        so dropping the materializer renders an empty `<select>` — a control
+        that looks broken — while every other test here stays green.
+        """
+        import main
+
+        srl = main.auction_state.teams["SRL"]
+        for p in srl.all_players:
+            if p.can_be_bought_out:
+                p.group = "A"
+
+        html = client.get("/team-view/SRL").text
+        panel = section_of(html, "team-panel")
+        assert 'aria-label="Buy out a player on SRL"' not in panel, (
+            "an empty picker is a control that looks broken"
+        )
+        assert "No group 2/3 players on SRL" in panel
+
+    def test_the_picker_carries_no_buyout_dots(self, client):
+        """Same rule as the Analyzer's: `bo-` ids live in the roster tables.
+
+        `_dom_id` mints one id per player and the scan resolves OOB targets with
+        `querySelectorAll("#"+id)`, so a copy in here would be swapped twice.
+        Scoped to the picker rather than the panel, since the roster tables
+        above it carry the real ones.
+        """
+        import main
+
+        html = client.get("/").text
+        start = html.find(f'aria-label="Buy out a player on {main.MY_TEAM}"')
+        assert start != -1, "BOT's own panel renders no buyout picker"
+        assert 'id="bo-' not in html[start:html.index("</form>", start)]
+
+
 class TestRoundThreeMutators:
     """Round 3 mutators: minors movement, scenario load, change_log + cascade."""
 
@@ -3595,7 +3794,16 @@ class TestTheViewSticks:
         assert self._panel_team(r.text) == "BOT"
 
     def test_a_buyout_shows_my_team(self, client, viewing_srl):
-        """`execute_buyout` is BOT-only, so your cap is the only thing that moved.
+        """Your own buyout still brings the view home, now that it can move.
+
+        This read "execute_buyout is BOT-only, so your cap is the only thing
+        that moved" until 2026-09-12, when `/buyout` learned a `team_code` and
+        the view started following the roster that changed. The assertion is
+        unchanged and is now the live half of a two-sided rule: BOT's buyout
+        shows BOT, a rival's shows the rival
+        (`TestBuyingOutAnotherTeamsPlayer::test_the_view_follows_the_roster_that_changed`).
+        Posting no `team_code` is deliberate — it also pins the endpoint's
+        default, which the Analyzer's Execute button relies on.
 
         The undo side of this was already covered; the forward side was not, and
         `test_undoing_a_buyout_shows_my_team` reopening SRL after the buyout

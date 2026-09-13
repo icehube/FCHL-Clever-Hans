@@ -1152,9 +1152,10 @@ def _view_team(code: str) -> None:
     is still BOT, which is the only case the original reasoning ("reading an
     opponent's Cap Used as your own right after a pick lands") was ever about.
     On an opponent's pick nothing of yours moved and the panel that just went
-    stale is theirs. /buyout passes MY_TEAM because execute_buyout can only
-    touch BOT; /reset and /load-scenario because they replace the world; /undo
-    passes the team named by the record it reverted.
+    stale is theirs. /buyout passes the team whose player was bought out — BOT
+    for your own, the rival for theirs, since 2026-09-12 made execute_buyout
+    take a team at all; /reset and /load-scenario because they replace the
+    world; /undo passes the team named by the record it reverted.
 
     It VALIDATES rather than leaning on _context's `teams.get(_viewed_team,
     team)` fallback, so `_viewed_team` is always a live team code. That fallback
@@ -1650,8 +1651,10 @@ def _search_rows(query: str) -> dict:
             "provenance": "" if hit.where == "bought-out" else _provenance(hit.last_txn),
             # DISPLAY and NAVIGATION are two fields, and a buyout is why.
             # `team_code` names whose cap carries the row — for a bought-out
-            # player that is BOT, and the penalty sits in BOT's panel header,
-            # so the code is worth showing. But he is on no roster, and the
+            # player that is whichever team bought him out, and the penalty
+            # sits in that team's panel header, so the code is worth showing
+            # (and is the only place it appears, since he is on no roster to
+            # read it off). But he is on no roster, and the
             # other four rows all promise "click this and see the player", so
             # linking there lands you somewhere he demonstrably is not. Only
             # the live locations navigate.
@@ -1909,11 +1912,25 @@ async def buyout_check(request: Request, player_name: str):
 
 
 @app.post("/buyout", response_class=HTMLResponse)
-async def buyout(request: Request, player: str = Form(...)):
-    """Execute a buyout."""
-    # Capture player info before execute_buyout removes them
-    team = auction_state.teams[MY_TEAM]
-    p = team.find_player(player)
+async def buyout(
+    request: Request,
+    player: str = Form(...),
+    team_code: str = Form(MY_TEAM),
+):
+    """Execute a buyout on any team's roster.
+
+    `team_code` defaults to BOT because the Buyout Analyzer's Execute button is
+    the older caller and acts on `team`, which is always BOT. The team panel's
+    picker posts it explicitly for whichever roster is on screen — the league
+    permits any team to buy anyone out, and an opponent's buyout that cannot be
+    recorded leaves their cap wrong in every calculation the tool makes about
+    them, the market ceiling included.
+    """
+    # Capture player info before execute_buyout removes them. `.get`, because
+    # an unknown code has to reach execute_buyout's own refusal rather than
+    # KeyError-ing here — one definition of "which teams exist".
+    team = auction_state.teams.get(team_code)
+    p = team.find_player(player) if team else None
     if p:
         bo_position = p.position
         bo_salary = p.salary
@@ -1924,7 +1941,7 @@ async def buyout(request: Request, player: str = Form(...)):
     # any name), so this path is walked.
     try:
         with _undoable(rollback=True):
-            execute_buyout(auction_state, player)
+            execute_buyout(auction_state, player, team_code)
     except ValueError as e:
         # Report the actual reason: this used to say "not found" for every
         # failure, so an ineligible-group refusal named the wrong problem.
@@ -1935,15 +1952,23 @@ async def buyout(request: Request, player: str = Form(...)):
 
     # Log buyout transaction
     if p:
-        _log_transaction(player, bo_position, MY_TEAM, bo_salary, "buyout",
+        _log_transaction(player, bo_position, team_code, bo_salary, "buyout",
                          nhl_team=bo_nhl_team)
 
     _recompute()
     _save_state()
-    _view_team(MY_TEAM)  # execute_buyout is BOT-only, so your cap is what moved
+    # The view follows the roster that changed, the 2026-08-08 policy — which
+    # is BOT for your own buyout and the rival for theirs. `/undo` mirrors this
+    # off the logged record and needed no change: it already reads t.team_code.
+    _view_team(team_code)
     return _toast(
         _render(request, "partials/all_panels.html"),
-        f"Bought out {player}", "success",
+        # Names the team and the dead cap it just took on. "Bought out X" alone
+        # was unambiguous while only one roster could be touched.
+        f"Bought out {player} ({team_code}) — "
+        f"${(bo_salary * BUYOUT_PENALTY_RATE if p else 0.0):.1f}M penalty "
+        f"stays on {team_code}'s cap",
+        "success",
     )
 
 
@@ -1994,8 +2019,11 @@ async def undo(request: Request):
         # kept this deferred. ALLOWLIST, never a denylist: the real types are
         # draft / trade_out / trade_in / trade / buyout, and /trade-between logs
         # team_code as "SRL→MAC", so a denylist that missed one string would
-        # point the view at something that is not a team code at all. A
-        # buyout's team_code IS MY_TEAM, so one branch covers both.
+        # point the view at something that is not a team code at all. One
+        # branch covers draft and buyout because both log the team whose roster
+        # moved — which for a buyout was always MY_TEAM until 2026-09-12 and is
+        # now whichever team the panel's picker named. The code did not change;
+        # it read t.team_code all along.
         if t.transaction_type in ("draft", "buyout"):
             _view_team(t.team_code)
     elif len(auction_state.change_log) < len(pre_chg):

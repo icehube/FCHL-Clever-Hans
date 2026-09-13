@@ -24,6 +24,63 @@ rediscover the same non-problem.
 
 ### Added
 
+- **Any team's buyout can now be recorded, from that team's panel.** CBA 11.4
+  lets any team buy anyone out, and this tool is the league's record of all
+  eleven rosters — but `trade.execute_buyout` read `state.teams[MY_TEAM]`, so a
+  rival's buyout could not be entered at any layer. An unrecorded one leaves
+  that team's cap wrong in *everything* the app computes about them, the market
+  ceiling included, which is the bid advisor's own input.
+
+  `execute_buyout(state, player_name, team_code=MY_TEAM)` looks the team up
+  first, runs `find_player` against **that** roster, and puts the penalty there.
+  `POST /buyout` takes a `team_code` form field, logs the transaction against
+  it, and points the view at it — the 2026-08-08 "the view follows the roster
+  that changed" policy. `/undo` needed no change at all: it already mirrored the
+  view off `t.team_code`, which was simply always `MY_TEAM` before.
+
+  **A second, smaller gap closed with it.** `buyout_panel.html` renders Execute
+  Buyout only when the recommendation is `buyout`, so even for BOT there was no
+  way to execute one the MILP rates `keep` — legal, and sometimes right for cap
+  reasons the MILP does not model. The new picker renders for BOT too.
+
+  **The two controls are advice and record, and the split is deliberate.**
+  `evaluate_buyout` did NOT follow `execute_buyout` in taking a team: it scores
+  the hypothetical against BOT's MILP total, so pointed at SRL's roster it would
+  answer a question about the wrong team. Same reason the scan and the dots stay
+  BOT-only.
+
+  The picker is a `<select>` rather than a button per row, for the reason the
+  Analyzer became one on 2026-08-15: eligible counts run 4–15 per team on a
+  fresh pool and grow with every pick (everyone drafted is group 3), so by the
+  endgame most rows would carry a button — and a `<select>` is sized by its
+  column rather than its content, so it cannot widen the panel. No confirm
+  dialog, per the owner decision the same day: the buyout is a logged
+  transaction, it shows in the Logs panel and the header search, and `Ctrl+Z`
+  reverts it. Its field is `player`, matching `/buyout` and deliberately not
+  `player_name`, which is `/buyout-check`'s query param on the Analyzer's
+  picker — two pickers sharing a name is a reader that cannot tell them apart.
+
+  **The guard that makes the team argument mean something** is that
+  `find_player` runs against the named team only. A lookup that searched the
+  league would take the right player off the wrong cap and toast success: two
+  teams corrupted, nothing on screen to say so. Pinned from both directions —
+  `test_a_player_on_another_roster_is_refused` at the engine and at the
+  endpoint. The set-equality test for the picker is asserted on an **opponent**
+  on purpose: a picker reading `team` instead of `viewed_team` renders BOT's
+  candidates under SRL's heading, which is the 2026-08-05 panel leak in a new
+  control, and on BOT's own panel the two expressions agree so it would look
+  perfect. Eight mutants run, eight died — including penalty-on-BOT,
+  log-against-BOT, view-goes-home, picker-reads-`team`, and the pre-selected
+  first option, which here is a one-click buyout of whoever sorts first rather
+  than the Analyzer's silent no-op.
+
+  Six comments asserting BOT-only moved with the code (`_view_team`'s docstring
+  and call site, `/undo`'s allowlist note, `_search_rows`' display/navigation
+  split, `state.py`'s `_searchable` docstring, CLAUDE.md's view-policy and
+  buyout bullets). The toast now names the team and the dead cap: "Bought out X"
+  was unambiguous only while one roster could be touched, and with no confirm
+  dialog it is the only confirmation there is.
+
 - **A Recompute button on the bid panel's counterfactual, so the card can be
   re-solved at the price actually on the table.** Filed 2026-08-06 as an owner
   finding and deferred "pending draft-day experience"; the owner asked for the

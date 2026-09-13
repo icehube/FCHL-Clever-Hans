@@ -416,15 +416,35 @@ def execute_trade(
 def execute_buyout(
     state: AuctionState,
     player_name: str,
+    team_code: str = MY_TEAM,
 ) -> None:
-    """Execute a buyout on a player on BOT's roster."""
-    team = state.teams[MY_TEAM]
+    """Execute a buyout on a player on `team_code`'s roster.
+
+    ANY team may buy anyone out (CBA 11.4) and this tool is the league's record
+    of all eleven rosters, so a rival's buyout has to be recordable — it was
+    not until 2026-09-12, and an unrecorded one leaves that team's cap wrong in
+    every calculation the app makes about them, the market ceiling included.
+
+    `evaluate_buyout` deliberately does NOT follow: it scores a hypothetical
+    against BOT's MILP total, so run on SRL's roster it would answer a question
+    about the wrong team. Recording an opponent's buyout and advising on your
+    own are different jobs.
+
+    Eligibility is unchanged and is not a function of who owns the contract:
+    group 2/3 only, wherever the player sits.
+    """
+    team = state.teams.get(team_code)
+    if team is None:
+        raise ValueError(f"Unknown team '{team_code}'")
     # Checked here as well as in evaluate_buyout: /buyout posts a bare player
     # name, so guarding only the advisory path leaves the illegal move one
     # hand-made request away — and this one mutates the cap.
     target = team.find_player(player_name)
     if target is None:
-        raise ValueError(f"Player '{player_name}' not found on {MY_TEAM}")
+        # Names the team, because with eleven rosters reachable "not found" on
+        # its own reads as "not in the league" when the real answer is usually
+        # "he is on somebody else's".
+        raise ValueError(f"Player '{player_name}' not found on {team_code}")
     _require_buyout_eligible(target)
 
     player = team.remove_player(player_name)

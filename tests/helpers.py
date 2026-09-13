@@ -208,6 +208,32 @@ def buyout_options(html: str) -> list[str]:
     ]
 
 
+def team_buyout_options(html: str, team_code: str) -> list[str]:
+    """The names the TEAM PANEL's buyout picker offers, for one team.
+
+    A second reader rather than a parameter on `buyout_options`, because the
+    two pickers answer different questions and are scoped differently:
+    `#buyout-panel` holds BOT's advisory Analyzer, while this one is the record
+    control and renders for whichever team `viewed_team` names.
+
+    Addressed by the select's `aria-label` and sliced to `</select>`, the
+    `trade_choices` idiom — NOT by `section_of(html, "team-panel")`, which
+    would sweep up the Trade Between Teams partner dropdown and report eleven
+    team codes as buyout candidates.
+
+    Unescaped for the reason `buyout_options` documents at length: an
+    apostrophe name comes back as `Ryan O&#39;Reilly` and would compare unequal
+    to `Player.name`, turning a membership assertion into one that cannot fail.
+    """
+    marker = f'aria-label="Buy out a player on {team_code}"'
+    start = html.find(marker)
+    assert start != -1, f"no buyout picker for {team_code} in the response"
+    block = html[start:html.index("</select>", start)]
+    return [
+        unescape(n) for n in re.findall(r'<option value="([^"]*)"', block) if n
+    ]
+
+
 def trade_choices(html: str, aria_label: str) -> dict[str, str]:
     """One `.choice-list`'s offer, as {checkbox value: visible label}.
 

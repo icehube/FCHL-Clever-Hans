@@ -780,7 +780,7 @@ class AuctionState:
 
         Live state beats the log, always, and `setdefault` is what enforces
         it. `execute_buyout` removes a player from every list and leaves only
-        a nameless float in `team.penalties`, so his `buyout` record is the
+        a nameless float in that team's `penalties`, so his `buyout` record is the
         sole evidence he existed — but the log is append-only HISTORY, and a
         name appearing in it is not evidence of where he is now. Only the
         collections are.

@@ -299,3 +299,80 @@ class TestExecuteBuyout:
         state, mp = _setup()
         with pytest.raises(ValueError, match="not found"):
             execute_buyout(state, "Ghost Player")
+
+
+class TestBuyingOutAnotherTeamsPlayer:
+    """CBA 11.4 is not a BOT-only rule, and this tool is the league's record.
+
+    Until 2026-09-12 `execute_buyout` read `state.teams[MY_TEAM]`, so a rival's
+    buyout could not be entered at all — and an unrecorded one leaves that
+    team's cap wrong in everything the app computes about them, the market
+    ceiling included.
+    """
+
+    def _eligible_on(self, state, code):
+        return next(p for p in state.teams[code].all_players if p.can_be_bought_out)
+
+    def test_the_penalty_lands_on_that_team_and_not_on_bot(self):
+        state, mp = _setup()
+        rival = state.teams["SRL"]
+        bot = state.teams[MY_TEAM]
+        victim = self._eligible_on(state, "SRL")
+        before = (rival.penalties, bot.penalties, rival.roster_count)
+
+        execute_buyout(state, victim.name, "SRL")
+
+        assert rival.find_player(victim.name) is None
+        assert rival.penalties == pytest.approx(
+            before[0] + victim.salary * BUYOUT_PENALTY_RATE
+        )
+        assert bot.penalties == before[1], "the penalty landed on the wrong cap"
+        assert rival.roster_count == before[2] - 1
+
+    def test_a_player_on_another_roster_is_refused(self):
+        """The guard that makes the team argument mean something.
+
+        `find_player` runs against the NAMED team, so asking SRL to buy out one
+        of BOT's players has to refuse. A lookup that searched the league would
+        buy out the right player from the wrong cap — a silent, plausible-looking
+        corruption of two teams at once.
+        """
+        state, mp = _setup()
+        mine = self._eligible_on(state, MY_TEAM)
+        before = (state.teams["SRL"].penalties, state.teams[MY_TEAM].penalties)
+
+        with pytest.raises(ValueError, match="SRL"):
+            execute_buyout(state, mine.name, "SRL")
+
+        assert state.teams[MY_TEAM].find_player(mine.name) is not None
+        assert (state.teams["SRL"].penalties, state.teams[MY_TEAM].penalties) == before
+
+    def test_an_unknown_team_is_refused(self):
+        state, mp = _setup()
+        with pytest.raises(ValueError, match="Unknown team"):
+            execute_buyout(state, self._eligible_on(state, MY_TEAM).name, "NOPE")
+
+    def test_eligibility_is_not_a_function_of_who_owns_him(self):
+        """Group A-E on a rival is as ineligible as group A-E on BOT."""
+        state, mp = _setup()
+        prospect = next(
+            p for p in state.teams["SRL"].all_players if not p.can_be_bought_out
+        )
+        before = state.teams["SRL"].penalties
+        with pytest.raises(ValueError, match="cannot be bought out"):
+            execute_buyout(state, prospect.name, "SRL")
+        assert state.teams["SRL"].find_player(prospect.name) is not None
+        assert state.teams["SRL"].penalties == before
+
+    def test_the_default_is_still_bot(self):
+        """Two callers still omit it — the Analyzer's Execute button and the
+        older tests above. A default that had drifted would move the penalty
+        somewhere else entirely.
+        """
+        state, mp = _setup()
+        victim = self._eligible_on(state, MY_TEAM)
+        before = state.teams[MY_TEAM].penalties
+        execute_buyout(state, victim.name)
+        assert state.teams[MY_TEAM].penalties == pytest.approx(
+            before + victim.salary * BUYOUT_PENALTY_RATE
+        )

@@ -322,6 +322,75 @@
     {% endif %}
 
     <div class="divider my-1"></div>
+    <h4 class="font-semibold text-xs mb-1">Buy Out</h4>
+    {# Any team may buy anyone out (CBA 11.4) and this tool is the league's
+       record of all eleven rosters, so this renders for whoever is on screen —
+       `viewed_team`, which only this template may read.
+
+       It is not a duplicate of the Buyout Analyzer, which answers a different
+       question. The Analyzer is BOT-ONLY ADVICE: it scores the hypothetical
+       against BOT's MILP total and offers Execute only when the verdict is
+       "buyout". This is the RECORD: it executes whatever the league actually
+       did, including a buyout the MILP rates "keep" — legal, sometimes right
+       for cap reasons the MILP does not model, and until 2026-09-12 impossible
+       to enter from the UI even for BOT.
+
+       A picker rather than a button per row, for the reason the Analyzer
+       became one on 2026-08-15: eligible counts run 4-15 per team on a fresh
+       pool and grow with every pick, since everyone drafted is group 3, so by
+       the endgame most rows would carry a button. A <select> is sized by its
+       column rather than by its content, so this cannot widen the panel.
+
+       `all_players`, never `roster_players`: eligibility is a property of the
+       contract group alone, so a group 2/3 player in the minors is a legal
+       buyout whose salary is fully on cap. Reading the roster list is the
+       2026-08-07 bug that hid 11 of BOT's 15 eligible players.
+
+       `|list` is belt-and-braces, exactly as in buyout_panel.html: `selectattr`
+       returns a GENERATOR and `{% if %}` on one is always truthy, so a filter
+       that stopped matching would render an empty <select> instead of the note
+       below.
+
+       No `bo-` dot in here. Those live in the two roster tables above and
+       nowhere else — `dom_id` mints ONE id per player and the scan resolves OOB
+       targets with querySelectorAll("#"+id), so a second copy is swapped twice. #}
+    {% set buyout_candidates = viewed_team.all_players|selectattr('can_be_bought_out')|sort(attribute='projected_points')|list %}
+    {% if buyout_candidates %}
+    <form hx-post="/buyout" hx-target="#app" hx-swap="innerHTML" class="flex gap-1 items-center">
+        <input type="hidden" name="team_code" value="{{ viewed_team.code }}">
+        {# `player`, matching /buyout's form field — deliberately NOT
+           `player_name`, which is /buyout-check's QUERY param on the Analyzer's
+           picker. Two selects on one page with one name is a reader that cannot
+           tell them apart, in the tests and in the head.
+
+           The empty first option is load-bearing twice over: it is what the
+           Analyzer needed so the top candidate is not pre-selected, and here it
+           also means a stray Enter or click cannot buy out whoever happens to
+           sort first. `required` is the other half — the server would refuse an
+           empty name, but noisily, after a snapshot. #}
+        <select name="player" required aria-label="Buy out a player on {{ viewed_team.code }}"
+                class="select select-xs select-bordered flex-1 min-w-0">
+            <option value="" disabled selected>Pick a player…</option>
+            {% for p in buyout_candidates %}
+            {# `(M)` as plain text: an <option> may not carry markup. #}
+            <option value="{{ p.name }}">{{ player_label(p, with_position=false) }}{% if p.is_minor %} (M){% endif %}</option>
+            {% endfor %}
+        </select>
+        {# No hx-confirm (owner decision 2026-09-12): the buyout is a logged
+           transaction, it shows in the Logs panel and the header search, and
+           Ctrl+Z reverts it — so a mis-click is visible and reversible, which
+           is the same standard the other roster-edit controls are held to. #}
+        <button type="submit" class="btn btn-xs btn-error">Buy Out</button>
+    </form>
+    <p class="text-xs opacity-60 mt-1">50% of the salary stays on {{ viewed_team.code }}'s cap (CBA 11.4).</p>
+    {% else %}
+    {# An empty <select> is a control that looks broken — buyout_panel.html's
+       note, for the same reason. Reachable: MAC has 4 eligible today and a team
+       of pure group A-E keepers would have none. #}
+    <p class="text-xs opacity-60">No group 2/3 players on {{ viewed_team.code }} to buy out.</p>
+    {% endif %}
+
+    <div class="divider my-1"></div>
     <h4 class="font-semibold text-xs mb-1">Trade Between Teams</h4>
     {# One column, not three. At 1280 this panel is 415px, so `grid-cols-3` gave
        each control 120px against labels wanting 229px — more than half of every

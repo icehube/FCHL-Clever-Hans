@@ -95,7 +95,11 @@ counterfactual was closed by building the Recompute button, and the cold
 `/bid-check` and the opponent-edit exposure were closed as decisions
 (`CHANGELOG.md`). **2026-09-13 took it to eleven**: the owner ran a full
 139-pick draft and the planning-ceiling entry, the only one genuinely waiting on
-an auction rather than on an opinion, closed on the numbers it asked for. Keep
+an auction rather than on an opinion, closed on the numbers it asked for.
+**2026-09-14 put it back to twelve**: refreshing `team_odds.json` to the
+2026-2027 Cup odds filed one, and it is a finding about this file's own safety
+net rather than about the app — the refresh changed all 32 clubs and the suite
+noticed nothing. Keep
 the count and the file in step: it has now been wrong three times, every one of
 them an entry added or closed without the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
 four regions now, not three; `bid_limits` is 705 rows, not 704; the exact
@@ -112,7 +116,8 @@ rather than waiting for the draft to produce an opinion; the fourth — the
 planning ceiling — expired on 2026-09-13 when the draft was actually run and
 `tests/measure_replay.py` answered it at **0 of 139 picks**. What is left is
 parked on two different kinds of thing: the next `players.csv` refresh (two
-entries), and ordinary cost-versus-benefit. **Asking is a way to expire one and
+entries), the next `team_odds.json` refresh (one), and ordinary
+cost-versus-benefit. **Asking is a way to expire one and
 so is doing it**, and the ratio is worth knowing — four of seven draft-day items
 needed a sentence from the operator, one needed the auction, and the auction
 then took eleven hours and produced a single closed entry.
@@ -155,6 +160,7 @@ hypothesis unless it says what was measured.
 
 - [2026-08-17] [review] tests/test_browser_ui.py:524 (test_an_over_cap_adjust_salary_toast_renders_and_dismisses) — **flakes under full-suite load with `Page.evaluate: Resulting promise was garbage collected`**, a Playwright teardown error rather than an assertion failure. Observed once in a 777-test run 2026-08-17; the same test passes 3/3 in isolation and the whole browser file passes 35/35 on its own (98s), so it is contention, not a regression — nothing in that commit touched the browser suite. The mechanism fits the test: it fires `htmx.ajax` from the page and then evaluates against the resulting toast, so a slow response under load can outlive the evaluate's promise. Deferred rather than papered over with a retry: a `flaky`/rerun decorator would hide a real regression in the one suite that checks things `TestClient` physically cannot, and CLAUDE.md already names `-m "not browser"` as the draft-day escape hatch. Worth a fix only if it recurs — at which point the shape is awaiting the specific toast element before evaluating, not a blanket rerun. Note the existing closed interaction-budget entry covers a *different* problem (wall-clock assertions going flaky under load); this one has no timing assertion at all
 - [2026-08-07] [refresh-drill] data_loader.py (_disambiguated_names) — the duplicate-name suffix is a workaround for a naming assumption, not a repair of it: the player NAME is still the primary key, so two players who share one are kept apart by a display string rather than by identity. A stable player id as the key would make the ambiguity structurally impossible and keep names clean on screen. Deferred by owner decision (2026-08-07), with the inventory recorded here so the follow-up does not have to rediscover it: `available_players`, `market_prices`/`model_prices`, `find_player`, ~20 endpoints taking a `player` form field, the transaction log, the trade dropdowns, and the `bo-<name>` DOM ids — plus `to_json`/`from_json`, so saved drafts and the undo chain need a migration. Large, and it touches the assign and bidding paths a live draft depends on
+- [2026-09-14] [refresh-drill] tests/test_data_loader.py:476 (_fingerprint) — **a complete `team_odds.json` refresh moves no number in the fingerprint, so the documented "expect exactly one failure" step does not fire.** The only odds field is `odds_sum_percent`, and a correctly de-vigged odds file sums to ~100 *by construction* — so the one quantity pinned is the one that cannot change. Measured on the 2025-2026 → 2026-2027 refresh: all 32 clubs took new values (EDM 11.04% → 6.76%, SJS 0.17% → 4.96%), the season string changed, the pool re-priced $637.5M → $631.2M, and the suite went 1213-green with no diff to read. The invariants beside it are genuinely blind here too: `test_every_nhl_club_in_every_pool_has_cup_odds` checks that every club has *an* entry, never which. So the failure mode the fingerprint exists to catch — a refresh that silently drops or respells half the file — is caught for `players.csv` and not for this one, and a file that swapped two clubs' odds would ship silently. Deferred because the obvious fix is the mistake the three-way split removed: pinning 32 per-club values recreates the 19 exact live numbers that drowned two real bugs in a refresh diff. The shape worth considering is one line that is *derived* and still scannable — the sorted top-5 codes, or a digest of the canonical dict — which needs a decision about what a useful odds diff actually reads like, not just more numbers
 
 ---
 

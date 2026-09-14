@@ -20,6 +20,46 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-14]
+
+### Changed
+
+- **`data/team_odds.json` refreshed to the 2026-2027 Stanley Cup odds.** Season
+  string `2025-2026` → `2026-2027`, all 32 clubs re-valued. The source was a
+  sportsbook table carrying both American odds and a rounded implied-percent
+  column, and **the percent column is not what went in the file**: it sums to
+  **112%**, is rounded to half-points, and disagrees with its own odds on two
+  rows (FLA +770 implies 11.494% but is printed 12.0%; COL +852 implies 10.504%
+  against 11.0%). The file stores **vig-removed fractions** — the previous one
+  summed to 0.9999 — so each club's implied probability was computed from the
+  American price, `p = 100 / (odds + 100)`, and the 32 values normalised by
+  their own total of **111.006%**. Rounded to 4dp the result sums to 0.9999,
+  the same figure the old file carried, which is why `odds_sum_percent` in the
+  data fingerprint did not move (see below).
+- **The biggest movers are the top of the board, and the direction is not
+  uniform.** EDM 11.04% → **6.76%**, DAL 8.72% → 4.96%, WPG 3.60% → 0.90%, LAK
+  3.94% → 1.35%; the other way, SJS 0.17% → **4.96%**, MIN 2.30% → 5.86%, BUF
+  0.55% → 3.15%, WSH 2.86% → 4.96%. FLA takes over the top spot from EDM.
+- **Priced impact is small, because `team_probability` is the fourth-largest of
+  the five drivers** (mean effect 0.079 against Points' 0.445 — see
+  `.claude/rules/pricing-pipeline.md`). Measured over the live 705-player pool:
+  total expected price **$637.5M → $631.2M (−0.98%)**, and the largest single
+  move is **$0.81M** (Jason Robertson, DAL). No club respelling, so every pool
+  still resolves — `test_every_nhl_club_in_every_pool_has_cup_odds` passes on
+  all four `data/players*.csv`, and the `UTH`→`UTA` alias still points at one
+  number.
+- **The documented refresh protocol's "expect exactly one failure" step did not
+  fire, and that is a gap rather than a pass.** The full suite went
+  **1213 passed, 2 skipped** with no fingerprint diff to read, because the only
+  odds quantity `_fingerprint` pins is `odds_sum_percent` — which is ~100 *by
+  construction* for any correctly de-vigged file and therefore cannot detect a
+  refresh. The invariants beside it check that every club has **an** entry,
+  never which one, so a file that swapped two clubs' odds would ship silently.
+  Filed in `BACKLOG.md` rather than fixed here: the obvious repair — pinning 32
+  per-club values — recreates the 19 exact live numbers that the three-way split
+  of `tests/test_data_loader.py` removed precisely because they drowned two real
+  bugs in a refresh diff.
+
 ## [2026-09-13]
 
 ### Added

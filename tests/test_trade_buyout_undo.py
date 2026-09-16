@@ -993,10 +993,25 @@ class TestARejectedEditCostsNoUndoDepth:
         raise AssertionError("every BOT roster player is benched — no rejection available")
 
     def _ineligible(self):
-        """A BOT player /buyout must refuse: contract group outside 2/3."""
+        """A BOT player /buyout must refuse: contract group outside 2/3.
+
+        Searches `all_players`, which is roster PLUS minors, and that is the set
+        the endpoint and the picker both work over — `can_be_bought_out` is a
+        property of the contract group alone, so where a player sits does not
+        enter it (CLAUDE.md, "Buying out is two controls").
+
+        It read `roster_players` until 2026-09-15, which stopped finding anything
+        the moment STATUS began being derived FROM the contract group (owner
+        decision, same day): `2`/`3` map to START and `A`-`F` to MINOR, so every
+        active player is eligible by construction and every ineligible one is in
+        the minors. Measured on the 2026-27 pool, **all eleven teams** have zero
+        ineligible actives and 1-35 ineligible minors. That is structural, not a
+        run of luck — a pool where this test could find its subject on the active
+        roster is one where the STATUS derivation has changed.
+        """
         import main
 
-        for p in main.auction_state.teams["BOT"].roster_players:
+        for p in main.auction_state.teams["BOT"].all_players:
             if p.group not in BUYOUT_ELIGIBLE_GROUPS:
                 return p.name
         raise AssertionError("BOT holds no buyout-ineligible player")

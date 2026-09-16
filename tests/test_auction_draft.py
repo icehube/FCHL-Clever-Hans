@@ -140,6 +140,20 @@ class TestAuctionDraftSimulation:
         _state["baseline_market_ceiling"] = main.market_info.market_ceiling
         _state["milp_history"] = [main.milp_solution.total_points]
         _state["picks"], _state["spare"] = _script()
+        # The early half of test_19's comparison, taken HERE rather than in
+        # test_04, so the two samples straddle all nine picks instead of picks
+        # 3-9. Measured 2026-09-15: across picks 3-9 BOT's budget fell $38.8M ->
+        # $28.3M and its roster grew 7 -> 10, and the spare's panel came back
+        # BYTE-IDENTICAL — correctly, because his `value_cap` is what he adds to
+        # a starting lineup that is nowhere near full, and nothing in that window
+        # bound it. Straddling pick 1 as well moves it. So test_19's premise is
+        # real but it needs a wider window than a two-pick head start; the old
+        # placement passed on the 2025-26 pool and had no margin to spare.
+        _state["early_bid_check"] = client.post("/bid-check", data={
+            "player": _state["spare"],
+            "price": str(BID_CHECK_PRICE),
+            "bidders": "",
+        }).text
         _state["prev_available"] = len(state["available_players"])
         _state["team_salaries"] = {
             code: _team_salary(t) for code, t in state["teams"].items()
@@ -159,15 +173,24 @@ class TestAuctionDraftSimulation:
         """Pick 2: $5.0M — BOT pick."""
         self._assign_and_verify(client, 1)
 
-    def test_04_bid_check_early(self, client):
-        """Bid-check the spare early (BOT has plenty of budget)."""
-        r = client.post("/bid-check", data={
-            "player": _state["spare"],
-            "price": str(BID_CHECK_PRICE),
-            "bidders": "",
-        })
-        assert r.status_code == 200
-        _state["early_bid_check"] = r.text
+    def test_04_the_early_bid_check_is_a_real_panel(self, client):
+        """The baseline sample test_19 compares against, checked for substance.
+
+        The capture itself moved into `test_01` (see the comment there). This
+        step stays because test_19's `assert early != late` is satisfied by an
+        early sample that is an error page, a not-found branch, or the wrong
+        player — all three differ from a live panel, and all three would make the
+        comparison pass while proving nothing.
+        """
+        early = _state.get("early_bid_check", "")
+        assert '<div id="bid-panel">' in early, "the baseline sample is not a bid panel"
+        # Both branches of bid_panel.html carry id="bid-advice" on purpose, so
+        # the id cannot tell them apart — the verdict block's `bid-result` class
+        # is what separates advice from the not-found alert.
+        assert 'class="bid-result bid-' in early, (
+            "the baseline sample rendered the not-found branch — the spare was "
+            "not in the pool at baseline, which no ordering should allow"
+        )
 
     def test_05_pick_03_to_srl(self, client):
         """Pick 3: SRL at $5.5M."""
@@ -266,7 +289,11 @@ class TestAuctionDraftSimulation:
         )
 
     def test_19_bid_check_changed(self, client):
-        """Bid advice should differ between early and late in the draft."""
+        """Bid advice should differ between baseline and late in the draft.
+
+        The early sample is taken at baseline, before pick 1 — see the comment
+        in `test_01` for the measurement that moved it there.
+        """
         early = _state.get("early_bid_check", "")
         late = _state.get("late_bid_check", "")
         assert early, "Early bid check should have been captured"

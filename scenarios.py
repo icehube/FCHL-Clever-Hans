@@ -145,6 +145,7 @@ def _drain(
     price: dict[str, float],
     reserved: set[str],
     target_spendable: float,
+    up_to: int = ROSTER_SIZE,
 ) -> None:
     """Buy real players at model price until `spendable_budget` drops to target.
 
@@ -170,10 +171,21 @@ def _drain(
     MIN_SALARY, so `room` caps the choice and a scenario that ignored it would
     be modelling an auction the league forbids.
 
+    `up_to` is the OTHER stopping condition and it is not cosmetic. Whether a
+    team runs out of roster before it runs out of money is a property of the
+    POOL: on the 2025-26 pool a drain to $12.0M left every team at 13-16 players
+    with room for the staggered `_fill` above it, and on the 2026-27 pool the
+    same call ran five of them to 24 — which no-ops the fill, zeroes
+    `roster_needs`, and silently converts "everyone has holes" into "half the
+    league is full". Defaulting to `ROSTER_SIZE` keeps the endgame scenarios
+    unchanged; a caller that has a target size passes it here as well as to
+    `_fill`, and lets `_squeeze` take whatever money is left over rather than
+    letting the drain spend it on a 24th player.
+
     Ties break on name so two loads of the same scenario are identical; the tests
     assert that, and `dict` order alone would tie it to CSV row order.
     """
-    while team.spendable_budget > target_spendable and team.roster_count < ROSTER_SIZE:
+    while team.spendable_budget > target_spendable and team.roster_count < up_to:
         room = team.remaining_budget - (team.total_spots_remaining - 1) * MIN_SALARY
         headroom = team.spendable_budget - target_spendable
         ceiling = min(room, headroom + MIN_SALARY)
@@ -338,9 +350,25 @@ def _scenario_endgame_last_goalie(state: AuctionState) -> None:
         (p for p in bot.roster_players if p.position == "G"),
         key=lambda p: (p.projected_points, p.name),
     )
-    for spare in crease[:max(0, len(crease) - (POSITION_MINIMUMS["G"] - 1))]:
+    wanted = POSITION_MINIMUMS["G"] - 1
+    # Weakest first, keeping the best -- `crease` is sorted ascending.
+    for spare in crease[: max(0, len(crease) - wanted)]:
         spare.is_bench = True  # send_to_minors' precondition
         bot.send_to_minors(spare.name)
+
+    # ...and RECALL when BOT starts with too few. The docstring above says the
+    # count is keeper data that moves every season, and it does: the 2026-09-15
+    # pool leaves BOT no active goalie at all (nine are in its minors), so
+    # demoting alone left the crease empty, BOT needing TWO, and the scenario
+    # quietly testing a state where the last seat cannot be filled by one
+    # player. Best first, so the survivor is the same shape as the demote
+    # branch's -- the tie-break on name keeps two loads identical.
+    spares = sorted(
+        (p for p in bot.minor_players if p.position == "G"),
+        key=lambda p: (-p.projected_points, p.name),
+    )
+    while sum(1 for p in bot.roster_players if p.position == "G") < wanted and spares:
+        bot.recall_from_minors(spares.pop(0).name)
 
     # Goalies are reserved from BOT's own buying: the point is the hole in the
     # crease, and `_drain` would happily fill it with the best one in the pool.
@@ -395,9 +423,22 @@ def _scenario_endgame_sole_bidder(state: AuctionState) -> None:
     MIN_SALARY, so `spendable_budget` can never go negative and
     `physical_max_bid` never drops below MIN_SALARY while a spot remains. The only
     legal way to price a team out completely is therefore a FULL roster with less
-    than one increment of cap left — which is what `_drain` to zero followed by
-    `_fill` to 24 produces (measured: all ten land at $0.0-0.1M). A floor purchase
-    moves `spendable_budget` by nothing, so the fill cannot undo the drain.
+    than one increment of cap left — which is what `_drain` to zero, `_fill` to
+    24 and a `_squeeze` to $0.0M produce. A floor purchase moves
+    `spendable_budget` by nothing, so the fill cannot undo the drain.
+
+    **The squeeze is not belt-and-braces; the drain cannot finish the job on its
+    own.** `_drain` stops at `ROSTER_SIZE`, so a team whose roster runs out
+    before its money does keeps whatever is left — and which teams those are is a
+    property of the POOL, not of the code. On the 2025-26 pool all ten landed at
+    $0.0-0.1M and this scenario shipped without a squeeze for a month; on the
+    2026-27 pool, where the eleven rosters arrive 250 players deep, **VPP stopped
+    at 24 with $5.3M and HSM with $12.5M** — two live bidders in a scenario whose
+    entire premise is that there are none, surfacing as `test_nobody_can_outbid_bot`
+    rather than as anything readable. `_squeeze` is the lever purchases cannot
+    pull (see its docstring), and at `spots == 0` it sets `remaining_budget`
+    itself, so the dead cap reads as contracts bought out by a league that spent
+    everything.
 
     **Nobody is marked done, and that is the whole point.** `bid_panel.html`
     filters the bidder grid on `is_done` alone, so these teams stay clickable
@@ -427,6 +468,7 @@ def _scenario_endgame_sole_bidder(state: AuctionState) -> None:
             continue
         _drain(team, state, price, set(), 0.0)
         _fill(team, state, price, set())
+        _squeeze(team, 0.0)
 
 
 def _squeeze(team: TeamState, target_max: float) -> None:
@@ -519,10 +561,23 @@ def _late_draft_shape(
     `_fill` to a staggered size with depth, then `_squeeze` onto a staggered
     physical max. Spending first is not decoration — it is what keeps the
     penalties plausible: measured, no drain at all needs $15.2M to $28.3M of dead
-    cap per team, draining to $12.0M needs **$9.0M to $11.0M**, and draining
+    cap per team, draining to $12.0M needs **$9.7M to $19.9M**, and draining
     deeper does not help (at $8.0M and $5.0M some teams reach 24 players, which
     destroys the premise, while the penalty spread widens to $5.4-15.9M and
     $2.9-19.5M).
+
+    **The drain and the fill share one size, and the drain is bounded by it.**
+    That is the `up_to=size` below, and it is what stops the drain running a team
+    to 24 and no-opping the fill above it — see `_drain`. The cost is at the top
+    of the penalty band: a team whose roster fills before its budget empties
+    keeps the rest as dead cap, so the 2026-27 pool (whose unreserved tier tops
+    out at **$4.0M**, with only 11 players over $3.0M and 500 of 653 at the
+    floor) cannot absorb $25M a side in 17-21 players the way the 2025-26 one
+    could, and $9.0-11.0M became $9.7-19.9M. Two ways to narrow it again if it
+    ever matters: fill larger, or reserve fewer than `_reserved_top`'s 25 so the
+    $4-10M tier is drainable. Both trade against something this file already
+    measures, which is why neither was done for a band that is still inside what
+    CBA 11.4 can produce.
 
     **The stagger is load-bearing, not cosmetic.** The market ceiling is the
     SECOND-highest opponent max; ten teams on the same number make "second"
@@ -543,9 +598,9 @@ def _late_draft_shape(
     last = max(1, len(codes) - 1)
     for i, code in enumerate(codes):
         team = state.teams[code]
-        _drain(team, state, price, reserved, 12.0)
-        _fill(team, state, price, reserved,
-              up_to=fill_lo + (i * (fill_hi - fill_lo)) // last)
+        size = fill_lo + (i * (fill_hi - fill_lo)) // last
+        _drain(team, state, price, reserved, 12.0, up_to=size)
+        _fill(team, state, price, reserved, up_to=size)
         _squeeze(team, round(lo + i * (hi - lo) / last, 1))
 
 
@@ -567,6 +622,20 @@ def _leave_bot_planning(
     * $18.0M / $20.0M — 18 players and 6 spots, but $11.0M and $13.0M of dead cap,
       which reads as absurd on your own roster.
 
+    **Those four are the 2025-26 sweep and the target it chose survives; the
+    figures it chose between do not.** Re-measured 2026-09-15, the $16.0M target
+    lands BOT at **18 players, 6 spots, $10.0M remaining, $7.5M physical max,
+    needs {D: 2}, penalty $21.3M** — the drain now stops on `up_to=18` rather
+    than on its budget, because the 2026-27 pool's drainable tier tops out at
+    $4.0M (see `_late_draft_shape`). The penalty is past the band the last bullet
+    calls absurd, and it is kept anyway for one reason: the sweep was choosing
+    between targets on the state each PRODUCED, and on this pool every target
+    above $12.0M produces the same 18-player roster, so re-running it would
+    re-derive $16.0M and change nothing. What is worth knowing is that the
+    plausibility argument no longer holds on this pool for BOT or for the eight
+    opponents at the top of their band, and the lever that would fix it is the
+    reserve, not the target.
+
     $7.5M is deliberately under MAX_SALARY: a physical max sitting at the league
     maximum cannot be told apart from `physical_max_bid`'s clamp, which is the
     mistake `endgame-last-goalie` was built to avoid. The penalty lands in the
@@ -574,7 +643,7 @@ def _leave_bot_planning(
     than as BOT being special.
     """
     bot = state.teams[MY_TEAM]
-    _drain(bot, state, price, reserved, 16.0)
+    _drain(bot, state, price, reserved, 16.0, up_to=18)
     if bot.roster_count < 18:
         _fill(bot, state, price, reserved, up_to=18)
     _squeeze(bot, 7.5)
@@ -602,11 +671,14 @@ def _scenario_drained_late_draft(state: AuctionState) -> None:
     are live, every one of them still needs players, and the ceiling binds anyway
     — because the money is gone.
 
-    Measured 2026-08-18: ceiling **$3.3M**, strictly inside the floor/cap range
-    and the second of ten distinct maxes ($3.5M / $3.3M / $3.1M / ...);
-    `demand_count` 10 with `floor_demand` False; rosters 17-21 with 3-7 spots
-    each and nobody done; **25 of 597** pool prices capped; every team's MILP
-    Optimal. Build 16ms.
+    Re-measured 2026-09-15 on the 2026-27 pool: ceiling **$3.3M**, strictly
+    inside the floor/cap range and the second of ten distinct maxes ($3.5M /
+    $3.3M / $3.1M / ...); `demand_count` 10 with `floor_demand` False; rosters
+    17-21 with 3-7 spots each and nobody done; **25 of 554** pool prices capped;
+    every team's MILP Optimal. Build 14ms. (The 2025-26 figures were the same
+    ceiling and the same capped count over 597 players — the ceiling is set by
+    `_late_draft_shape`'s spread, which is a constant, so it is the pool size and
+    the penalty band that moved, not the state this scenario is about.)
 
     What it is for: this is the only loadable state where the bid panel's
     forecast half says something about a player rather than reporting `at_cap`.
@@ -636,11 +708,15 @@ def _scenario_full_roster_still_bidding(state: AuctionState) -> None:
     folded in: there the ceiling collapses to the floor, here a team that cannot
     roster anybody sets the league's clearing price.
 
-    Measured 2026-08-18. **MAC: 24 players, 0 spots, `roster_needs` all zero,
-    `physical_max_bid` $8.0M** on $8.0M of remaining budget — and
-    `market_ceiling` is $8.0M with `second_bidder` MAC. GVR is highest at $10.0M
-    with 7 spots still open, the other eight opponents run $3.0M down to $1.5M at
-    17-21 players, nobody is done, every team's MILP is Optimal. Build 13ms.
+    Re-measured 2026-09-15 on the 2026-27 pool. **LPT: 24 players, 0 spots,
+    `roster_needs` all zero, `physical_max_bid` $8.0M** on $8.0M of remaining
+    budget — and `market_ceiling` is $8.0M with `second_bidder` LPT. SRL is
+    highest at $10.0M with 7 spots still open, the other eight opponents run
+    $3.0M down to $1.5M at 17-21 players, nobody is done, every team's MILP is
+    Optimal. Build 13ms. **Which CODE plays which part is not fixed** — the two
+    rich teams are `by_wealth[0]` and `by_wealth[1]`, so a pool refresh that
+    changes who starts richest reassigns them; it was MAC and GVR on the 2025-26
+    pool. Assert the ROLE, never the code.
 
     **The counterfactual is the point, and it is a number**: the second-highest
     max among opponents WITH SPOTS is $3.0M, so a ceiling rule that gated on
@@ -668,7 +744,7 @@ def _scenario_full_roster_still_bidding(state: AuctionState) -> None:
       destroy the test: with the highest and the second both full, "the ceiling is
       set by a team with no roster space" can no longer fail.
 
-    Only **2 of 594** pool prices are capped here — exactly the two players whose
+    Only **5 of 550** pool prices are capped here — exactly the players whose
     model price exceeds $8.0M. That is expected at this ceiling and this scenario
     is not the one for the capped marker; `drained-late-draft` is.
     """
@@ -681,7 +757,7 @@ def _scenario_full_roster_still_bidding(state: AuctionState) -> None:
     full, rival = by_wealth[0], by_wealth[1]
     for code, up_to, target_max in ((full, ROSTER_SIZE, 8.0), (rival, 17, 10.0)):
         team = state.teams[code]
-        _drain(team, state, price, reserved, 12.0)
+        _drain(team, state, price, reserved, 12.0, up_to=up_to)
         _fill(team, state, price, reserved, up_to=up_to)
         _squeeze(team, target_max)
     _late_draft_shape(state, price, reserved, by_wealth[2:], spread=(1.5, 3.0))

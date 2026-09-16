@@ -1886,15 +1886,35 @@ class TestTheBuyoutPickerIsOneRow:
         on 15 rows, 468px of list inside a 587px panel, growing with every group
         2/3 pick. The threshold is generous — it is here to fail loudly if the
         list is ever re-expanded, not to pin a layout to the pixel.
-        """
-        _open(page, live_server)
-        self._open_analyzer(page)
 
-        n, height = page.evaluate("""() => {
-            const p = document.querySelector('#buyout-panel');
-            return [p.querySelectorAll('option').length - 1,
-                    p.getBoundingClientRect().height];
-        }""")
+        **Loads a scenario, because a fresh league no longer has the candidates
+        the claim is about.** The list grows with every group 2/3 pick, so the
+        number to measure is a DRAFTED BOT's, and how many it starts with is a
+        property of the pool: the 2025-26 file seated 15 eligible contracts on
+        BOT at reset, the 2026-27 file seats **6** — its actives are all group
+        2/3 and its 21 minors are all `A`-`F`, which is what deriving STATUS
+        from the contract group produces (owner decision 2026-09-15). Six rows
+        are short whatever the picker does, so the precondition was the thing
+        that failed, correctly. `drained-late-draft` puts BOT at 18 eligible of
+        39, which is the regime the 468px measurement came from.
+        """
+        # `live_server` is session-scoped and nothing resets the state between
+        # browser tests, so the scenario has to be put back or it becomes the
+        # starting state of whatever pytest-randomly runs next.
+        try:
+            page.request.post(f"{live_server}/load-scenario",
+                              form={"name": "drained-late-draft"})
+            _open(page, live_server)
+            self._open_analyzer(page)
+
+            n, height = page.evaluate("""() => {
+                const p = document.querySelector('#buyout-panel');
+                return [p.querySelectorAll('option').length - 1,
+                        p.getBoundingClientRect().height];
+            }""")
+        finally:
+            page.request.post(f"{live_server}/reset")
+
         assert n >= 10, f"only {n} candidates — the fixture no longer exercises this"
         assert height < 250, (
             f"#buyout-panel is {height:.0f}px tall with {n} candidates; the "

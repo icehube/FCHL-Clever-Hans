@@ -8,6 +8,7 @@ validation responses.
 import json
 import os
 import re
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -369,7 +370,15 @@ class TestCounterfactualAutoLoads:
             panel, re.S,
         )
         assert mount, "the bid panel no longer auto-loads a counterfactual"
-        assert "Connor%20McDavid" in mount.group(1), mount.group(1)
+        # Derived and UNQUOTED, never a percent-encoded literal. This read
+        # `"Connor%20McDavid" in ...` until 2026-09-15 and stopped matching the
+        # moment the pool was refreshed — `tests/test_no_literal_player_names.py`
+        # could not see it, because it compares full names against the pool and
+        # a percent-encoded one is not one. Unquoting also keeps the assertion
+        # about WHICH player rather than about the encoder's safe-character set.
+        assert unquote(mount.group(1)).startswith(f"/explain/{pool_top(1)[0]}"), (
+            mount.group(1)
+        )
         assert "inline=1" in mount.group(1), (
             "must request the body-only fragment; the full panel would put a "
             "second id=\"explanation\" on the page"

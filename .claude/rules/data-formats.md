@@ -12,10 +12,10 @@ Single source for all players: keepers, auction-eligible, and minor leaguers.
 
 ```csv
 PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS,PRIOR FCHL TEAM
-Nikita Kucherov,F,3,START,LGN,TBL,31,8.5,0,144,
-Connor McDavid,F,RFA2,,RFA,EDM,27,11.4,0,132,SRL
-Artemi Panarin,F,3,,UFA,NYR,32,7.3,0,120,
-Connor Ingram,G,3,MINOR,BOT,UTH,27,0.5,0,30,
+Connor McDavid,F,3,START,GVR,EDM,30,11.4,0,131,
+Nikita Kucherov,F,3,,UFA,TBL,34,10.0,0,128,
+Gabriel Vilardi,F,RFA2,,RFA,WPG,28,0.9,0,72,ZSK
+Dylan Holloway,F,C,MINOR,BOT,STL,25,1.6,0,67,
 ```
 
 ### Column meanings
@@ -39,7 +39,7 @@ Connor Ingram,G,3,MINOR,BOT,UTH,27,0.5,0,30,
 **The player name is the app's primary key** — `available_players`,
 `market_prices`, `find_player`, every endpoint's `player` form field, the
 transaction log, and the `bo-<name>` DOM ids. `players.csv` does not guarantee
-uniqueness: as of 2026-08-07 it had 2158 rows and 2155 distinct names.
+uniqueness: as of 2026-09-15 it has 1268 rows and 1267 distinct names.
 
 `data_loader._disambiguated_names` suffixes every row of a colliding group,
 escalating only as far as it must: `Name (TEAM)`, then `Name (TEAM POS)` when
@@ -48,15 +48,24 @@ never just the later ones — `X` beside `X (VAN D)` reads as one player listed
 twice. The renames are logged and shown in an `#data-warning` banner (separate
 from `#startup-warning`, which `/reset` clears).
 
-Two ways a collision breaks things, and both are live in the current file:
+Two ways a collision breaks things. Both were live in the 2025-26 file; the
+2026-27 refresh left **one** colliding group and it is the first kind:
 
 - **two biddable rows** — `biddable[name] = ...` overwrote one, so `Matt Murray`
   (DAL and TOR) made 705 eligible rows load as 704 and the DAL one could not be
-  drafted at all;
+  drafted at all. The live case today is `Elias Pettersson`, two Vancouver
+  players who share a club as well as a name, so he escalates to the `(TEAM
+  POS)` tier: `Elias Pettersson (VAN F)` and `Elias Pettersson (VAN D)`. Both
+  are biddable, both carry points, and both are therefore draftable — which is
+  the rename doing its job.
 - **a roster row and a biddable row** — different dicts, nothing overwrites, so
-  the same name is owned *and* draftable (`Jack Hughes`, `Elias Pettersson`).
-  Only the zero-point exclusion hides those today; a projection refresh removes
-  it.
+  the same name is owned *and* draftable. `Jack Hughes` and `Elias Pettersson`
+  were both this shape in the 2025-26 file, hidden only by the zero-point
+  exclusion dropping the biddable half, and `BACKLOG.md` recorded that the next
+  projection refresh would remove the cover. Re-checked on the 2026-27 pool
+  (2026-09-15): **this shape no longer occurs at all** — the one remaining group
+  is biddable-vs-biddable. That is the pool changing, not the hazard being
+  fixed, so the entry stays.
 
 The goalie-wins join uses the **raw** CSV name, because
 `goalie_projection_stats.csv` carries that and cannot disambiguate either —
@@ -122,17 +131,41 @@ players**, which on screen is indistinguishable from a finished draft.
 no biddables. It synthesizes `GROUP` from team + status — `UFA -> 3`,
 `RFA -> RFA2`, `MINOR -> A`, otherwise `3`. `MINOR -> A` is the consequential
 one: it keeps those salaries **off cap** and out of buyout eligibility, matching
-the current file, where 145 of 149 MINOR rows are `A`-`E`. Rows on a team code
+the current file, where **166 of 170** MINOR rows are `A`-`E` (the other 4 are
+`F`, which behaves identically — it is in none of `RFA_GROUPS`,
+`MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`). On the 2026-27 file the match
+is exact rather than approximate, because STATUS is **derived** from the
+contract group there (owner decision 2026-09-15: `2`/`3` -> `START`, `A`-`F` ->
+`MINOR`), so no group-2/3 player is a minor and no `A`-`F` player is a starter.
+Two consequences worth knowing: the league's cap-used figure is understated,
+measured at $20.7M against the hand-maintained 2025-26 file (8.9% of rows
+wrong); and every buyout-INELIGIBLE contract is now in the minors by
+construction, which is why `test_trade_buyout_undo.py::_ineligible` searches
+`all_players` rather than `roster_players`. Rows on a team code
 `fchl_teams.json` does not have are held back and printed, rather than being
 swallowed by `build_initial_state` (which ignores unknown codes in silence).
 
-**`NHL TEAM` is joined from the current `players.csv`** by normalized name
-(`--nhl-teams`, on by default), covering 869 of 876 rows. Three normalizations
-matter, and two of them undo damage in the pool file rather than era drift: the
-legacy file writes a **backtick** for an apostrophe; `players.csv` renders `-`
-as `0` (`Oliver Ekman0Larsson`) and `ari` as `UTH` (`Eetu LuostUTHnen`), from
-two find-and-replaces — see the open finding in `BACKLOG.md`. Matching also
-strips a trailing parenthetical (`Tony DeAngelo (NCM)`) and falls back to
+**`NHL TEAM` is joined from the canonical pools** by normalized name
+(`--nhl-teams`, repeatable; `DEFAULT_NHL_SOURCES` is `players.csv` then
+`players-25.csv`, tried in that order with the first answer winning). Coverage
+is **714 of 876** as of 2026-09-15, down from 869 of 876: the donor is whatever
+`players.csv` holds, and the 2026-27 refresh cut it from 2158 rows to 1268 by
+dropping 885 unprojected prospects, which took the single-donor figure to 644.
+Chaining `players-25.csv` behind it recovers 70 of those. It will not reach 869
+again — a 2023 player who has left the league since is in no pool this repo
+carries — and chaining is deliberately not merging, because a player listed on
+two clubs by two pools would be refused by the tie guard below.
+
+Three normalizations matter, and two of them undo damage in the *2025-26* pool
+file rather than era drift: the legacy file writes a **backtick** for an
+apostrophe; that `players.csv` rendered `-` as `0` (`Oliver Ekman0Larsson`) and
+`ari` as `UTH` (`Eetu LuostUTHnen`), from two find-and-replaces. **Neither
+artefact survives the 2026-27 refresh** — measured 2026-09-15, no pool file in
+the repo now contains a digit-zero hyphen, and none spells Utah `UTH`. The
+normalizations stay, and `test_normalization_undoes_how_the_two_files_spell_a_name`
+supplies its own synthetic cases rather than relying on the pool: the file is
+replaced before every draft and the next export may reintroduce either. Matching
+also strips a trailing parenthetical (`Tony DeAngelo (NCM)`) and falls back to
 first-initial + surname for a spelled-out nickname.
 
 Two guards make the join safe to trust:
@@ -140,9 +173,14 @@ Two guards make the join safe to trust:
 - **A name two players share resolves to nothing.** The set of candidate clubs
   is kept, not collapsed, so a tie is refused rather than broken — a coin flip
   would put a wrong club on a real player silently.
-- **Only real NHL clubs are written.** `players.csv` carries the FCHL
-  placeholder `UFA` in its NHL TEAM column on 9 rows, which is invisible to
+- **Only real NHL clubs are written.** The 2025-26 `players.csv` carried the
+  FCHL placeholder `UFA` in its NHL TEAM column on 9 rows, which is invisible to
   pricing but would render as a club and, once in a pool file, look like data.
+  `convert_fchl_online.py` now blanks the same placeholder at the source (4 rows
+  on the 2026-27 file), so no pool in the repo carries `UFA` any more and the
+  named exception in `test_every_nhl_club_in_every_pool_has_cup_odds` currently
+  matches nothing. Both stay: the guard is about what a future export may write,
+  not about what today's happens to contain.
 
 These are **present-day** clubs: a player traded since the legacy season gets
 the team he plays for now. That is coherent rather than a compromise, because

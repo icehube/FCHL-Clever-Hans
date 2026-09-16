@@ -20,6 +20,137 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-15]
+
+### Changed
+
+- **`data/players.csv` rebuilt for the 2026 auction: new rosters joined to new
+  projections.** Two sources were supplied and neither is sufficient alone, so
+  the refresh is a join. The FCHL Online roster export (2153 rows) carries
+  rosters, contract groups, salaries, NHL clubs and ages but **no STATUS, no
+  PRIOR FCHL TEAM, and no usable projections** — its own `Pts` column is a
+  blend rather than Dobber (McDavid 138 against Dobber's 131). The DobberHockey
+  2026-27 workbook carries projected points on two sheets and nothing about the
+  league. The result is **1268 rows, 1018 biddable, 678 with points**, against
+  2158 / 1910 / 705 before.
+- **`convert_fchl_online.py` (new) is the third converter**, beside
+  `convert_legacy_players.py` and `convert_state_json.py`, and imports the
+  shared helpers from the first rather than restating them. Five things in it
+  are load-bearing and each was found by measurement, not by reading: the
+  export packs the contract group onto the name (`"Connor McDavid    3"`); 21
+  of 22 RFA rows spell the team cell `'RFA'` **with literal apostrophes**, so
+  stripping them has to happen before the known-team check or 21 of the 22 RFAs
+  become an unknown-team holdback; `_require_biddables` runs before anything is
+  written, because an empty pool is indistinguishable from a finished draft on
+  screen; `F` is a real contract group on 4 rows and passes through untouched;
+  and 4 rows carrying the FCHL placeholder `UFA` in the NHL column are
+  **blanked, never guessed**.
+- **The skater join takes the workbook's own `Points` column and the goalie
+  join computes `2*W + 3*SO`**, per the owner's instruction — the sheet offers
+  `1W+2SO` and `3W+5SO` and not the FCHL rule. The header is at row index 5 in
+  both sheets (rows 0-4 are `Quick Jumps:` navigation), located by scanning for
+  the required column names rather than hardcoded.
+- **The name fallback is gated on the NHL club agreeing, and that gate is the
+  whole feature.** Measured: a bare first-initial+surname fallback recovers 9
+  players of whom **5 are different people** (`Jack Anderson` → `Josh
+  Anderson`, `Dryden Hunt` → `Daemon Hunt`, `Colin White` → `Colton White`,
+  `Aku Raty` → `Aatu Raty`, `Jack Smith` → `Jackson Smith`). A false match
+  prices a real player off someone else's projection, which is strictly worse
+  than a miss — a miss only drops him from the pool. Club-gated, it accepts
+  exactly the true nickname cases (`Dan`/`Daniel Vladar`, `Jack`/`John St.
+  Ivany`, `Sam`/`Samuel Poulin`, `Alex`/`Alexander Wennberg`) and rejects all
+  five impostors.
+- **`PRIOR FCHL TEAM` uses the opposite rule, deliberately.** It is recovered
+  from the previous `players.csv`, and for a *prior-season* join the club gate
+  is wrong, because players get traded between seasons — `Egor Chinakhov` is
+  `Yegor Chinakhov` in the old file **and** moved CBJ → PIT, so a club-gated
+  lookup loses him. The lookup is three passes (full name, then
+  initial+surname, then surname alone), each refusing ambiguity, and all 22 are
+  printed for review because the join runs once.
+- **`data/goalie_projection_stats.csv` gained an 82-row `2026-2027` block**
+  (1179 → 1261 rows). `load_goalie_wins` takes `max(league_year)` as a
+  **string** and `"2026-2027" > "2025-2026"`, so the new block wins with no
+  code change. The rows are written with the spelling that lands in
+  `players.csv`, not Dobber's: `load_players` joins goalie wins on the **raw**
+  `PLAYER` string, so a row written `Daniel Vladar` would silently miss a pool
+  row named `Dan Vladar` and fall back to the `pts / goalie_pts_per_win`
+  approximation.
+
+### Owner decisions (2026-09-15)
+
+- **STATUS is derived from the contract group** — `2`/`3` → `START`, `A`-`F` →
+  `MINOR` — because the export has no STATUS column. The cost was measured
+  before the decision, not discovered after: against the hand-maintained
+  2025-26 file the heuristic is wrong on **22 of 248 rows (8.9%)** and
+  understates league cap used by **$20.7M**. It also makes every
+  buyout-ineligible contract a minor by construction, which is why
+  `tests/test_trade_buyout_undo.py::_ineligible` now searches `all_players`
+  rather than `roster_players`.
+- **The 885 ENT rows are dropped**, through the existing holdback-and-report
+  path rather than a filter. They are unprojected prospects — measured, they
+  match Dobber at **4.6%** against 83.6% for rostered players.
+- **Penalties reset to zero.** JHN and LGN went $0.3M → $0.0M in
+  `data/fchl_teams.json`; nothing else in that file changed.
+
+### Fixed
+
+- **The legacy NHL-club join now chains two donors, because dropping the ENT
+  rows halved its source.** `convert_legacy_players.fill_nhl_teams` took one
+  canonical CSV and the only one was `data/players.csv` — which this refresh
+  cut from 2158 rows to 1268. Coverage of the 2023 pool fell from **869 of 876
+  to 644**, putting **206 of 668** loaded players on
+  `DEFAULT_TEAM_PROBABILITY`. It now takes a sequence (`DEFAULT_NHL_SOURCES` =
+  `players.csv`, then `players-25.csv`), tried in order with the first answer
+  winning, recovering **714 of 876** and **142 of 668**. Chaining is
+  deliberately not merging: merged indexes would list an off-season trade as
+  two clubs and the tie guard would correctly refuse both, turning every trade
+  into a blank. It cannot reach 869 again — a 2023 player who has left the
+  league since is in no pool the repo carries — so
+  `test_the_join_fills_almost_every_row` became
+  `test_the_join_fills_most_rows` at 0.80, and the price-model threshold went
+  0.05 → 0.25, both quoting the measurement. `data/players-23-converted.csv`
+  was regenerated: 876 rows in and out, only `NHL TEAM` changed, 594 cells
+  moved and blanks went 7 → 162. Some of those 594 are the join getting
+  *better* — Marner TOR → VGK and Rantanen COL → DAL are real trades the old
+  donor predated.
+
+### Investigated
+
+- **Three data-derived tests were finding no material rather than finding a
+  bug, and each has been given its own.** A test that cannot fail reads exactly
+  like coverage, and all three were written with a docstring explaining why
+  they derived their subject from the live pool — the instinct was right and
+  aimed at the wrong half. `test_a_name_two_players_share_is_left_blank` needed
+  two players sharing a name AND a position on DIFFERENT clubs; the 2026-27
+  pool has one duplicate group and both are Vancouver, so it asserted "the pool
+  has no same-name collision to exercise this". `test_a_word_prefix_outranks_a_bare_substring`
+  ran `"son"` on a measurement of 1 word-prefix hit against 82 substring hits;
+  the new pool answers that query with **76 hits, none of them a word prefix**.
+  `test_the_mount_requests_the_current_player` asserted a percent-encoded
+  literal name, which `tests/test_no_literal_player_names.py` structurally
+  cannot see — it compares full names, and `Connor%20McDavid` is not one. All
+  three now supply or derive their subject, and the ranking one was confirmed
+  to still fail against a collapsed-tier mutant.
+- **`tests/test_auction_draft.py`'s early bid-check moved to the baseline, and
+  the reason is that the advisor was right.** `test_19` asserts advice differs
+  between the early and late samples; on the new pool the two came back
+  **byte-identical**. Measured: across picks 3-9 BOT's budget fell $38.8M →
+  $28.3M and its roster grew 7 → 10, and the spare's `value_cap` did not move —
+  correctly, because it is what he adds to a starting lineup that is nowhere
+  near full, and nothing in that window bound it. Sampling before pick 1
+  instead straddles the whole nine and the figure moves. The old placement
+  passed on the 2025-26 pool with no margin to spare; `test_04` now asserts the
+  baseline sample is a real verdict panel, so `assert early != late` cannot be
+  satisfied by an error page.
+- **The roster-vs-biddable name collision did not survive the refresh, and the
+  `BACKLOG.md` entry stays open anyway.** That entry named this refresh as its
+  trigger. Re-checked: the 2026-27 file has one colliding group, `Elias
+  Pettersson` (VAN F / VAN D), and **both halves are biddable**, so
+  `_disambiguated_names` renames them and the search index sees two keys. Zero
+  pool/roster collisions, the third pool running — and this time not because
+  the zero-point exclusion hid anything. The trigger is gone; the hazard is
+  not.
+
 ## [2026-09-14]
 
 ### Changed
@@ -2212,7 +2343,7 @@ than defects, and the answers are the deliverable; two were real.
   `load_players` gates the biddable branch on `status == ""` and `UFA`/`RFA` sit
   in `_PLACEHOLDER_TEAMS` — so all 674 free agents match *neither* branch and are
   dropped without a word. An empty pool is indistinguishable from a finished
-  draft on screen. `convert_legacy_players.py:295 (_require_biddables)` refuses
+  draft on screen. `convert_legacy_players.py:325 (_require_biddables)` refuses
   to write that file at all, and `tests/test_legacy_conversion.py` asserts both
   halves: the converted file loads 668 biddables, and the same rows with `"0"`
   restored load none.

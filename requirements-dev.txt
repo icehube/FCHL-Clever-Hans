@@ -5,3 +5,10 @@
 # playwright drives the installed Google Chrome via channel="chrome", so
 # `playwright install` is NOT needed and no browser is downloaded.
 playwright>=1.62
+
+# openpyxl is read by convert_fchl_online.py, which turns the DobberHockey
+# draft-list workbook into projected points once a season. Same reasoning as
+# playwright: a data-prep tool run on a dev machine, never on draft day, so it
+# stays out of requirements.txt. The converter imports it lazily and says to
+# install this file if it is missing.
+openpyxl>=3.1

@@ -65,12 +65,17 @@ reading is now wrong.** This said Scarcity "takes over at the top, where the
 money is", measured at 0.268 mean effect against Points' 0.324 with Points
 largest for 82% of forwards. Constraining the points slope moved signal back
 into Points and `coef_log_rank` roughly halved (−0.391 → −0.196). Re-measured
-over the fresh 705-player pool: Points **0.445**, Scarcity **0.134**, NHL team
-0.079, Reputation 0.063, Contract 0.007. Points is the largest driver for
-**89%** of forwards and for **all 40** of the top 40 by projected points —
-Scarcity is now the largest for **none of them**. It is still the second
-largest mean effect, and still collinear, so the two rows are still read
-together; what is gone is the "takes over at the top" half.
+2026-09-15 over the 678-player 2026-27 pool: Points **0.455**, Scarcity
+**0.110**, Reputation 0.065, NHL team 0.059, Contract 0.005. Points is the
+largest driver for **91%** of forwards and for **all 40** of the top 40 by
+projected points — Scarcity is now the largest for **none of them**. It is still
+the second largest mean effect, and still collinear, so the two rows are still
+read together; what is gone is the "takes over at the top" half. (The 2026-09-10
+figures over the 705-player pool were 0.445 / 0.134 / 0.079 / 0.063 / 0.007 at
+89%, so the conclusion is the same pool over and the *pool* moved, not the fit —
+`model_params.json` is unchanged. Per position, `tests/measure_drivers.py`
+reports Points largest for 91% of F, 90% of D and 80% of G, with Reputation
+taking the remaining 20% of goalies.)
 
 **Two chains, and neither of them reaches `expected_price`.** The card has
 carried a second column since 2026-09-11: stage 2 multiplies the PRICE he sells
@@ -99,6 +104,13 @@ since `1 / exp(-log(1000))` is 999.9999999999998 and a bare `>=` prints a naked
 argument, and this card is embedded in `/bid-check`, so the failure would be a
 500 on the bidding path. The pool has 729 of headroom today, but
 `model_params.json` comes from another repo.
+
+**Every per-row count in the four paragraphs that follow was measured over the
+705-player 2025-26 pool (2026-09-09 to 2026-09-11) and has NOT been re-measured
+against the 678-player 2026-27 one.** They are the evidence for how the card is
+shaped, not live figures — each says which way a rendering rule fails and by
+roughly how much, and none of those conclusions turns on the pool. Re-measure
+before quoting a number out of them; do not re-measure before trusting the rule.
 
 **The collapsed `<summary>` obeys the same rule at its OWN precision, which is
 one decimal rather than two.** It is the closed state — the thing the card
@@ -138,8 +150,8 @@ attributed.** It is not decomposable the way either stage is: P(floor) is a
 second logistic pointing its own way (above); `sigma` is a nonlinear function of
 `log_mu`; and the clip bounds are per-position (`max_bid` is 11.4 F / 8.5 D /
 10.5 G, **not** `config.MAX_SALARY`).
-The clamp is the common case, not an edge — re-measured 2026-09-10, **490 of
-705** pool players have an unclamped median below their position's `min_bid`.
+The clamp is the common case, not an edge — re-measured 2026-09-15, **441 of
+678** pool players have an unclamped median below their position's `min_bid`.
 **One now sits ABOVE `max_bid`**, where none did before the refit: stars price
 higher, so the `"max"` clamp note is reachable on a real card and no longer a
 branch only a test sees. That is what surfaced the endpoint test reading the
@@ -279,7 +291,7 @@ Note also that the real row's "changed a price" is the **stronger** claim of the
 
 **Those are two different measurements and the second is the one that means "Layer 2 did something".** `ceiling < MAX_SALARY` says the ceiling moved; `market_price < model_price` says it moved *past a player's model price* and changed what the MILP planned on. `tests/measure_ceiling.py` reports the first (live, per pick), `tests/measure_spend.py` reports the second (from the logged `model_price`/`market_price` on every `draft` record) and `tests/measure_replay.py` reports the second over the whole pool rather than only over the players who sold -- which is the quantity the MILP actually plans on, and the reason `measure_spend.py` alone could not close the `BACKLOG.md` entry it was written for. Cross-checked on the same run 2026-08-17: the reader's first bind and the instrument's `0.5M@` step now print **the same number** (44) rather than differing by one, which is what a shared convention buys -- two independent paths, one over live `market_info` per pick and one over the transaction log, agreeing on the pick where the ceiling started mattering.
 
-The gap between them is the interesting part: in the drain run **the ceiling changed nothing until it hit the $0.5M floor at pick 44.** The intermediate steps -- $7.3M at pick 33, $4.5M at pick 41 -- were below `MAX_SALARY` and above every remaining model price, because a top-down draft has already sold the players those ceilings would have capped. So 133 overstates when the layer started mattering by 11 picks, and every one of the 122 is the floor case. A first pass predicted the price-changing count would be *much* smaller than 133 on the grounds that most of the pool is floor-priced; that reasoning was wrong about the magnitude -- once the ceiling itself reaches the floor it caps essentially everything, so the counts converge. (It also quoted "563 of 705" for the floor count, which reproduces under no definition. Re-measured 2026-08-17: **534 of 705**, where floor means `round(expected_price, 1) == 0.5` (**531** after the 2026-09-10 refit) -- always carry the definition, since the count runs 0 to 604 without it.)
+The gap between them is the interesting part: in the drain run **the ceiling changed nothing until it hit the $0.5M floor at pick 44.** The intermediate steps -- $7.3M at pick 33, $4.5M at pick 41 -- were below `MAX_SALARY` and above every remaining model price, because a top-down draft has already sold the players those ceilings would have capped. So 133 overstates when the layer started mattering by 11 picks, and every one of the 122 is the floor case. A first pass predicted the price-changing count would be *much* smaller than 133 on the grounds that most of the pool is floor-priced; that reasoning was wrong about the magnitude -- once the ceiling itself reaches the floor it caps essentially everything, so the counts converge. (It also quoted "563 of 705" for the floor count, which reproduces under no definition. Re-measured 2026-08-17: **534 of 705**, where floor means `round(expected_price, 1) == 0.5` (**531** after the 2026-09-10 refit, and **500 of 678** on the 2026-27 pool, 2026-09-15) -- always carry the definition, since the count runs 0 to 604 without it.)
 
 In the drain run the ceiling steps `11.4M@1 -> 7.3M@33 -> 4.5M@41 -> 0.5M@44` and never moves again. So the layer is **not** inert -- it binds readily, and reaches the floor in a quarter of a draft, once the money is gone. The pinned run is the artefact: paying exactly the model price is the one behaviour the model cannot be wrong about, so it leaves 18% of the cap unspent and **three** teams (JHN $19.8M, GVR $14.1M, VPP $12.0M) finish above the line -- one more than the two the second-highest rule needs. That question -- which end a real draft lands nearer, and therefore how much Layer 2 contributes to *planning* -- was answered on 2026-09-13 and the answer is in the third row of the table above: neither end, and past the inert one. **Do not restate any one of the three runs as "the" behaviour of the ceiling.**
 

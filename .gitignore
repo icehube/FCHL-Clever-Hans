@@ -33,11 +33,18 @@ FCHL-auction-pricer/
 .DS_Store
 Thumbs.db
 
-# Reference material dropped in data/ for a human to read — league workbooks
-# and the DobberHockey guides. Not inputs to anything: nothing in the app or
-# the tests opens them, and they are third-party publications. Four of them
-# (17MB, two PDFs of 9.4MB and 6.0MB) were swept into a commit by `git add -A`
-# on 2026-09-10, which is why this rule is by extension rather than by name.
+# Reference material dropped in data/ — league workbooks and the DobberHockey
+# guides. Third-party publications, and four of them (17MB, two PDFs of 9.4MB
+# and 6.0MB) were swept into a commit by `git add -A` on 2026-09-10, which is
+# why this rule is by extension rather than by name.
+#
+# Since 2026-09-15 one of them IS an input: `convert_fchl_online.py` reads
+# `data/dobberhockeydraftlist202627.xlsx` to build `data/players.csv`. It stays
+# ignored anyway — it is a 1.3MB paid third-party file, the converter is run
+# once a season by hand, and its OUTPUT is what the repo needs to carry. The
+# league's own roster export beside it is committed, because that half is ours.
+# So a `players.csv` rebuild needs the workbook fetched again; the converter's
+# docstring says where from.
 data/*.pdf
 data/*.xlsx
 

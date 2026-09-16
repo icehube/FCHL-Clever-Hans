@@ -25,6 +25,8 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
      above the first `###` with three paragraphs of general guidance wedged
      under them, so a reader scanning headings missed them entirely. -->
 
+- [2026-09-15] [refresh-drill] `tests/conftest.py:21 (isolated_state_dir)` — **the write-through guard on the operator's live draft is a pytest fixture, so anything that is not pytest walks straight past it.** `main.STATE_DIR` is a module global with no env override (`main.py` hardcodes `data/state`), and `isolated_state_dir` redirects it for the suite only. An ad-hoc diagnostic script doing `with TestClient(main.app)` — the obvious way to reproduce an endpoint failure outside the suite — therefore writes to `data/state/`, and `_save_state` rotates the previous file into `.backup`, so **two** such saves destroy both copies of a real draft. Hit on 2026-09-15 while diagnosing `test_19_bid_check_changed`: nine picks from a replayed `_script()` landed in `data/state/auction_state.json` and its backup, over a state that happened to be empty. Nothing warned; the file is `.gitignore`d, so `git status` said nothing either, and it was found only by opening the file before clearing it. Deferred rather than fixed because the cheap guard is the wrong one — an `FCHL_STATE_DIR` default change would surprise the draft-day path, and refusing to save when `sys.modules` contains `pytest` is both a false negative here (a bare script imports no pytest) and a false positive in the suite. The shape worth considering is a startup refusal to save over a state whose `available_players` came from a different CSV than the one just loaded, which is the actual hazard and is already knowable at `lifespan` — see the "saved state follows the pool" note in CLAUDE.md, which solves the same problem one level up
+
 - [2026-09-11] [grill] `tests/test_browser_ui.py:1246 (test_no_tooltip_renders_outside_the_scrollable_content)` — **the `counted >= 10` floor now sits at exactly 10**, with zero slack: the 2026-09-11 removal of the league-table `data-tip` took the measured count from 11 to 10, so the next tooltip deleted anywhere in the app fails this rather than the named `required` inventory, and the failure message ("the page must render the bid panel's four and the team panel's stat tiles") will not describe what actually happened — deferred because that is the tripwire working as designed and the STATES are deterministic, so it is not flaky; revisit only if a legitimate removal trips it, at which point the fix is to re-derive the floor from the `required` inventory rather than to lower a magic number
 
 - [2026-09-11] [grill] `main.py:1942 (trade_execute)` — **a trade whose form
@@ -56,8 +58,17 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
   rather than waiting for it to be reported. Re-checked 2026-09-13 against the
   pool a full draft was actually run on (`players-25.csv`): **0** pool/roster
   name collisions and 0 zero-point pool players, so it did not reproduce there
-  either — which is a second pool agreeing, not evidence the bug is gone. The
-  trigger stays the refresh.
+  either — which is a second pool agreeing, not evidence the bug is gone.
+  **The refresh has now happened and it did not fire.** Re-checked 2026-09-15
+  against the 2026-27 pool this entry was waiting for: the file has **one**
+  colliding group, `Elias Pettersson` (VAN F / VAN D), and both halves are
+  BIDDABLE — so `_disambiguated_names` renames them and `_searchable` sees two
+  distinct keys. Zero pool/roster collisions, for the third pool running, and
+  this time not because the zero-point exclusion hid anything: the roster-vs-
+  biddable shape is simply absent. That removes the trigger this entry named
+  without removing the hazard, so it stays open with a new one — the next
+  refresh, again. Three pools agreeing is worth recording as the reason this is
+  cheap to keep deferred, not as a reason to close it.
 
 - [2026-09-07] [nhl-team-join] `data/players.csv` (data, no symbol — line numbers
   drift on every refresh) — **15 player names are corrupted by two careless
@@ -99,7 +110,13 @@ an auction rather than on an opinion, closed on the numbers it asked for.
 **2026-09-14 put it back to twelve**: refreshing `team_odds.json` to the
 2026-2027 Cup odds filed one, and it is a finding about this file's own safety
 net rather than about the app — the refresh changed all 32 clubs and the suite
-noticed nothing. Keep
+noticed nothing. **2026-09-15 took it to thirteen**: rebuilding `players.csv`
+for the 2026 auction filed one more, also about tooling rather than the app —
+an ad-hoc `TestClient` script wrote nine picks into the operator's live
+`data/state/`, because the guard against exactly that is a pytest fixture. The
+same refresh expired the trigger on the `_searchable` entry without closing it,
+so the "waiting on a `players.csv` refresh" class is now **one**, not two, and
+that one has a new trigger of the same kind. Keep
 the count and the file in step: it has now been wrong three times, every one of
 them an entry added or closed without the prose being touched. The walk also corrected four claims: `.table-scroll-x` is
 four regions now, not three; `bid_limits` is 705 rows, not 704; the exact
@@ -116,8 +133,8 @@ rather than waiting for the draft to produce an opinion; the fourth — the
 planning ceiling — expired on 2026-09-13 when the draft was actually run and
 `tests/measure_replay.py` answered it at **0 of 139 picks**. What is left is
 parked on two different kinds of thing: the next `players.csv` refresh (two
-entries), the next `team_odds.json` refresh (one), and ordinary
-cost-versus-benefit. **Asking is a way to expire one and
+entries — **one** after 2026-09-15, see above), the next `team_odds.json`
+refresh (one), and ordinary cost-versus-benefit. **Asking is a way to expire one and
 so is doing it**, and the ratio is worth knowing — four of seven draft-day items
 needed a sentence from the operator, one needed the auction, and the auction
 then took eleven hours and produced a single closed entry.

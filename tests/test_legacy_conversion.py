@@ -24,6 +24,7 @@ import data_loader
 import main
 from convert_legacy_players import (
     CANONICAL_COLUMNS,
+    DEFAULT_NHL_SOURCES,
     LEGACY_BLANK_STATUS,
     _require_biddables,
     convert,
@@ -55,11 +56,16 @@ def converted() -> list[dict]:
     `convert` alone here left the fixture without the NHL join while the script
     wrote it, so the fixture and the committed file disagreed and the guard
     comparing them failed on the fixture rather than on the artifact.
+
+    The NHL sources come from `DEFAULT_NHL_SOURCES` for the same reason, not
+    from a path spelled out here: `main()` reads that tuple, so a second donor
+    added there and not here would reopen exactly the divergence above, one
+    donor further along.
     """
     rows, _, _ = convert_all(
         _legacy_rows(),
         league_team_codes(REPO / "data" / "fchl_teams.json"),
-        str(REPO / "data" / "players.csv"),
+        [str(REPO / path) for path in DEFAULT_NHL_SOURCES],
         str(REPO / "data" / "team_odds.json"),
     )
     return rows
@@ -338,9 +344,22 @@ class TestTheNhlTeamJoin:
         assert normalize_name("Widget (NCM)") == normalize_name("Widget")
         assert normalize_name("Ekman-Larsson") == normalize_name("Ekman Larsson")
 
-    def test_the_join_fills_almost_every_row(self, converted):
+    def test_the_join_fills_most_rows(self, converted):
+        """0.80, down from 0.95, and the drop is data rather than a weaker guard.
+
+        The donor is whatever the canonical pools happen to hold, and the
+        2026-27 refresh cut `players.csv` from 2158 rows to 1268 by dropping 885
+        unprojected prospects (owner decision 2026-09-15). Measured: coverage of
+        the 2023 pool fell to **73.4%** on `players.csv` alone and comes back to
+        **81.5%** once `players-25.csv` is chained behind it (see
+        `fill_nhl_teams`). It cannot reach 95% again — a 2023 player who has left
+        the league since is in no pool this repo carries — so the choice is a
+        threshold that states the achievable figure or one that is permanently
+        red. The guard still has teeth at 0.80: a join that broke outright, or
+        lost a whole donor, lands far below it.
+        """
         filled = [r for r in converted if r["NHL TEAM"]]
-        assert len(filled) / len(converted) > 0.95
+        assert len(filled) / len(converted) > 0.80
 
     def test_only_real_nhl_clubs_are_written(self, converted):
         """`players.csv` carries the FCHL placeholder `UFA` in its NHL TEAM
@@ -354,26 +373,32 @@ class TestTheNhlTeamJoin:
         written = {r["NHL TEAM"] for r in converted if r["NHL TEAM"]}
         assert written <= allowed
 
-    def test_a_name_two_players_share_is_left_blank(self):
+    def test_a_name_two_players_share_is_left_blank(self, tmp_path):
         """Refusing beats guessing: a coin flip puts a wrong club on a real
-        player silently. Derived from the pool rather than named, because
-        `players.csv` is replaced before every draft and today's collisions are
-        not tomorrow's.
-        """
-        source = str(REPO / "data" / "players.csv")
-        full, loose = nhl_team_index(source)
-        shared = [
-            (name, cands)
-            for name, cands in full.items()
-            if len({t for _, t in cands}) > 1
-            and len({t for pos, t in cands if pos == sorted(cands)[0][0]}) > 1
-        ]
-        assert shared, "the pool has no same-name collision to exercise this"
-        name, cands = shared[0]
-        position = sorted(cands)[0][0]
-        assert lookup_nhl_team(name, position, full, loose) is None
+        player silently.
 
-    def test_an_unambiguous_name_does_resolve(self):
+        **Synthetic, and it has to be.** This was derived from `players.csv` on
+        the stated grounds that "today's collisions are not tomorrow's" — which
+        was the right instinct aimed at the wrong half. The rule needs two
+        players sharing a name AND a position on DIFFERENT clubs, and whether
+        the live pool contains such a pair is not something the pool owes
+        anybody: the 2026-27 refresh left exactly one duplicate group, both on
+        the same club, so the fixture found nothing and the test failed for
+        having no material rather than for a broken lookup. A rule test supplies
+        its own material, like `test_normalization_undoes_how_the_two_files_spell_a_name`
+        two tests up. `test_a_name_only_one_player_has_resolves` reads the live
+        pool and is the half that should.
+        """
+        source = tmp_path / "collide.csv"
+        source.write_text(
+            "PLAYER,POS,NHL TEAM\n"
+            "Widget Sprocket,F,TOR\n"
+            "Widget Sprocket,F,BOS\n"
+        )
+        full, loose = nhl_team_index(str(source), str(REPO / "data" / "team_odds.json"))
+        assert lookup_nhl_team("Widget Sprocket", "F", full, loose) is None
+
+    def test_a_name_only_one_player_has_resolves(self):
         """The other half — so a lookup that returned None for everything, which
         would satisfy the test above, fails here.
         """
@@ -407,4 +432,7 @@ class TestTheNhlTeamJoin:
             for p in state.available_players.values()
             if p.team_probability == config.DEFAULT_TEAM_PROBABILITY
         )
-        assert at_default < 0.05 * len(state.available_players)
+        # 0.25, and the same measurement moved it as moved the row threshold
+        # above: 142 of 668 (21.3%) with both donors chained, against 206 of 668
+        # before `players-25.csv` was added behind the shrunken `players.csv`.
+        assert at_default < 0.25 * len(state.available_players)

@@ -150,7 +150,7 @@ def a_roster_player(code: str):
     return players[0]
 
 
-def a_buyout_candidate(state=None):
+def a_buyout_candidate(state=None, with_club=False):
     """BOT's worst money-per-point player that may legally be bought out.
 
     Tests used to name one ("Dougie Hamilton", $4.2M / 16pts) and assert against
@@ -163,6 +163,14 @@ def a_buyout_candidate(state=None):
     picking the worst value overall lands on an A-E prospect the engine will
     correctly refuse.
 
+    `with_club` additionally requires an NHL club, for the callers that are
+    about the club BADGE rather than about buyout value. Not the default,
+    because the worst-value player is the point everywhere else. It exists
+    because a blank club is legal and reachable: the 2026-09-15 pool put BOT's
+    worst-value eligible player (Patrik Laine, 10 pts) on no NHL club at all,
+    which left the Transaction log's NHL column empty and read as two unrelated
+    failures — a missing badge and an "inert sortable header".
+
     Defaults to the live `main.auction_state`; pass a state to work on a clone.
     """
     import main
@@ -172,9 +180,13 @@ def a_buyout_candidate(state=None):
     team = state.teams[main.MY_TEAM]
     eligible = [
         p for p in team.keeper_players + team.acquired_players
-        if p.can_be_bought_out
+        if p.can_be_bought_out and (p.nhl_team if with_club else True)
     ]
-    assert eligible, "BOT has no buyout-eligible player — the fixture is wrong"
+    assert eligible, (
+        "BOT has no buyout-eligible player"
+        + (" with an NHL club" if with_club else "")
+        + " — the fixture is wrong"
+    )
     return max(eligible, key=lambda p: p.salary / max(p.projected_points, 1))
 
 

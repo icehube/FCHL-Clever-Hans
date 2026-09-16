@@ -1584,14 +1584,33 @@ class TestTheChartExplainsThePrice:
         pairing each FLOOR bar with the next row's price factor when the second
         column landed 2026-09-11 — five matches, every assertion green, every
         pairing wrong. A regex that spans cells is not reading a row.
+
+        The expected count comes from `_live_drivers`, not from `GROUPS`. All
+        five rendered while the pool's top forward was an RFA; the 2026-09-15
+        pool makes him a UFA, so `Contract` prints x1.00 in BOTH columns against
+        a UFA reference and the template correctly drops it. Counting GROUPS
+        asserted that the subject happened to be an RFA, which is not a fact
+        about the bars.
         """
-        block = self._block(client.get(f"/player-chart/{self._a_priced_forward()}").text)
+        import main
+        from price_model import decompose_player
+
+        name = self._a_priced_forward()
+        player = main.auction_state.available_players[name]
+        live = self._live_drivers(decompose_player(
+            player, main.model_params,
+            main.auction_state.price_reference[player.position],
+        ))
+        block = self._block(client.get(f"/player-chart/{name}").text)
         rows = re.findall(
             r'<span class="driver-bar (?:up|down)" style="width: (\d+)px">'
             r'</span></td>\s*<td class="driver-effect">&times;([\d.]{4,})',
             block, re.S,
         )
-        assert len(rows) == len(self.GROUPS), f"found {len(rows)} bars"
+        assert len(rows) == len(live), (
+            f"found {len(rows)} bars against {len(live)} live drivers "
+            f"({[d.group for d in live]})"
+        )
 
         widths = [int(w) for w, _ in rows]
         effects = [abs(math.log(float(f))) for _, f in rows]
@@ -3237,16 +3256,28 @@ class TestTheNhlOddsView:
     def test_a_club_with_no_odds_entry_is_named(self, client):
         """`_get_team_probability` falls through to the default SILENTLY.
 
-        players.csv carries the FCHL placeholder `UFA` in the NHL TEAM column on
-        9 rows; a club RESPELLED by a refresh lands in the same footer, which is
-        the point — it would otherwise price a whole roster at 3.1% with nothing
-        on screen. `tests/test_data_loader.py` fails the refresh itself.
+        A club RESPELLED by a refresh would otherwise price a whole roster at
+        3.1% with nothing on screen, so the footer names it.
+
+        **The subject is planted, not found.** Until the 2026-09-15 refresh the
+        live pool supplied one for free — `players.csv` carried the FCHL
+        placeholder `UFA` in the NHL TEAM column on 9 rows — and this test read
+        it straight off `_odds_unlisted()`. The new pool has none (its 4
+        placeholder rows are blanked at conversion, and a blank club is counted
+        by nobody), so that reading asserted over an empty set and the test could
+        no longer fail. Planting the club is what makes it independent of whether
+        a given season's data happens to be dirty.
         """
         import main
 
+        subject = next(iter(main.auction_state.available_players.values()))
+        subject.nhl_team = "ZZZ"
+
         body = client.get("/nhl-odds").text
         unlisted = {r["code"] for r in main._odds_unlisted()}
-        assert unlisted, "no unlisted club today — this test proves nothing"
+        assert "ZZZ" in unlisted, (
+            f"a pool club absent from the odds file is not reported: {unlisted}"
+        )
         for code in unlisted:
             assert code in body, f"{code} is priced at the default and is not shown"
         assert f"{main.DEFAULT_TEAM_PROBABILITY:.1f}% default" in body
@@ -3553,11 +3584,26 @@ class TestOverCapRosterEdits:
         Proves the warning tracks `counts_on_cap` rather than merely firing
         whenever a recall happens near the cap. Squeezed to $0.1M of room —
         anything that charged the salary again would blow through it.
+
+        The draftee is CREATED here rather than found among BOT's keepers. It
+        was found until the 2026-09-15 pool, whose BOT minors are group A to a
+        man — outside `MINOR_CAP_GROUPS` — so the search raised StopIteration.
+        Drafting one is also closer to what the test is named for: every
+        biddable becomes group 2 or 3 at `/assign`, so a drafted player sent
+        down is exactly the auto-routed draftee whose salary stays on cap.
         """
         import main
-        team = main.auction_state.teams["BOT"]
+        name = pool_top(1)[0]
+        assign(client, name, "BOT", MIN_SALARY)
+        client.post("/toggle-bench", data={"team_code": "BOT", "player_name": name})
+        client.post("/move-to-minors", data={"team_code": "BOT", "player_name": name})
         already_counted = next(
-            m for m in team.minor_players if m.group in MINOR_CAP_GROUPS)
+            m for m in main.auction_state.teams["BOT"].minor_players
+            if m.name == name)
+        assert already_counted.group in MINOR_CAP_GROUPS, (
+            f"{name} went down as group {already_counted.group}, which does not "
+            f"count on cap — this test would assert nothing"
+        )
         squeeze("BOT", headroom=0.1)
 
         r = self._recall(client, "BOT", already_counted.name)
@@ -5059,9 +5105,11 @@ class TestTheLogsPanel:
         """
         import main
 
-        victim = a_buyout_candidate()
+        # with_club: this test is about the badge surviving, so a candidate on
+        # no NHL club would assert nothing. Blank is legal and reachable — see
+        # helpers.a_buyout_candidate.
+        victim = a_buyout_candidate(with_club=True)
         club = victim.nhl_team
-        assert club, f"{victim.name} has no NHL club; pick a different fixture"
 
         r = client.post("/buyout", data={"player": victim.name})
         assert toast_of(r).get("type") in ("success", "warning"), toast_of(r)
@@ -5216,21 +5264,21 @@ class TestOneLogoPathForTheWholeApp:
     def test_the_player_search_prints_the_canonical_code_too(self, client):
         """The one place in the app a club code is TEXT rather than an image.
 
-        Derived by role -- a pool player whose club is an alias key -- because
-        players.csv is replaced before every draft.
+        **The alias is planted on a real pool player, not searched for.** It was
+        searched for until the 2026-09-15 refresh, when the live pool stopped
+        spelling Utah `UTH` — the FCHL Online export uses the canonical `UTA` —
+        so no pool player carried an alias key any more and the search found
+        nothing to assert on. The aliasing code is still live (the older pools in
+        `data/players*.csv` still exercise it, and the next export could revert),
+        so the test plants a subject rather than being deleted with the data that
+        happened to feed it.
         """
         import main
 
-        subject = next(
-            (p for p in main.auction_state.available_players.values()
-             if p.nhl_team in NHL_TEAM_ALIASES),
-            None,
-        )
-        assert subject, (
-            "no pool player carries an aliased club code, so this test cannot "
-            "fail and must be re-derived"
-        )
-        canonical = NHL_TEAM_ALIASES[subject.nhl_team]
+        subject = next(iter(main.auction_state.available_players.values()))
+        alias = next(iter(NHL_TEAM_ALIASES))
+        subject.nhl_team = alias
+        canonical = NHL_TEAM_ALIASES[alias]
         html = client.get("/find-player", params={"q": subject.name}).text
         assert f"· {canonical}<" in html, (
             f"the search row for {subject.name} does not name {canonical}: "
@@ -5341,7 +5389,9 @@ class TestEverySortableColumnCanActuallySort:
         import main
 
         assign(client, pool_top()[0], main.MY_TEAM, 2.0)
-        client.post("/buyout", data={"player": a_buyout_candidate().name})
+        # with_club, or the log's one buyout row has an empty NHL cell and the
+        # column reads as inert when it is the FIXTURE that is degenerate.
+        client.post("/buyout", data={"player": a_buyout_candidate(with_club=True).name})
 
         columns = self._sortable_columns(client.get("/").text)
         assert len(columns) >= 15, (
@@ -6317,14 +6367,38 @@ class TestTheLiveMarketInfoDescribesTheNamedBidders:
         return seen["info"]
 
     def _three_unequal_opponents(self, client):
-        """Three opponents with strictly different physical maxes, richest first."""
+        """Three opponents with strictly different physical maxes, richest first.
+
+        Each is drained to its OWN target rather than handed one pick apiece.
+        One max-salary pick each stopped separating them on the 2026-09-15 pool:
+        teams start far emptier there, so all three still clamped at
+        `physical_max_bid == MAX_SALARY` and richest and poorest were the same
+        number. Targets make the spread a property of the arrangement instead of
+        of whatever the keeper salaries happen to be this season.
+
+        Aimed at the UNCLAMPED ceiling, because `physical_max_bid` reports
+        `MAX_SALARY` for every team above it — so a gap computed from it reads
+        as zero while the real budgets are still tens of millions apart, and the
+        loop would exit having drained nothing.
+        """
         import main
 
         opponents = [c for c in main.auction_state.nomination_order
                      if c != main.MY_TEAM][:3]
         pool = iter(list(main.auction_state.available_players))
-        for code in opponents:
-            assign(client, next(pool), code, MAX_SALARY)
+
+        def unclamped(code):
+            return main.auction_state.teams[code].spendable_budget + MIN_SALARY
+
+        for code, target in zip(opponents, (9.0, 6.0, 3.0)):
+            # Bounded: each pick removes at most MAX_SALARY - MIN_SALARY of
+            # headroom, so a team cannot need more than a handful.
+            for _ in range(12):
+                gap = unclamped(code) - target
+                if gap <= 0:
+                    break
+                assign(client, next(pool), code,
+                       round(min(MAX_SALARY, gap + MIN_SALARY), 1))
 
         maxes = {c: main.auction_state.teams[c].physical_max_bid for c in opponents}
         ranked = sorted(opponents, key=lambda c: -maxes[c])

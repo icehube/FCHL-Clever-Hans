@@ -201,24 +201,33 @@ class TestWhatEachHitReports:
 
 class TestRankingAndLimits:
     def test_a_word_prefix_outranks_a_bare_substring(self, state):
-        """A surname prefix is what the operator types. Measured over the live
-        pool, "son" matches 1 name by word prefix and 82 by substring, so
-        collapsing the tiers to a bare `in` buries the answer."""
-        result = state.locate_players("son", limit=200)
-        folded = [h.name.lower() for h in result.hits]
-        word_start = [
-            i for i, n in enumerate(folded)
-            if any(w.startswith("son") for w in n.split())
-        ]
-        substring_only = [
-            i for i, n in enumerate(folded)
-            if "son" in n and not any(w.startswith("son") for w in n.split())
-        ]
-        assert word_start and substring_only, (
-            "this pool no longer separates the two tiers, so the test cannot fail"
-        )
-        assert max(word_start) < min(substring_only), (
-            f"a substring match ranked above a surname match: {folded[:12]}"
+        """A surname prefix is what the operator types; a mid-word hit is not.
+
+        Supplied rather than derived, for the reason the test below it states
+        and one more. It ran `"son"` over the live pool on the measurement that
+        it matched 1 name by word prefix and 82 by substring — and the 2026-27
+        pool answers that query with **76 hits, none of them a word prefix**, so
+        the two tiers were never both populated and the test reported that it
+        could not fail. A query that happens to split the tiers today is the same
+        bet placed again; `"berg"` would have worked this year and is no safer.
+
+        The decoy scores HIGHER, so points alone would rank it first and only the
+        tier can produce the asserted order — a collapsed `in` fails here rather
+        than merely losing its material.
+        """
+        shared = dict(position="F", nhl_team="XXX", group="1", salary=1.0)
+        team = state.teams[MY_TEAM]
+        team.acquired_players.append(PlayerOnRoster(
+            name="Yyyy Vuqaxis", projected_points=99, **shared,   # mid-word
+        ))
+        team.acquired_players.append(PlayerOnRoster(
+            name="Yyyy Qaxley", projected_points=20, **shared,    # word prefix
+        ))
+        team._invalidate_cache()
+
+        names = [h.name for h in state.locate_players("qax", limit=50).hits]
+        assert names == ["Yyyy Qaxley", "Yyyy Vuqaxis"], (
+            f"a substring match ranked above a surname match: {names}"
         )
 
     def test_a_first_name_prefix_does_not_outrank_a_better_surname(self, state):

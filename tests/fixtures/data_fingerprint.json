@@ -13,16 +13,16 @@
     "SHF",
     "HSM"
   ],
-  "biddable_total": 705,
-  "biddable_ufa": 683,
+  "biddable_total": 678,
+  "biddable_ufa": 656,
   "biddable_rfa": 22,
   "biddable_by_position": {
-    "D": 234,
-    "F": 407,
-    "G": 64
+    "D": 233,
+    "F": 395,
+    "G": 50
   },
-  "roster_players": 248,
-  "bot_total_salary": 30.3,
-  "total_picks_needed": 165,
+  "roster_players": 250,
+  "bot_total_salary": 13.0,
+  "total_picks_needed": 184,
   "odds_sum_percent": 99.99
 }

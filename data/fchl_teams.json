@@ -43,7 +43,7 @@
     "id": 6,
     "is_my_team": false,
     "name": "Johannesburg Israeleafs",
-    "penalty": 0.3,
+    "penalty": 0.0,
     "colors": { "primary": "#003876", "secondary": "#001f43" },
     "logo": "JHN.png"
   },
@@ -67,7 +67,7 @@
     "id": 9,
     "is_my_team": false,
     "name": "Lessard Gnomes",
-    "penalty": 0.3,
+    "penalty": 0.0,
     "colors": { "primary": "#164846", "secondary": "#80C042" },
     "logo": "LGN.png"
   },

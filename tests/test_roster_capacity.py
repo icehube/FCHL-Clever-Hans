@@ -505,12 +505,36 @@ class TestALegacyStateOverTheCapStillWorks:
     nothing else in the suite covers this shape.
     """
 
+    @staticmethod
+    def _over_the_cap(bot) -> None:
+        """Bench `BENCH_SIZE + 3` of BOT's actives, recalling depth if it is short.
+
+        Both tests need more actives than the bench holds, and how many BOT
+        starts with is a property of the POOL: the 2026-27 file seats **6** and
+        stashes 21 in the minors, so a bare `roster_players[:BENCH_SIZE + 3]`
+        silently benched everyone BOT had and asserted 6 == 7. Recalling clears
+        `is_bench` explicitly because `send_to_minors` forces it True on the way
+        down and `recall_from_minors` does not reset it — see
+        `TestRecallRespectsTheBench` — so a recalled player would arrive already
+        counted and the setup would never reach the over-cap state it is naming.
+        """
+        while len(bot.roster_players) < BENCH_SIZE + 3 and bot.minor_players:
+            name = bot.minor_players[0].name
+            bot.recall_from_minors(name)
+            bot.find_player(name).is_bench = False
+        assert len(bot.roster_players) >= BENCH_SIZE + 3, (
+            f"BOT has {len(bot.roster_players)} actives and "
+            f"{len(bot.minor_players)} in the minors — not enough to get over a "
+            f"{BENCH_SIZE}-man bench"
+        )
+        for p in bot.roster_players[:BENCH_SIZE + 3]:
+            p.is_bench = True                      # bypass set_bench, as a load does
+
     def test_it_renders_and_can_be_recovered(self, client):
         import main
 
         bot = main.auction_state.teams[MY_TEAM]
-        for p in bot.roster_players[:BENCH_SIZE + 3]:
-            p.is_bench = True                      # bypass set_bench, as a load does
+        self._over_the_cap(bot)
         assert bot.bench_count == BENCH_SIZE + 3
 
         r = client.get(f"/team-view/{MY_TEAM}")
@@ -529,8 +553,7 @@ class TestALegacyStateOverTheCapStillWorks:
         from state import AuctionState
 
         bot = main.auction_state.teams[MY_TEAM]
-        for p in bot.roster_players[:BENCH_SIZE + 3]:
-            p.is_bench = True
+        self._over_the_cap(bot)
 
         back = AuctionState.from_json(main.auction_state.to_json())
 

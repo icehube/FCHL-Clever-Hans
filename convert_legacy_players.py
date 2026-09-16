@@ -28,6 +28,7 @@ import os
 import re
 import sys
 import unicodedata
+from collections.abc import Sequence
 
 from config import NHL_TEAM_ALIASES
 
@@ -187,25 +188,52 @@ def lookup_nhl_team(name: str, position: str, full: dict, loose: dict) -> str | 
     return None
 
 
+# Chained, first answer wins: the current pool is the present-day truth and the
+# older one only covers names it has dropped. See `fill_nhl_teams` for why one
+# is no longer enough and why merging them would be worse.
+DEFAULT_NHL_SOURCES = ("data/players.csv", "data/players-25.csv")
+
+
 def fill_nhl_teams(
-    rows: list[dict], source: str, odds_path: str = "data/team_odds.json"
+    rows: list[dict],
+    source: str | Sequence[str],
+    odds_path: str = "data/team_odds.json",
 ) -> list[str]:
     """Fill NHL TEAM in place; return the names that could not be resolved.
 
     The legacy schema has no NHL team, and without one every player gets
     `DEFAULT_TEAM_PROBABILITY` — one of the price model's ten features flat
-    across the whole pool. The only source in the repo is the current
-    `players.csv`, so these are **present-day** teams: a player who has since
-    been traded gets the club he plays for now, not the one he played for in the
-    legacy season. That is the coherent pairing rather than a compromise, since
-    `team_odds.json` carries present-day Cup odds too.
+    across the whole pool. The sources are the canonical pools in the repo, so
+    these are **present-day** teams: a player who has since been traded gets the
+    club he plays for now, not the one he played for in the legacy season. That
+    is the coherent pairing rather than a compromise, since `team_odds.json`
+    carries present-day Cup odds too.
+
+    **Several sources, tried in order, and chaining is not merging.** Merging the
+    indexes would hand `lookup_nhl_team` a player listed on two clubs by two
+    pools and it would correctly REFUSE — turning every off-season trade into a
+    blank, which is the opposite of what a second source is for. Chained, the
+    first pool that can answer wins, so precedence is explicit: the current pool
+    is the present-day truth and an older one only covers names it has dropped.
+
+    The reason there is more than one is measured. The donor is whatever
+    `data/players.csv` happens to hold, and the 2026-27 refresh cut it from 2158
+    rows to 1268 by dropping 885 unprojected prospects (owner decision
+    2026-09-15) — so coverage of the 2023 pool fell from **>95% to 73.4%**, and
+    31% of the converted pool priced at `DEFAULT_TEAM_PROBABILITY`. Adding
+    `players-25.csv` behind it recovers it to **81.4%**. It does not reach 95%
+    again and cannot: a 2023 player who has left the league since is in no pool
+    the repo carries, and the join has nowhere to look him up.
     """
-    full, loose = nhl_team_index(source, odds_path)
+    sources = [source] if isinstance(source, str) else list(source)
+    indexes = [nhl_team_index(path, odds_path) for path in sources]
     unresolved = []
     for row in rows:
-        team = lookup_nhl_team(row["PLAYER"], row["POS"], full, loose)
-        if team:
-            row["NHL TEAM"] = team
+        for full, loose in indexes:
+            team = lookup_nhl_team(row["PLAYER"], row["POS"], full, loose)
+            if team:
+                row["NHL TEAM"] = team
+                break
         else:
             unresolved.append(row["PLAYER"])
     return unresolved
@@ -275,7 +303,7 @@ def convert(
 def convert_all(
     rows: list[dict],
     known_teams: set[str],
-    nhl_source: str | None = None,
+    nhl_source: str | Sequence[str] | None = None,
     odds_path: str = "data/team_odds.json",
 ) -> tuple[list[dict], dict[str, list[str]], list[str]]:
     """The whole pipeline: convert, hold back unknown teams, join NHL teams.
@@ -287,8 +315,10 @@ def convert_all(
     """
     converted, skipped = convert(rows, known_teams)
     unresolved: list[str] = []
-    if nhl_source and os.path.exists(nhl_source):
-        unresolved = fill_nhl_teams(converted, nhl_source, odds_path)
+    wanted = [nhl_source] if isinstance(nhl_source, str) else list(nhl_source or [])
+    present = [path for path in wanted if os.path.exists(path)]
+    if present:
+        unresolved = fill_nhl_teams(converted, present, odds_path)
     return converted, skipped, unresolved
 
 
@@ -321,8 +351,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--nhl-teams",
-        default="data/players.csv",
-        help="canonical CSV to source NHL TEAM from (blank to skip the join)",
+        action="append",
+        metavar="CSV",
+        help=(
+            "canonical CSV to source NHL TEAM from; repeat to chain fallbacks, "
+            "first answer wins (default: %s)" % ", ".join(DEFAULT_NHL_SOURCES)
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -337,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         rows = list(reader)
 
     converted, skipped, unresolved = convert_all(
-        rows, league_team_codes(args.teams), args.nhl_teams
+        rows, league_team_codes(args.teams), args.nhl_teams or DEFAULT_NHL_SOURCES
     )
     biddable = _require_biddables(converted)
 

@@ -35,7 +35,7 @@
     "id": 5,
     "is_my_team": false,
     "name": "The Shafranators",
-    "penalty": 0.0,
+    "penalty": 2.8,
     "colors": { "primary": "#0D4499", "secondary": "#E7CD38" },
     "logo": "SHF.png"
   },

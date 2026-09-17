@@ -444,6 +444,25 @@ def convert_all(
     return converted, skipped, fallbacks, unmatched, priors
 
 
+def no_nhl_club(rows: list[dict]) -> list[dict]:
+    """Converted rows left with a blank NHL TEAM, for the report.
+
+    `convert_row` blanks anything that is not a real club, which folds two very
+    different things into one empty cell: a club code the odds file does not
+    know (a data problem) and the league's own `UFA` placeholder, which is its
+    flag for **a player with no NHL contract**. The second is a roster decision
+    waiting to be made -- a rostered player on a cap-counting contract who will
+    not play a game -- and it was silent until 2026-09-17, when one of them
+    (group 3, $2.3M, on an active roster) had to be found by hand.
+
+    Reported rather than acted on. No-NHL-contract is the normal state for a
+    group A-F prospect; it only means something for a START row in a
+    cap-counting group, and which of those the league actually drops is not
+    something this script can know.
+    """
+    return [r for r in rows if not r["NHL TEAM"]]
+
+
 def write_csv(path: str, rows: list[dict], columns: list[str]) -> None:
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns)
@@ -517,6 +536,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nmatched by first-initial + surname, NHL club agreeing ({len(fallbacks)}):")
         for export_name, club, dobber_name in fallbacks:
             print(f"    {export_name} ({club}) -> {dobber_name}")
+
+    blank_club = no_nhl_club(converted)
+    if blank_club:
+        print(f"\nno NHL club ({len(blank_club)}) — blanked rather than invented:")
+        for r in blank_club:
+            flag = (
+                "  <-- rostered, on cap"
+                if r["STATUS"] == "START" and r["GROUP"] in ACTIVE_GROUPS
+                else ""
+            )
+            print(
+                f"    {r['PLAYER']:28} {r['FCHL TEAM'] or '-':4} "
+                f"grp {r['GROUP']:4} ${r['SALARY']}M{flag}"
+            )
+        print(
+            "  The export writes `UFA` here for a player with no NHL contract. A "
+            "flagged row is a roster decision: he counts against the cap and will "
+            "not play. Removing him is a hand edit of the pool file — delete the "
+            "row, which is the only way to say 'gone this season'."
+        )
 
     missing_prior = [n for n, t in priors if not t]
     print(f"\nRFA prior teams ({len(priors)} RFAs):")

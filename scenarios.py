@@ -273,7 +273,19 @@ def _scenario_endgame_ceiling_binds(state: AuctionState) -> None:
     # BOT keeps real money and real needs, so the panel gives live advice rather
     # than DROP on everything — the point is to exercise the advisor, not to
     # bankrupt it.
-    _drain(state.teams[MY_TEAM], state, price, reserved, 7.0)
+    #
+    # `up_to` is what makes "real needs" true rather than incidental, and it is
+    # the half that was missing. `_drain` stops at whichever comes first, the
+    # budget target or the roster cap, and which one binds is a property of the
+    # POOL: BOT reached the $7.0M target with 2 spots to spare until the
+    # 2026-09-17 bake seated three more of its prospects, after which it hit 24
+    # first and arrived here full. A full roster is precisely the state the
+    # advisor cannot advise in — the MILP must fill EXACTLY `remaining_spots`,
+    # so with none left every marginal value is 0, `value_cap` falls under
+    # MIN_SALARY and every player reports `stop_status = unaffordable`. That is
+    # the same failure `_late_draft_shape` and `_leave_bot_planning` already cap
+    # against; this call was the one left uncapped.
+    _drain(state.teams[MY_TEAM], state, price, reserved, 7.0, up_to=ROSTER_SIZE - 2)
 
 
 def _scenario_endgame_last_goalie(state: AuctionState) -> None:

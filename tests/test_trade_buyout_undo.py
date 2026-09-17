@@ -110,10 +110,22 @@ def targets(client):
     eligible = [p for p in roster if p["group"] in BUYOUT_ELIGIBLE_GROUPS]
     assert len(eligible) >= 2, "BOT has too few buyout-eligible players"
 
-    # Worst money-per-point on the roster: exactly what a buyout is for.
-    buyout = max(eligible, key=lambda p: p["salary"] / max(p["projected_points"], 1))
     # Best player on the roster: a buyout check must answer KEEP.
     keep = max(eligible, key=lambda p: p["projected_points"])
+    # Worst money-per-point among the REST: exactly what a buyout is for.
+    #
+    # Excluding `keep` is what makes the three picks distinct by construction
+    # rather than by luck. Three independent argmaxes over one small roster can
+    # collide, and on 2026-09-17 they did: BOT's dearest contract was also its
+    # top scorer, so `buyout` and `keep` were the same player and `spare` — which
+    # only excludes those two by NAME — became the third of two. The assertion
+    # below caught it, but as an unexplained `2 == 3` in a setup fixture, naming
+    # neither player nor cause. Excluding the top scorer is also the more correct
+    # reading: buying out your best player is the case that must answer KEEP, so
+    # he is the subject of the other test, not a candidate for this one.
+    rest = [p for p in eligible if p["name"] != keep["name"]]
+    assert rest, "BOT's only buyout-eligible player is also its best"
+    buyout = max(rest, key=lambda p: p["salary"] / max(p["projected_points"], 1))
     # Lowest scorer who is neither, so the trade tests cannot collide with the
     # player the buyout tests permanently remove. Drawn from the WHOLE roster,
     # not just the eligible ones — trading an ineligible player is legal, and

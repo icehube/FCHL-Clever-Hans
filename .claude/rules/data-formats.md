@@ -39,7 +39,7 @@ Dylan Holloway,F,C,MINOR,BOT,STL,25,1.6,0,67,
 **The player name is the app's primary key** — `available_players`,
 `market_prices`, `find_player`, every endpoint's `player` form field, the
 transaction log, and the `bo-<name>` DOM ids. `players.csv` does not guarantee
-uniqueness: as of 2026-09-15 it has 1268 rows and 1267 distinct names.
+uniqueness: as of 2026-09-17 it has 1267 rows and 1266 distinct names.
 
 `data_loader._disambiguated_names` suffixes every row of a colliding group,
 escalating only as far as it must: `Name (TEAM)`, then `Name (TEAM POS)` when
@@ -77,6 +77,21 @@ would silently degrade every renamed goalie to the pts/win fallback.
 - **Keepers**: `STATUS = START` and `FCHL TEAM` is a team code (not UFA/RFA)
 - **Biddable at auction**: `FCHL TEAM = UFA` or `FCHL TEAM = RFA` (STATUS blank)
 - **Minor league**: `STATUS = MINOR`
+
+**Only `MINOR` is compared against anything.** `load_players` reads
+`is_minor = status == "MINOR"` and nothing else, so on a real team code every
+other string — `START`, a blank, `MINR`, `Minor`, a stray space — produces an
+**active keeper**, silently. `START` is a convention the writers keep, not a
+value the loader checks. That is why moving a player between the roster and the
+minors in a pool file goes through `bake_roster_state.py` rather than by hand:
+a typo there is not an error, it is a wrong roster that looks right.
+
+**These three are the whole durable roster vocabulary**, and `/reset` rebuilds
+from them. A bench assignment is not among them — `is_bench` has no column and
+reaches no engine module — and a player removed from the league is expressed by
+the **absence** of his row, which is the only way to say "gone this season": a
+blank `FCHL TEAM` is dropped at load but leaves a misleading row behind, and
+`UFA` would put him in the auction. See the prep loop in CLAUDE.md.
 
 ### RFA detection (for price model `is_rfa` feature)
 
@@ -176,10 +191,20 @@ Two guards make the join safe to trust:
 - **Only real NHL clubs are written.** The 2025-26 `players.csv` carried the
   FCHL placeholder `UFA` in its NHL TEAM column on 9 rows, which is invisible to
   pricing but would render as a club and, once in a pool file, look like data.
-  `convert_fchl_online.py` now blanks the same placeholder at the source (4 rows
-  on the 2026-27 file), so no pool in the repo carries `UFA` any more and the
+  `convert_fchl_online.py` now blanks the same placeholder at the source (3 rows
+  on the 2026-27 file, after the fourth was removed from the league — see
+  `no_nhl_club` below), so no pool in the repo carries `UFA` any more and the
   named exception in `test_every_nhl_club_in_every_pool_has_cup_odds` currently
-  matches nothing. Both stay: the guard is about what a future export may write,
+  matches nothing. **A blank club means two different things and
+  `no_nhl_club` reports both rather than letting them collapse**: a club the odds
+  file does not know (a data problem — the 162 blanks in
+  `players-23-converted.csv` are all this) and the `UFA` placeholder, which is
+  the league's own flag for *no NHL contract*. Only the second is a roster
+  decision, and only when the row is a cap-counting one: a group A-F prospect
+  without an NHL contract is the normal case and costs nothing, while a `START`
+  row in group 2/3 is a salary against the cap for a player who will not play.
+  `tests/test_fchl_online_conversion.py` fails on the latter.
+  Both stay: the guard is about what a future export may write,
   not about what today's happens to contain.
 
 These are **present-day** clubs: a player traded since the legacy season gets

@@ -270,16 +270,45 @@ def test_every_rendered_colour_class_is_defined():
         pages = [client.get("/").text]
 
         bot = main.auction_state.teams[main.MY_TEAM]
+        eligible = [q for q in bot.all_players if q.can_be_bought_out]
+        assert eligible, "BOT has no buyout-eligible player to ask about"
+
         verdicts: dict[str, str] = {}
-        for p in (q for q in bot.all_players if q.can_be_bought_out):
-            html = client.get(
-                "/buyout-check", params={"player_name": p.name}
-            ).text
+
+        def _ask(name: str) -> None:
+            html = client.get("/buyout-check", params={"player_name": name}).text
             for verdict in ("BUYOUT", "KEEP"):
                 if f">{verdict}</span>" in html:
                     verdicts.setdefault(verdict, html)
+
+        # KEEP comes free: on a fresh league almost every contract is worth
+        # keeping, which is exactly why the other branch has to be BUILT.
+        for q in eligible:
+            _ask(q.name)
             if len(verdicts) == 2:
                 break
+
+        # **BUYOUT is supplied, not hoped for.** It used to come from whichever
+        # player the pool happened to make a bad contract, and that is a data
+        # dependency wearing a scan: on 2026-09-17 the one BOT player the MILP
+        # would buy out was removed from the league, this reached only KEEP, and
+        # half the trimmed colour classes silently stopped being checked. So if
+        # no real contract is bad enough, make one — an eligible player at the
+        # league maximum frees MAX_SALARY/2 net, which the MILP can always spend
+        # better on a fresh pool. `/adjust-salary` is the ordinary typo-fix
+        # endpoint, and the state dies with the client.
+        if "BUYOUT" not in verdicts:
+            victim = min(eligible, key=lambda q: q.projected_points)
+            client.post(
+                "/adjust-salary",
+                data={
+                    "team_code": main.MY_TEAM,
+                    "player_name": victim.name,
+                    "new_salary": main.MAX_SALARY,
+                },
+            )
+            _ask(victim.name)
+
         assert len(verdicts) == 2, (
             f"only reached {sorted(verdicts)} — both colour branches must render "
             f"or half the trimmed classes go unchecked"

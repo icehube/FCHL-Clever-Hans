@@ -20,6 +20,147 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-17]
+
+### Added
+
+- **`bake_roster_state.py` — a pre-draft baseline that survives `/reset`.**
+  `POST /reset` rebuilds every team from `data/players.csv` +
+  `data/fchl_teams.json` and reads the saved state not at all, so prep done in
+  the UI — recalling a prospect, demoting a keeper, entering a cap penalty — was
+  destroyed by the first reset after it. That is correct behaviour and it left
+  no way to return to a *prepared* baseline after testing, which is the whole
+  shape of draft prep: model what the rivals will do, test against it, get back
+  to it. None of the three `_backfill_*` helpers saved it either — they fill a
+  blank NHL club, set `is_keeper`, and copy a logo; **nothing moves a player
+  between the roster and the minors**. So the baseline now lives in the data
+  files and the script puts it there, carrying exactly two things: which list a
+  player is in (`STATUS`) and `TeamState.penalties`. Owner decision 2026-09-16,
+  choosing the data files over a second saved-state concept.
+
+  **It refuses rather than guesses**, and both refusals are for silent failures.
+  A state holding transactions or acquired players is rejected outright: baking
+  it would write draft picks into the pool file as keepers, priced as though the
+  league had always owned them, with a buyout penalty indistinguishable from one
+  the league handed down. A player the state holds and the pool does not, or one
+  on a different team, is rejected by name. Every refusal test asserts the files
+  are **byte-identical afterwards**, not merely that an exception came back.
+
+  **Bench flags are not carried, and that costs nothing.** There is no bench
+  column in `CANONICAL_COLUMNS`, and `is_bench` reaches no engine module:
+  `lineup_points` scores the best 12F/6D/2G from every roster player regardless
+  of the flag, and none of `total_salary`, `roster_count`, `spendable_budget` or
+  `physical_max_bid` reads it (`TeamState.set_bench`'s docstring said so already).
+  So the half of the original worry that was about benching was a worry about
+  losing something inert. What moves numbers is **minors** placement — a
+  demotion drops `roster_count`, raises `min_budget_reserved`, lowers
+  `spendable_budget`, and for a group A–F player takes the salary off cap
+  entirely — and that is exactly what the CSV expresses. The script reports the
+  bench flags and `is_done` it is dropping on every run, so the gap is never
+  silent.
+
+  **Line endings are preserved rather than assumed.** `data/players.csv` is
+  CRLF and `csv.DictWriter` defaults to CRLF, so an early version matched by
+  accident; an LF pool would have been rewritten end to end, burying a
+  three-line bake in a 1268-line diff. Found the hard way the same day, on a
+  hand edit whose `Path.read_text()` collapsed the endings of the whole file.
+  `line_terminator` now sniffs the file, and both directions are pinned.
+
+- **`convert_fchl_online.no_nhl_club` reports players with no NHL club.** The
+  converter blanks any club that is not a real code, which folded two different
+  things into one empty cell: a club the odds file does not know — a data
+  problem, and what the 162 blanks in `players-23-converted.csv` are — and the
+  export's `UFA` placeholder, which is the league saying **this player has no
+  NHL contract**. The second is a roster decision, not a data problem, and it
+  was silent. `tests/test_fchl_online_conversion.py` fails on a rostered
+  cap-counting row with no club, scoped to `data/players.csv` alone because only
+  the live pool is built from an export carrying that signal.
+
+### Changed
+
+- **Patrik Laine removed from `data/players.csv`; no penalty, no code.** He had
+  no NHL contract, so the CBA 11.4 buyout does not apply — there is no contract
+  to buy out, the league charges nothing, and the full $2.3M comes off BOT's
+  cap. `execute_buyout` would have charged 50% of it, leaving BOT carrying a
+  penalty the league never assessed. Owner decision 2026-09-16: such a player is
+  **gone entirely this season** — off the roster and not draftable — and it
+  happens **pre-draft only**. Deleting the row is exactly that, and it is the
+  only CSV expression of it: `FCHL TEAM: UFA` would put him in the auction, and
+  a blank `FCHL TEAM` is dropped at load but leaves a misleading row in the file.
+  BOT loses one roster player and $2.3M of cap load, and gains a spot to fill.
+
+  **No `/release` endpoint was built, and the cost of one is recorded in
+  `BACKLOG.md` rather than left to be re-derived.** It would need a new
+  `transaction_type`, a new `where` threaded through six places — miss one and
+  the player becomes findable *nowhere*, worse than a buyout, which at least
+  surfaces him — a branch in `tests/measure_replay.py`, which raises on unknown
+  types by design, and a new eligibility property, because a no-contract player
+  is typically group 2/3 and the buyout picker would keep offering him the
+  penalising path. For a pre-draft-only operation, against a durable-prep story
+  that is now the data files, and which the endpoint would lose on the very next
+  `/reset`, that is the wrong trade.
+
+- The three BOT prospects recalled in the UI on 2026-09-16 — groups A, B and C —
+  baked from `MINOR` to `START`, putting $2.6M back on BOT's cap and taking
+  three spots off its needs. This is the first use of the bake path.
+
+- `data/fchl_teams.json`: SHF `penalty` $0.0M → $2.8M, entered by hand and
+  committed here. Penalties are read only by `build_initial_state`, so a JSON
+  edit needs a `/reset` to take effect — `_backfill_team_metadata` refreshes the
+  logo and nothing else.
+
+### Fixed
+
+Three tests that the pool edit above broke, all the same species: each derived
+its subject from the live data and none of them had ever *guaranteed* it. Every
+one passed on the old pool and failed on the new one, so each is recorded with
+what the data was doing for it.
+
+- **`scenarios._scenario_endgame_ceiling_binds` left BOT with a full roster.**
+  Its own comment says "BOT keeps real money and **real needs**", and the needs
+  half was incidental: `_drain` stops at whichever comes first, the budget
+  target or `ROSTER_SIZE`, and which one binds is a property of the pool. BOT
+  reached the $7.0M target with 2 spots to spare until three of its prospects
+  were recalled, after which it hit 24 first and arrived full. A full roster is
+  precisely the state the advisor cannot advise in — the MILP must fill
+  *exactly* `remaining_spots`, so with none left every marginal value is 0,
+  `value_cap` falls below `MIN_SALARY`, and every player reports
+  `stop_status = unaffordable`. Measured: 22 roster / 2 spots / `value_cap` 6.5
+  / `live` before, 24 / 0 / 0.0 / `unaffordable` after. Now capped at
+  `up_to=ROSTER_SIZE - 2` — the same guard `_late_draft_shape` and
+  `_leave_bot_planning` already carry, and this was the one `_drain` call left
+  without it.
+
+- **`test_trade_buyout_undo.py`'s `targets` fixture picked the same player
+  twice.** It took three independent argmaxes over one small roster — worst
+  $/point, most points, fewest points — and asserted they were distinct. On the
+  new pool BOT's dearest contract is also its top scorer, so `buyout` and `keep`
+  resolved to one player and the fixture died as a bare `assert 2 == 3` in
+  setup, naming neither player nor cause and erroring out 12 tests. `buyout` is
+  now drawn from the eligible set **excluding** `keep`, which makes the three
+  distinct by construction — and is the more correct reading anyway: buying out
+  your best player is the case that must answer KEEP, so he is the subject of
+  the other test rather than a candidate for this one.
+
+- **`test_every_rendered_colour_class_is_defined` stopped checking half the
+  colours.** It scanned BOT's eligible contracts for one the MILP would buy out,
+  and the only such player was the one removed from the league. It then reached
+  `KEEP` alone, and every colour class on the `BUYOUT` branch went unchecked —
+  the failure mode CLAUDE.md describes as a data guard masking the flag beside
+  it. The `BUYOUT` verdict is now **supplied**: if no real contract is bad
+  enough, `/adjust-salary` makes one at `MAX_SALARY`, which frees half of it net
+  and which the MILP can always spend better on a fresh pool. Verified the
+  distinction is real — the scan alone reaches `['KEEP']` over all 5 eligible,
+  and the supplied contract reaches `BUYOUT`.
+
+- **`bake_roster_state.py` assumed CSV line endings.** `csv.DictWriter` defaults
+  to CRLF and `data/players.csv` is CRLF, so the first version matched by
+  accident; an LF pool would have been rewritten end to end. Found within the
+  hour on a hand edit whose `Path.read_text()` collapsed all 1269 line endings,
+  turning a one-row deletion into a 2537-line diff. `line_terminator` now sniffs
+  the file and both directions are pinned.
+
+
 ## [2026-09-15]
 
 ### Changed

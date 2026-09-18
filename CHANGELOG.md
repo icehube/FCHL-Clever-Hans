@@ -109,6 +109,46 @@ rediscover the same non-problem.
   edit needs a `/reset` to take effect — `_backfill_team_metadata` refreshes the
   logo and nothing else.
 
+- **The auction grid dropped from three columns to two, on owner request.**
+  `.area-players` (Available Players + League State) is gone; Available
+  Players moved into `.area-auction`, above Auction Control, and League State
+  into `.area-team`, above the Team panel. `all_panels.html` now renders two
+  `<div>`s instead of three, and `.auction-grid`'s 1024px 3-col media-query
+  tier is deleted — 1-col under 768px, 2-col above it, no third tier. Track
+  widths widened accordingly (measured with a temporary downloaded Chromium,
+  since this dev machine has no system Chrome for the checked-in suite's
+  `channel="chrome"`): ~329→~499px at 1024, ~409→~627px at 1280,
+  ~511→~787px at 1600.
+
+  **Three consequences that were not the ask, all confirmed rather than
+  assumed.** (1) `TestTheChartLandsWhereYouClicked`'s document-order claim
+  flipped: `#player-chart-container` (inside `bid_limits.html`, now first in
+  `.area-auction`) precedes `#bid-panel` (inside `auction_control.html`) where
+  it used to sit in a separate column entirely, so the test's screen-position
+  assertion is now vertical — the table's chart must land above the bid panel
+  — rather than horizontal. The `counterfactual.html` two-mount test
+  (`#bid-panel` vs `#explanation`) was unaffected: both still live in
+  `.area-auction`, in the same relative order as before, just with
+  `bid_limits.html` now ahead of both. (2) 1024px is no longer the tightest
+  2-col track — 800px is (~387px vs ~499px, measured) — left un-swapped in
+  `TestTooltipsStayInsideTheirPanel`'s scenario-specific widths rather than
+  silently changing which combinations get exercised as a side effect of the
+  grid change. (3) The header search dropdown's `left: 0` anchor was chosen
+  (2026-09-10) to land over `.area-players` — League State — as the column
+  least needed mid-bid, with Auction Control and the Team panel's Cap
+  Used/Remaining/Max Bid in the other two. With `.area-players` gone the same
+  fixed geometry (search box x=542-722, card to x≈1010 at 1280px) straddles
+  the new column boundary (x≈640) and lands mostly on `.area-team`'s top
+  card — still League State today, by measurement, not by a live design
+  choice; it would land on the Team panel instead if League State's card ever
+  shrank enough.
+
+  All 1188 endpoint tests and the full 52-test browser suite pass with no
+  behavioural regressions; references to `.area-players` and the 3-column
+  grid were updated across `tests/measure_layout.py`, `tests/test_browser_ui.py`,
+  `tests/test_endpoints.py`, `static/style.css` and `CLAUDE.md`'s "Responsive
+  layout" and two-mounts bullets.
+
 ### Fixed
 
 Three tests that the pool edit above broke, all the same species: each derived
@@ -159,6 +199,23 @@ what the data was doing for it.
   hour on a hand edit whose `Path.read_text()` collapsed all 1269 line endings,
   turning a one-row deletion into a 2537-line diff. `line_terminator` now sniffs
   the file and both directions are pinned.
+
+- **`tests/test_browser_ui.py`'s `browser` fixture had silently dropped
+  `channel="chrome"`**, unrelated to the grid-layout work above but sitting in
+  the same uncommitted diff — caught by a `/go` simplify pass that flagged it
+  for a human decision rather than fixing it unasked. The dev machine had no
+  real Google Chrome installed at all, but did have a Playwright-downloaded
+  Chromium cached under `~/.cache/ms-playwright/` from some earlier,
+  undocumented `playwright install` — a step CLAUDE.md and this file's own
+  module docstring both say must never be needed, because the draft runs with
+  the network down. With `channel="chrome"` removed, the suite fell back to
+  that cached download and went **52/52 green**, which is exactly why this is
+  worth recording rather than shrugging off: the suite gave no signal at all
+  that it was running against the wrong browser. Confirmed directly —
+  `p.chromium.launch(channel="chrome")` failed with `Chromium distribution
+  'chrome' is not found at /opt/google/chrome/chrome` before the fix. Resolved
+  by installing real Google Chrome on the machine and restoring
+  `channel="chrome"`; re-verified 52/52 against it (167s).
 
 
 ## [2026-09-15]

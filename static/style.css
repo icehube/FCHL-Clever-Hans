@@ -1,44 +1,40 @@
 /* FCHL Auction Manager — Tokyo Night theme overrides for DaisyUI */
 
-/* Responsive auction grid: 1 col mobile, 2 col tablet, 3 col desktop.
+/* Responsive auction grid: 1 col mobile, 2 col tablet and up.
+
+   Until 2026-09-17 this was a 3-column grid (.area-auction / .area-players /
+   .area-team). .area-players was folded into the other two — Available
+   Players moved into .area-auction (above the auction control panel) and
+   League State into .area-team (above the team panel) — leaving two areas
+   and one breakpoint. See CLAUDE.md's "Responsive layout" bullet.
 
    minmax(0, 1fr), NEVER a bare `1fr`. `1fr` is shorthand for minmax(AUTO, 1fr),
    and per css-grid §6.6 a grid item takes a CONTENT-BASED automatic minimum
-   whenever it spans a track whose MIN sizing function is `auto`. So the widest
-   panel silently sets its own column's floor and the other two divide whatever
-   is left. Measured in Chrome at 1280px, before the fix: tracks came out
-   292 / 991 / 585, the grid's content box was 1904 against a 1280 client box,
-   and #team-panel began at x=1310 — the entire panel carrying Cap Used,
-   Remaining, Max Bid, the roster and the buyout dots was off-screen, on the
-   width the draft is actually run at.
+   whenever it spans a track whose MIN sizing function is `auto`. So the wider
+   panel would silently set its own column's floor and the other one would take
+   whatever is left — this is the same 3-column bug (measured then: tracks
+   292 / 991 / 585 at 1280px, #team-panel off-screen at x=1310) and nothing
+   about a 2-column grid makes it unreachable.
 
-   Nothing looked wrong because all_panels.html's inline `overflow-y: auto`
+   Nothing would look wrong because all_panels.html's inline `overflow-y: auto`
    forces this element's `overflow-x` to compute to `auto` too (CSS Overflow
-   §3.2), so 624px hid behind the GRID's scrollbar and no PAGE scrollbar ever
-   appeared. Do not "fix" that with `overflow-x: hidden` — that makes the team
-   panel unreachable rather than merely off-screen.
+   §3.2), so overflow hides behind the GRID's scrollbar and no PAGE scrollbar
+   ever appears. Do not "fix" that with `overflow-x: hidden` — that makes a
+   column unreachable rather than merely off-screen.
 
-   The 990 was #league-state's 13-column table, NOT #bid-limits: bid_limits'
-   table already sits in a .scroll-container and its min-content is 544. A
-   `min-width: 0` on the .area-* children would be a redundant second source of
-   truth — §6.6 keys on the TRACK's min sizing function, not on the item (that
-   is the flexbox rule, §4.5). Note every Tailwind grid utility in this app
-   already emits this: `grid-cols-3` is `repeat(3, minmax(0, 1fr))`.
+   A `min-width: 0` on the .area-* children would be a redundant second source
+   of truth — §6.6 keys on the TRACK's min sizing function, not on the item
+   (that is the flexbox rule, §4.5). Note every Tailwind grid utility in this
+   app already emits this: `grid-cols-2` is `repeat(2, minmax(0, 1fr))`.
    .auction-grid was the one hand-written grid that did not.
 
    Zeroing the track floor is necessary but NOT sufficient: it shrinks the item
    box and does nothing to the item's DESCENDANTS, which keep their min-content
-   and have `overflow: visible`. Measured with minmax injected and no wrappers,
-   the league table still painted out to x=1405 across #team-panel at 856-1271.
-   Hence .table-scroll-x below — the two are one change. */
+   and have `overflow: visible`. Hence .table-scroll-x below — the two are one
+   change. */
 .auction-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 768px) {
     .auction-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .area-team { grid-column: span 2; }
-}
-@media (min-width: 1024px) {
-    .auction-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .area-team { grid-column: span 1; }
 }
 
 :root {
@@ -394,7 +390,18 @@ th.sort-desc::after { content: ' \25BC'; opacity: 1; }
     /* Left-anchored, not right. #toast-container is a LATER sibling of the
        navbar at the same z-50, so it paints on top; right-anchored, a toast
        would cover the results. From the left edge of the control group the
-       card hangs over .area-players, the column least needed mid-bid. */
+       card hangs mostly over .area-team's top card (League State) — measured
+       at 1280px, the search box sits at x=542-722, straddling the
+       .area-auction/.area-team boundary at x≈640, and the 26rem-wide card
+       (468px at this app's 18px root font) extends to x≈1010, mostly past it.
+
+       Until 2026-09-17 this deliberately hung over the middle of a 3-column
+       grid (`.area-players`, holding League State), the column least needed
+       mid-bid — Auction Control and the Team panel's Cap Used/Remaining/Max
+       Bid sat in the other two. Folding `.area-players` away left the same
+       card geometry landing on League State's top card by measurement, not
+       by a still-live design choice; re-check if either area's top card
+       changes. */
     left: 0;
     width: 26rem;
     max-height: 60vh;

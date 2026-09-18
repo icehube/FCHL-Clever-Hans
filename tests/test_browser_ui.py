@@ -381,13 +381,13 @@ class TestLayoutAndToasts:
     def _column_xs(self, page) -> set[int]:
         areas = [
             page.locator(f".{cls}").first.bounding_box()
-            for cls in ("area-auction", "area-players", "area-team")
+            for cls in ("area-auction", "area-team")
         ]
         assert all(a is not None for a in areas), "a grid area did not render"
         return {round(a["x"]) for a in areas}
 
-    # Every width the 3-column layout can be run at: 1024 is the tightest
-    # (329px tracks), 1280 is the draft laptop, 1600 the top of that range.
+    # Every width the 2-column layout can be run at: 1024 is the tightest
+    # (~498px tracks), 1280 is the draft laptop, 1600 the top of that range.
     CONTAINMENT_WIDTHS = (1024, 1280, 1600)
 
     CONTAINMENT_PROBE = """() => {
@@ -402,7 +402,7 @@ class TestLayoutAndToasts:
           spill.push((c.id ? '#' + c.id : c.tagName) +
                      ' content ' + c.scrollWidth + ' in ' + c.clientWidth);
       const areas = {};
-      for (const cls of ['area-auction', 'area-players', 'area-team']) {
+      for (const cls of ['area-auction', 'area-team']) {
         const r = document.querySelector('.' + cls).getBoundingClientRect();
         areas[cls] = {left: Math.round(r.left), right: Math.round(r.right)};
       }
@@ -433,8 +433,12 @@ class TestLayoutAndToasts:
         forces `overflow-x` to `auto` too, so the overflow went behind the GRID's
         scrollbar and no page scrollbar ever appeared — and because
         `test_the_layout_responds_to_width` above only counts DISTINCT column x
-        values, which `{9, 311, 1310}` satisfies perfectly. Three columns is not
-        the same claim as three columns you can see.
+        values, which `{9, 311, 1310}` satisfies perfectly. Columns existing is
+        not the same claim as columns you can see.
+
+        The grid dropped to 2 columns on 2026-09-17 (`.area-players` folded
+        into the other two), which is unrelated to this bug — a `minmax(0, 1fr)`
+        column can still hog its row with two tracks as with three.
         """
         for width in self.CONTAINMENT_WIDTHS:
             context = browser.new_context(viewport={"width": width, "height": 900})
@@ -466,9 +470,9 @@ class TestLayoutAndToasts:
             )
             # One assertion, both failure directions: a hogged track (292/1885 =
             # 0.155 before the fix) and a future collapse to nothing. 0.25 not
-            # 0.33 so a deliberate `1fr 1.4fr 1fr` later is not a false failure.
+            # 0.5 so a deliberate `1fr 1.4fr` later is not a false failure.
             tracks = d["tracks"]
-            assert len(tracks) == 3, f"{width}px: expected 3 tracks, got {tracks}"
+            assert len(tracks) == 2, f"{width}px: expected 2 tracks, got {tracks}"
             assert min(tracks) >= 0.25 * sum(tracks), (
                 f"{width}px: one column is hogging the row — tracks {tracks}"
             )
@@ -497,14 +501,15 @@ class TestLayoutAndToasts:
         """The breakpoints, shipped and never once looked at.
 
         BOTH ends are asserted on purpose. Checking only the narrow case passes
-        even with every `@media` rule deleted — verified by mutation: removing
-        both queries destroys the 3-column desktop layout the draft is actually
-        run in, and a stacked-only assertion notices nothing.
+        even with the `@media` rule deleted — verified by mutation: removing it
+        destroys the 2-column desktop layout the draft is actually run in, and
+        a stacked-only assertion notices nothing.
 
         What this CANNOT see is containment: it compares only the count of
         distinct column x values, so it passed for months while `.area-team` sat
-        at x=1310 with the viewport 1280 wide. That is
-        `test_the_grid_never_overflows_its_own_width` above.
+        at x=1310 with the viewport 1280 wide (back when this was a 3-column
+        grid — see `test_the_grid_never_overflows_its_own_width` above for that
+        containment check).
         """
         page.set_viewport_size({"width": 420, "height": 900})
         _open(page, live_server)
@@ -513,11 +518,11 @@ class TestLayoutAndToasts:
 
         page.set_viewport_size({"width": 1280, "height": 900})
         page.wait_for_function(
-            "() => document.querySelector('.area-players').getBoundingClientRect().x > 0"
+            "() => document.querySelector('.area-team').getBoundingClientRect().x > 0"
         )
         wide = self._column_xs(page)
-        assert len(wide) == 3, (
-            f"columns did not spread at 1280px: {wide} — the media queries are "
+        assert len(wide) == 2, (
+            f"columns did not spread at 1280px: {wide} — the media query is "
             f"gone or the grid template changed, and the draft runs at this width"
         )
 
@@ -565,8 +570,18 @@ class TestTheChartLandsWhereYouClicked:
     while `bid_limits.html` rendered an empty div with the same id as the
     table's swap target. No single server response contained both copies — the
     chart body reaches the page by a swap — so the whole suite passed while a
-    chart link in the players table rendered its chart into the bid panel in
-    the other column, `area-auction` being first in document order.
+    chart link in the players table rendered its chart into the bid panel
+    instead of its own mount.
+
+    Until 2026-09-17 the two mounts sat in separate GRID COLUMNS
+    (`bid_panel.html`'s copy in `.area-auction`, `bid_limits.html`'s in the
+    since-removed `.area-players`), so the fix was checked by screen position:
+    the table's chart had to land in the column the click came from, not the
+    auction column. That day's layout change folded Available Players into
+    `.area-auction`, ABOVE the auction control panel, so both mounts now share
+    one column, stacked — `#player-chart-container` (inside `bid_limits.html`)
+    precedes `#bid-panel` in document order. The check is now vertical: the
+    table's chart must land above the bid panel, never inside it.
     """
 
     def _open_with_a_live_bid(self, page, live_server):
@@ -595,14 +610,16 @@ class TestTheChartLandsWhereYouClicked:
         assert other in mounted.inner_text()
 
         # The screen-position claim, which is the whole user-visible bug and
-        # the one thing TestClient cannot answer: the chart must appear in the
-        # players column the click came from, not the auction column.
+        # the one thing TestClient cannot answer: the chart must appear above
+        # the bid panel, in its own mount, not swapped down into the bid
+        # panel's.
         chart_box = mounted.bounding_box()
         panel_box = page.locator("#bid-panel").bounding_box()
-        assert chart_box["x"] >= panel_box["x"] + panel_box["width"], (
-            f"chart opened at x={chart_box['x']:.0f}, inside/left of the bid "
-            f"panel ending at x={panel_box['x'] + panel_box['width']:.0f} — it "
-            f"rendered into the wrong column"
+        assert chart_box["y"] + chart_box["height"] <= panel_box["y"], (
+            f"chart opened at y={chart_box['y']:.0f}-"
+            f"{chart_box['y'] + chart_box['height']:.0f}, overlapping or below "
+            f"the bid panel starting at y={panel_box['y']:.0f} — it rendered "
+            f"into the wrong mount"
         )
 
         # And the bid panel's own chart is untouched, still showing its player.
@@ -627,8 +644,8 @@ class TestTheChartLandsWhereYouClicked:
         page.click('#bid-panel .price-chart-card button[aria-label^="Close"]')
         page.wait_for_selector("#bid-panel .price-chart-card", state="detached")
         assert page.locator("#player-chart-container .price-chart-card").count() == 1, (
-            "closing the bid panel's chart also closed the table's, in the "
-            "other column — × resolved to the wrong element"
+            "closing the bid panel's chart also closed the table's — × "
+            "resolved to the wrong element"
         )
 
 
@@ -1020,10 +1037,10 @@ class TestTooltipsStayInsideTheirPanel:
     screenshot.
     """
 
-    # Every breakpoint in style.css (1-col, 2-col, 3-col) plus the edges either
-    # side of the 768px switch, where the stat tiles narrow to ~191px and a
-    # centred 15rem bubble no longer clears the panel edge. 800 is the width
-    # that actually caught the team-panel case; 375 and 1280 did not.
+    # Every breakpoint in style.css (1-col, 2-col) plus the edges either side
+    # of the 768px switch, where the stat tiles narrow to ~191px and a centred
+    # 15rem bubble no longer clears the panel edge. 800 is the width that
+    # actually caught the team-panel case; 375 and 1280 did not.
     WIDTHS = (375, 640, 700, 800, 1024, 1280, 1920)
 
     # (width, scenario-or-None). A fresh reset cannot render 8 of the app's 20
@@ -1035,9 +1052,17 @@ class TestTooltipsStayInsideTheirPanel:
     #
     # Three widths rather than all seven, because the extra cost is a page load
     # plus a live bid each and the risk does not vary smoothly: 375 is the 1-col
-    # case where the panel is widest, 1024 the tightest 3-col track (~329px), and
+    # case where the panel is widest, 1024 a mid-range 2-col track (~499px), and
     # 1280 the width the draft is actually run at. A left-anchored bubble in a
     # horizontally scrollable table is most at risk at the narrow end.
+    #
+    # Until 2026-09-17 this was a 3-col grid and 1024 WAS its tightest track
+    # (~329px) — measured after the 2-col change, 1024 gives ~499px and 800
+    # (already in WIDTHS above) is now the tighter one at ~387px. Left here
+    # rather than swapped to 800: every state below already passes at 1024,
+    # and re-deriving which width is "tightest" for a scenario+width
+    # combination that has not been run at 800 is a separate risk to take on
+    # deliberately, not as a side effect of a grid change.
     #
     # `OVER_COMMITTED` is NOT a scenario — it is a squeeze applied to a fresh
     # state, and it has its own branch below. Since 2026-09-07 the bid panel
@@ -1053,9 +1078,8 @@ class TestTooltipsStayInsideTheirPanel:
         (375, "endgame-ceiling-binds"),
         (1024, "endgame-ceiling-binds"),
         (1280, "endgame-ceiling-binds"),
-        # 1024 alone, for the same cost reason as above: it is the tightest
-        # 3-col track (~329px), where a centred `tooltip-bottom` bubble is most
-        # likely to leave the panel it belongs to.
+        # 1024 alone, for the same cost reason as above (see the note on
+        # WIDTHS about 1024 no longer being the tightest track post-2026-09-17).
         (1024, OVER_COMMITTED),
     )
 
@@ -1273,12 +1297,14 @@ class TestMidBidClutterCanBeDismissed:
         whichever comes first in document order rather than the one clicked.
 
         **Only one of the two directions can detect that, and the first draft of
-        this test picked the wrong one.** `all_panels.html` puts `.area-auction`
-        before `.area-players`, so the BID PANEL's card is first: clicking its
-        own close button hits the same element whether the code says `closest()`
-        or `document.querySelector()`, and a mutation to the latter sailed
-        through green. So this closes the **#explanation** card — the one that is
-        not first — which is where the two implementations disagree.
+        this test picked the wrong one.** `all_panels.html` includes
+        `auction_control.html` (which holds `#bid-panel`) before
+        `explanation.html` (`#explanation`) within `.area-auction`, so the BID
+        PANEL's card is first: clicking its own close button hits the same
+        element whether the code says `closest()` or `document.querySelector()`,
+        and a mutation to the latter sailed through green. So this closes the
+        **#explanation** card — the one that is not first — which is where the
+        two implementations disagree.
         """
         _open(page, live_server)
         bid_player, other = pool_top(2)

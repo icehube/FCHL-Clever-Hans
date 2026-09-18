@@ -1204,9 +1204,11 @@ class TestPlayerChart:
 
     It used to carry `id="player-chart-container"` itself while
     `bid_limits.html` rendered an empty div with the same id as the table's
-    swap target. htmx resolves a target by id and takes the first match, and
-    `area-auction` precedes `area-players`, so during a live bid a chart link
-    in the table rendered the chart into the bid panel in the other column.
+    swap target. htmx resolves a target by id and takes the first match, so
+    during a live bid a chart link in the table rendered the chart into the
+    bid panel instead of its own mount. (Until 2026-09-17 the two mounts sat
+    in separate grid columns; see `tests/test_browser_ui.py`'s
+    `TestTheChartLandsWhereYouClicked` for the current, single-column layout.)
     """
 
     def test_player_chart_valid(self, client):

@@ -20,6 +20,48 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-20]
+
+### Changed
+
+- **The auction grid is back to three columns, reverting the 2026-09-17
+  collapse to two.** Owner request, three days after asking for the fold. A
+  straight `git revert` of the layout commit: `.area-players` returns as its
+  own grid area holding Available Players + League State, `all_panels.html`
+  renders three `<div>`s again, and `.auction-grid`'s 1024px 3-col media-query
+  tier comes back — 1-col under 768px, 2-col at 768px+, 3-col at 1024px+.
+  Track widths return with it: ~329px at 1024, ~409px at 1280, ~511px at 1600,
+  down from the 2-col ~499/~627/~787px. The test and comment text that moved
+  with the fold moved back — `tests/measure_layout.py`, `tests/test_browser_ui.py`
+  (including `TestTheChartLandsWhereYouClicked`'s screen-position assertion,
+  horizontal again because the two chart mounts are in separate columns once
+  more), `tests/test_endpoints.py` and `static/style.css`'s grid and
+  search-dropdown comments.
+
+  **Nothing was wrong with the two-column mechanics**, which is worth stating
+  plainly so it is not re-derived later from the track numbers: 2-col tracks
+  were genuinely wider, the full suite and the browser suite were both green
+  on it, and the three consequences recorded in the 2026-09-17 entry were all
+  real and all handled. It came back on how it looked with Available Players,
+  Auction Control, Explanation, Logs, Trade and Buyout stacked in one column.
+  That is a judgement about the screen, not about the CSS.
+
+  **Three things deliberately not reverted.** The 2026-09-17 changelog entry
+  below stays — it records work that landed, and deleting it would leave the
+  reverting commit explaining itself against nothing. The `channel="chrome"`
+  entry beside it stays for a stronger reason: it documents an unrelated fix
+  that is still in force (the dev machine now has real Google Chrome, and
+  `tests/test_browser_ui.py`'s fixture keeps the flag — the committed tree
+  never lost it, so the revert did not touch it either). And CLAUDE.md's
+  "Responsive layout" and two-mounts bullets were hand-written rather than
+  rolled back, so both bullets now name the three areas *and* carry the
+  fold-and-restore history; a clean revert would have erased the fact that two
+  columns was ever tried.
+
+  Verified: 1188 passed / 10 skipped with `-m "not browser"`, and the full
+  52-test browser suite green against system Chrome (152s).
+
+
 ## [2026-09-17]
 
 ### Added

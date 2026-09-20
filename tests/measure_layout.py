@@ -47,6 +47,7 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 TARGETS = [
     ".auction-grid",
     ".area-auction",
+    ".area-players",
     ".area-team",
     "#bid-limits",
     "#bid-limits .flex.items-center.gap-4",
@@ -265,7 +266,7 @@ def min_contents(page) -> None:
             print(f"  {sel:<44} {res['width']:>11.0f}")
 
 
-AREAS = (".area-auction", ".area-team")
+AREAS = (".area-auction", ".area-players", ".area-team")
 
 
 def attribution(page, areas=AREAS) -> None:

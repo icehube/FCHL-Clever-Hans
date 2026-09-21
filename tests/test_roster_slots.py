@@ -120,17 +120,21 @@ def _roster_table(html: str) -> str:
     return panel[start:panel.index("</table>", start)]
 
 
-def _slot_rows(html: str) -> list[tuple[str, str, str]]:
-    """(slot, position, name) for every rendered roster row, in display order."""
+def _slot_rows(html: str) -> list[tuple[str, str]]:
+    """(slot, name) for every rendered roster row, in display order.
+
+    There is no position cell to read: the slot label IS the position for a
+    starter, which is why the Pos column came out on 2026-09-20.
+    """
     table = _roster_table(html)
     body = table[table.index("</thead>"):]
     out = []
     for row in re.findall(r"<tr\b.*?</tr>", body, re.S):
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
-        if len(cells) < 5:
+        if len(cells) < 4:
             continue
         strip = lambda c: re.sub(r"<[^>]+>", "", c).strip()  # noqa: E731
-        out.append((strip(cells[1]), strip(cells[2]), strip(cells[4])))
+        out.append((strip(cells[1]), strip(cells[3])))
     return out
 
 
@@ -154,12 +158,31 @@ class TestTheColumnIsWiredUp:
         assert "data-tip" not in head
         assert "Lineup slot" in head, "the # header explains nothing"
 
+    def test_the_roster_table_has_no_position_column(self, client):
+        """Removed 2026-09-20: the slot label is the position, for every starter.
+
+        Pins the decision so the column is not reinstated by reflex. The Minors
+        table below keeps its own Pos column and is deliberately untouched —
+        minors carry no lineup slot to read the position off, so this asserts
+        against the ROSTER table alone.
+        """
+        table = _roster_table(client.get(f"/team-view/{MY_TEAM}").text)
+        head = table[:table.index("</thead>")]
+        assert ">Pos<" not in head, (
+            "the roster table has a Pos column again — the slot label already "
+            "carries it"
+        )
+        assert ">Grp<" in head, (
+            "this read the wrong table or the wrong slice — Grp should still "
+            "be there, so a passing Pos assertion would mean nothing"
+        )
+
     def test_the_first_of_each_position_is_numbered_one(self, client):
         rows = _slot_rows(client.get(f"/team-view/{MY_TEAM}").text)
-        owned = [(slot, pos) for slot, pos, _ in rows if slot]
-        assert owned, "no roster row carried a slot label"
+        slots = [slot for slot, _ in rows if slot]
+        assert slots, "no roster row carried a slot label"
         for pos in ("F", "D", "G"):
-            first = [s for s, p in owned if p == pos and s.startswith(pos)]
+            first = [s for s in slots if s.startswith(pos) and s[1:].isdigit()]
             if first:
                 assert first[0] == f"{pos}1", (
                     f"the first {pos} on the roster is labelled {first[0]}"
@@ -173,7 +196,7 @@ class TestTheColumnIsWiredUp:
         """
         rows = _slot_rows(client.get(f"/team-view/{MY_TEAM}").text)
         for pos in ("F", "D", "G"):
-            got = [s for s, _, _ in rows if s.startswith(pos) and s[1:].isdigit()]
+            got = [s for s, _ in rows if s.startswith(pos) and s[1:].isdigit()]
             assert got == [f"{pos}{i}" for i in range(1, len(got) + 1)], (
                 f"{pos} slots are not a gapless 1..N sequence: {got}"
             )
@@ -207,12 +230,12 @@ class TestTheColumnIsWiredUp:
         pos = victim.position
 
         before = _slot_rows(client.get(f"/team-view/{MY_TEAM}").text)
-        was = dict((n, s) for s, _, n in before)[victim.name]
+        was = dict((n, s) for s, n in before)[victim.name]
         assert was.startswith(pos), (
             f"{pos} player starts on {was} — the fixture is not what it claims"
         )
-        n_pos_before = sum(1 for s, _, _ in before if s.startswith(pos))
-        n_bench_before = sum(1 for s, _, _ in before if s.startswith("B"))
+        n_pos_before = sum(1 for s, _ in before if s.startswith(pos))
+        n_bench_before = sum(1 for s, _ in before if s.startswith("B"))
 
         r = client.post(
             "/toggle-bench",
@@ -221,11 +244,11 @@ class TestTheColumnIsWiredUp:
         assert r.status_code == 200
 
         after = _slot_rows(client.get(f"/team-view/{MY_TEAM}").text)
-        now = dict((n, s) for s, _, n in after)[victim.name]
+        now = dict((n, s) for s, n in after)[victim.name]
         assert now.startswith("B"), f"benched player still reads {now}"
 
-        n_pos_after = sum(1 for s, _, _ in after if s.startswith(pos))
-        n_bench_after = sum(1 for s, _, _ in after if s.startswith("B"))
+        n_pos_after = sum(1 for s, _ in after if s.startswith(pos))
+        n_bench_after = sum(1 for s, _ in after if s.startswith("B"))
         assert n_pos_after == n_pos_before - 1, (
             f"{pos} count went {n_pos_before} -> {n_pos_after}; benching must "
             f"give the position number back"
@@ -255,7 +278,13 @@ class TestTheRosterTableIsNotSilentlyOffset:
         rows = re.findall(r"<tr\b.*?</tr>", body, re.S)
         assert rows, "the roster table rendered no rows — this checks nothing"
         for row in rows:
-            assert len(re.findall(r"<td[\s>]", row)) == headers, (
-                f"{headers} headers but {len(re.findall(r'<td[\\s>]', row))} "
-                f"cells — a column is silently offset"
+            # Counted ONCE and reused: re-running the regex inside the f-string
+            # is how this message came to report 5 cells for an 8-cell row
+            # during a mutation check — the inline copy was escaped differently
+            # and matched only the bare `<td>`s, so the guard fired correctly
+            # and then described the wrong thing.
+            cells = len(re.findall(r"<td[\s>]", row))
+            assert cells == headers, (
+                f"{headers} headers but {cells} cells — a column is silently "
+                f"offset"
             )

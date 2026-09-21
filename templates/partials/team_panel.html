@@ -172,13 +172,14 @@
     </div>
     {% endif %}
     {# Re-measured 2026-09-20 at 1280px (tests/measure_layout.py): min-content
-       542px in a 379px scroller, up from 508px before the # column — which
-       costs 34px. Mostly still the Actions cell: a nowrap flex row of Bench +
-       the salary form + ↓ Minors. Scrolls itself rather than painting over
-       whatever sits to its right — see .table-scroll-x in style.css. The
-       wrapper is what keeps test_the_grid_never_overflows_its_own_width green,
-       so a further column goes INSIDE it or the panel paints over #team-panel's
-       neighbour. #}
+       501px in a 379px scroller. The # column cost 34px (508 -> 542) and
+       dropping the Pos column it made redundant gave back 41px, so the table
+       is 7px NARROWER than before either change. What is left is mostly the
+       Actions cell: a nowrap flex row of Bench + the salary form + ↓ Minors.
+       Scrolls itself rather than painting over whatever sits to its right —
+       see .table-scroll-x in style.css. The wrapper is what keeps
+       test_the_grid_never_overflows_its_own_width green, so a further column
+       goes INSIDE it or the panel paints over #team-panel's neighbour. #}
     <div class="table-scroll-x">
     <table class="table table-xs table-zebra">
         <thead>
@@ -188,8 +189,12 @@
                    horizontal scroller, and a centred bubble anchored to a
                    header in one is clipped at essentially every scroll
                    position — same rule the `Grp` header below follows. #}
+                {# No Pos column: the slot label IS the position for every
+                   starter (F1/D1/G1). A bench row reads B1..B4 and carries no
+                   letter, but it sorts inside its own position block, so it
+                   sits among the F rows or the D rows and is placed by where
+                   it falls rather than by a column of its own. #}
                 <th class="opacity-60" title="Lineup slot — F1-F12, D1-D6, G1-G2 start; B1-B4 bench. A row with no number is not on the roster.">#</th>
-                <th>Pos</th>
                 <th title="Player group (A-F for skaters, 1-3 for goalies)">Grp</th>
                 <th>Player</th>
                 <th>NHL</th>
@@ -214,7 +219,6 @@
                real answer is "this analysis isn't about you". #}
             <td>{% if viewed_team.is_my_team and not p.is_target and p.can_be_bought_out %}<span id="bo-{{ p.name|dom_id }}" class="buyout-light light-grey" title="Not analyzed — click 'Scan Roster for Buyout Opportunities' in the Buyout Analyzer"></span>{% endif %}</td>
             <td class="opacity-60 font-mono text-xs">{{ p.slot }}</td>
-            <td>{{ p.position }}</td>
             <td class="font-mono text-xs opacity-70">{{ p.group }}</td>
             <td>{{ p.name }}</td>
             <td>{{ nhl_logo(p.nhl_team) }}</td>

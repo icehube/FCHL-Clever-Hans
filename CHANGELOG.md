@@ -70,7 +70,9 @@ rediscover the same non-problem.
   Measured at 1280px: the roster table's min-content went 508px → **542px**
   inside a 379px `.table-scroll-x`, so the cost is 34px of a table that already
   scrolled, and `test_the_grid_never_overflows_its_own_width` stays green at
-  1024/1280/1600 because the column went inside the existing wrapper.
+  1024/1280/1600 because the column went inside the existing wrapper. (The
+  `Pos` column came out immediately afterwards — see *Changed* below — taking
+  the table to **501px**, 7px narrower than before any of this.)
 
   The Minors table is deliberately untouched — minors are not part of the 24-man
   roster and have no F/D/G or bench shape, and that heading already reads
@@ -91,6 +93,30 @@ rediscover the same non-problem.
   state it does not have. Reworded rather than exempted.
 
 ### Changed
+
+- **The team panel's roster table lost its `Pos` column.** The `#` slot label
+  added the same day names the position for every starter — `F1`, `D3`, `G2` —
+  so `Pos` restated it on 20 of 24 rows, in the app's widest panel, on a table
+  that scrolls horizontally at the width the draft is actually run at. Owner
+  request. Measured at 1280px: min-content 542px → **501px**, giving back 41px
+  against the 34px the `#` column cost, so the roster table now sits **7px
+  narrower than before the numbering shipped**.
+
+  **A bench row is the exception and it is worth knowing.** `B1`..`B4` is one
+  sequence across all positions, so for up to four rows the label carries no
+  position letter and the premise "position is visible in the `#` column" does
+  not hold. It stays readable because rows sort *inside* their position block —
+  a benched forward sits among the `F` rows, a benched goalie among the `G`
+  rows — so position comes from where the row falls rather than from a cell.
+  Weaker than an explicit column, and the accepted cost; the cheap fix if it
+  annoys on draft day is a position-bearing bench label (`B1·F`), one line in
+  `main._roster_slots`.
+
+  **The Minors table keeps its own `Pos`**, deliberately: a minor-league player
+  has no lineup slot to read the position off, so there is nothing there to
+  restate. `test_the_roster_table_has_no_position_column` pins the removal and
+  asserts `Grp` is still present in the same slice, so it cannot pass by
+  reading the wrong table.
 
 - **The auction grid is back to three columns, reverting the 2026-09-17
   collapse to two.** Owner request, three days after asking for the fold. A

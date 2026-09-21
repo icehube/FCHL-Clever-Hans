@@ -26,7 +26,7 @@ rediscover the same non-problem.
 
 - **Lineup-slot numbering on the team panel's roster.** A leading `#` column
   labels each row `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for players who will
-  start and `B1`..`B4` for benched ones, so the last number in a group is
+  start and `BF1`..`BG4` for benched ones, so the last number in a group is
   literally how many of that position the team holds. Mid-auction that question
   had no answer on screen: the table lists the roster grouped F → D → G with
   points descending, and counting it meant counting rows by eye, during a live
@@ -38,7 +38,7 @@ rediscover the same non-problem.
   all** — it is not owned, so letting it take `F3` would report a roster the
   team does not have; it consumes no counter either, so dismissing a suggestion
   never renumbers the players around it. **The bench is one sequence across
-  every position** (`B1`..`B4`), matching the CBA's position-agnostic 4-man
+  every position** (the NUMBER in `BF1`, `BD2`), matching the CBA's position-agnostic 4-man
   bench, and a benched player gives his position number back to the man below
   him. **Bare numbers, no denominator** — `F1`, not `F1/12`: this table's
   min-content was already 163px past its scroller.
@@ -102,15 +102,25 @@ rediscover the same non-problem.
   against the 34px the `#` column cost, so the roster table now sits **7px
   narrower than before the numbering shipped**.
 
-  **A bench row is the exception and it is worth knowing.** `B1`..`B4` is one
-  sequence across all positions, so for up to four rows the label carries no
-  position letter and the premise "position is visible in the `#` column" does
-  not hold. It stays readable because rows sort *inside* their position block —
-  a benched forward sits among the `F` rows, a benched goalie among the `G`
-  rows — so position comes from where the row falls rather than from a cell.
-  Weaker than an explicit column, and the accepted cost; the cheap fix if it
-  annoys on draft day is a position-bearing bench label (`B1·F`), one line in
-  `main._roster_slots`.
+  **The bench label grew a position letter in the same sitting, because
+  removing `Pos` is what made it necessary.** Bench rows read `B1`..`B4` for
+  about an hour, and that left up to four rows — the only four — whose position
+  nothing on the panel stated; the premise "position is visible in the `#`
+  column" held for 20 rows of 24. Position was still *inferable*, since rows
+  sort inside their position block and a benched forward sits among the `F`
+  rows, but inferable from row order is not the same as stated. The label is now
+  `BF1`, `BD2`, `BG3` — owner request, and it makes the premise true on every
+  row rather than almost all of them. Costs nothing in width: `BF1` is three
+  characters and the column's min-content was already set by `F12`, so the table
+  measures the same 501px.
+
+  **The NUMBER stays one running sequence and does not restart per position** —
+  the second bench player is `BD2` even though he is the first benched
+  defenceman. It answers "how full is the bench" against the hard `BENCH_SIZE`
+  of 4, which is the constraint that binds; bench *composition* against
+  `BACKUP_TARGETS` (2F/1D/1G) is a soft objective preference the MILP is free to
+  deviate from, so counting that instead would put a number on the panel that
+  nothing enforces.
 
   **The Minors table keeps its own `Pos`**, deliberately: a minor-league player
   has no lineup slot to read the position off, so there is nothing there to
@@ -3465,7 +3475,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1538 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1547 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -3570,7 +3580,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1538 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1547 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

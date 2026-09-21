@@ -7,7 +7,7 @@ horizontally. `Needs: 3F · 1D` (from `roster_needs`) gives the aggregate and
 never the running count beside the player.
 
 `main._roster_slots` labels each row `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for
-players who will start, `B1`..`B4` for benched ones, and nothing at all for a
+players who will start, `BF1`..`BG4` for benched ones, and nothing at all for a
 MILP suggested buy. The last number in a group is then literally how many of
 that position the team holds.
 
@@ -55,12 +55,30 @@ class TestTheSlotRule:
         rows = main._roster_slots([_row("F"), _row("F", target=True), _row("F")])
         assert [r["slot"] for r in rows] == ["F1", "", "F2"]
 
-    def test_the_bench_is_one_sequence_across_every_position(self):
-        """B1..B4 regardless of position — the CBA bench is position-agnostic."""
+    def test_the_bench_number_is_one_sequence_across_every_position(self):
+        """The NUMBER runs 1..4 over the whole bench; the LETTER is the position.
+
+        Not a per-position sequence: the second bench player is `BD2` even
+        though he is the first benched defenceman. The number answers "how full
+        is the bench" against the hard `BENCH_SIZE` of 4, which is what binds —
+        bench composition against `BACKUP_TARGETS` is a soft MILP preference and
+        would be the wrong thing to count.
+        """
         rows = main._roster_slots(
             [_row("F"), _row("F", bench=True), _row("D"), _row("D", bench=True)]
         )
-        assert [r["slot"] for r in rows] == ["F1", "B1", "D1", "B2"]
+        assert [r["slot"] for r in rows] == ["F1", "BF1", "D1", "BD2"]
+
+    def test_a_bench_label_names_its_own_position(self):
+        """Every row carries its position — the reason the Pos column could go.
+
+        `B1` alone left up to four rows whose position nothing on the panel
+        stated once `Pos` was dropped.
+        """
+        rows = main._roster_slots(
+            [_row("F", bench=True), _row("D", bench=True), _row("G", bench=True)]
+        )
+        assert [r["slot"] for r in rows] == ["BF1", "BD2", "BG3"]
 
     def test_a_benched_player_gives_his_position_number_back(self):
         """Benching the middle forward renumbers the one below him.
@@ -69,7 +87,7 @@ class TestTheSlotRule:
         still consumed a position counter, the third forward would stay `F3`.
         """
         rows = main._roster_slots([_row("F"), _row("F", bench=True), _row("F")])
-        assert [r["slot"] for r in rows] == ["F1", "B1", "F2"]
+        assert [r["slot"] for r in rows] == ["F1", "BF1", "F2"]
 
     def test_a_position_past_its_starting_slots_keeps_counting(self):
         """No clamp at 12 — `F13` is the signal that someone belongs on the bench.
@@ -96,7 +114,7 @@ class TestTheSlotRule:
         assert slots[11] == "F12"
         assert slots[17] == "D6"
         assert slots[19] == "G2"
-        assert slots[20:] == ["B1", "B2", "B3", "B4"]
+        assert slots[20:] == ["BF1", "BF2", "BD3", "BG4"]
 
     def test_the_labels_follow_the_order_they_are_given(self):
         """It must not sort. The caller sorts; this numbers what it is handed.

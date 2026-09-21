@@ -615,26 +615,35 @@ def _roster_slots(rows: list[dict]) -> list[dict]:
     `BENCH_SIZE`. On a correctly-benched full roster the sequence lands exactly
     on F1-12, D1-6, G1-2, B1-4 without any clamp.
 
+    A bench label carries its position too — `BF1`, `BD2` — while the NUMBER
+    stays one running sequence across every position rather than restarting per
+    position. The number is therefore "how full is the bench", against the hard
+    `BENCH_SIZE` of 4, which is the constraint that actually binds; bench
+    COMPOSITION against `BACKUP_TARGETS` (2F/1D/1G) is a soft objective
+    preference the MILP is free to ignore, so it would be the wrong thing to
+    count. The letter went in on 2026-09-20, when dropping the `Pos` column left
+    `B1` as the only row on the panel whose position nothing stated.
+
     Bench membership is read off the `is_bench` FLAG, not derived from points.
     That is the flag the row dimming, the Bench button and `send_to_minors`'
     precondition all read, so deriving it differently here would put two answers
     on one row. It does mean this column can disagree with the "Lineup PTS"
     tile: `lineup_points` scores the best 12F/6D/2G from every roster player and
     ignores `is_bench` entirely (see `TeamState.set_bench`), so benching your
-    top forward shows him as `B1` while the tile still counts him as a starter.
+    top forward shows him as `BF1` while the tile still counts him as a starter.
     That disagreement is older than this column and is merely made visible by
     it; it is not this function's to resolve.
     """
     counts: dict[str, int] = {}
     bench = 0
     for row in rows:
+        pos = row.get("position", "")
         if row.get("is_target"):
             row["slot"] = ""
         elif row.get("is_bench"):
             bench += 1
-            row["slot"] = f"B{bench}"
+            row["slot"] = f"B{pos}{bench}"
         else:
-            pos = row.get("position", "")
             counts[pos] = counts.get(pos, 0) + 1
             row["slot"] = f"{pos}{counts[pos]}"
     return rows

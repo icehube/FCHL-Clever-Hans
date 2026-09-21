@@ -583,6 +583,69 @@ def _asset_version(path: str) -> str:
 templates.env.globals["asset_version"] = _asset_version
 
 
+def _roster_slots(rows: list[dict]) -> list[dict]:
+    """Label each team-panel roster row with its lineup slot, in display order.
+
+    `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for players who will start, `B1`..`B4`
+    for benched ones, and an EMPTY label for a MILP suggested-buy row. The last
+    number rendered in a position group is therefore literally how many of that
+    position the team holds, which is the question this column exists to answer
+    and which nothing on the panel answered before — `roster_needs` gives the
+    aggregate (`Needs: 3F · 1D`), never the running count beside the player.
+
+    Order is the caller's, not this function's: it must be applied AFTER
+    `team_panel.html`'s `pos_rank` + points sort, because the number means "the
+    Nth row of this group as drawn". Sorting here would let the label and the
+    table disagree.
+
+    Three things this deliberately does not do.
+
+    A target row is skipped rather than numbered because it is not owned — the
+    MILP suggests it, nobody bought it — so letting it take `F3` would report a
+    roster the team does not have, which is the one thing the column must not
+    do. It consumes no counter at all, so removing a suggestion never renumbers
+    the players around it.
+
+    A position is NOT clamped at its starting-lineup size. Fourteen forwards
+    with none benched really does render `F13`, `F14`: that is the true holding
+    and it is exactly the signal that two of them belong on the bench. Clamping
+    would hide the only state the operator needs to act on, and auto-benching
+    the overflow would overwrite a decision that is theirs — `is_bench` is set
+    through `/toggle-bench` and `TeamState.set_bench` already caps the bench at
+    `BENCH_SIZE`. On a correctly-benched full roster the sequence lands exactly
+    on F1-12, D1-6, G1-2, B1-4 without any clamp.
+
+    Bench membership is read off the `is_bench` FLAG, not derived from points.
+    That is the flag the row dimming, the Bench button and `send_to_minors`'
+    precondition all read, so deriving it differently here would put two answers
+    on one row. It does mean this column can disagree with the "Lineup PTS"
+    tile: `lineup_points` scores the best 12F/6D/2G from every roster player and
+    ignores `is_bench` entirely (see `TeamState.set_bench`), so benching your
+    top forward shows him as `B1` while the tile still counts him as a starter.
+    That disagreement is older than this column and is merely made visible by
+    it; it is not this function's to resolve.
+    """
+    counts: dict[str, int] = {}
+    bench = 0
+    for row in rows:
+        if row.get("is_target"):
+            row["slot"] = ""
+        elif row.get("is_bench"):
+            bench += 1
+            row["slot"] = f"B{bench}"
+        else:
+            pos = row.get("position", "")
+            counts[pos] = counts.get(pos, 0) + 1
+            row["slot"] = f"{pos}{counts[pos]}"
+    return rows
+
+
+# A filter rather than six lines of Jinja `namespace` counters, for the reason
+# `_dom_id` records: the rule is then one pure function a unit test can call
+# directly, instead of arithmetic that only a rendered page can check.
+templates.env.filters["roster_slots"] = _roster_slots
+
+
 buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 
 # Stanley Cup odds per NHL club, as PERCENT, for the navbar's odds view. Loaded

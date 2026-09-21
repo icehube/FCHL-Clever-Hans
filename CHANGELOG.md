@@ -22,6 +22,74 @@ rediscover the same non-problem.
 
 ## [2026-09-20]
 
+### Added
+
+- **Lineup-slot numbering on the team panel's roster.** A leading `#` column
+  labels each row `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for players who will
+  start and `B1`..`B4` for benched ones, so the last number in a group is
+  literally how many of that position the team holds. Mid-auction that question
+  had no answer on screen: the table lists the roster grouped F → D → G with
+  points descending, and counting it meant counting rows by eye, during a live
+  bid, in a table that scrolls horizontally. `Needs: 3F · 1D` (from
+  `roster_needs`) gives the aggregate and never the running count beside the
+  player.
+
+  Three owner decisions shape it. **A MILP suggested-buy row gets no number at
+  all** — it is not owned, so letting it take `F3` would report a roster the
+  team does not have; it consumes no counter either, so dismissing a suggestion
+  never renumbers the players around it. **The bench is one sequence across
+  every position** (`B1`..`B4`), matching the CBA's position-agnostic 4-man
+  bench, and a benched player gives his position number back to the man below
+  him. **Bare numbers, no denominator** — `F1`, not `F1/12`: this table's
+  min-content was already 163px past its scroller.
+
+  **A position is deliberately not clamped at its starting-lineup size.**
+  Fourteen forwards with none benched really does render `F13`, `F14`. That is
+  the true holding and it is exactly the signal that two of them belong on the
+  bench; clamping would hide the only state worth acting on, and auto-benching
+  the overflow would overwrite a decision that is the operator's
+  (`/toggle-bench`, already capped by `TeamState.set_bench`). On a correctly
+  benched full roster the sequence lands on F1-12, D1-6, G1-2, B1-4 with no
+  clamp needed.
+
+  **It makes one older inconsistency visible for the first time, and that is
+  not a regression.** Bench membership is read off the `is_bench` flag, which is
+  what the row dimming, the Bench button and `send_to_minors`' precondition all
+  read — but `is_bench` reaches no engine module, and `lineup_points` scores the
+  best 12F/6D/2G from every roster player regardless. So benching your top
+  forward now shows him as `B1` while the "Lineup PTS" tile still counts him as
+  a starter. That disagreement predates this column by a long way; deriving
+  slots from points instead would have put two different answers on one row.
+  Recorded in `main._roster_slots`' docstring so it is not filed as a bug.
+
+  Implemented as a `roster_slots` Jinja filter over `main._roster_slots` rather
+  than Jinja `namespace` counters, for the reason `_dom_id` records: the rule is
+  then one pure function a unit test can call directly. It runs **after**
+  `team_panel.html`'s sort, because the label means "the Nth row of this group
+  as drawn" — sorting inside it would let the label and its row disagree.
+  Measured at 1280px: the roster table's min-content went 508px → **542px**
+  inside a 379px `.table-scroll-x`, so the cost is 34px of a table that already
+  scrolled, and `test_the_grid_never_overflows_its_own_width` stays green at
+  1024/1280/1600 because the column went inside the existing wrapper.
+
+  The Minors table is deliberately untouched — minors are not part of the 24-man
+  roster and have no F/D/G or bench shape, and that heading already reads
+  `Minors (N)`.
+
+  `tests/test_roster_slots.py` is new: seven unit tests on the rule itself and
+  six on the rendered column, each watched to fail before being believed
+  (targets numbered → 2 red; bench rows consuming a position counter → 1 red;
+  the `<td>` dropped while the `<th>` stays → 3 red). It also brings the team
+  panel the header-to-cell parity guard `#league-state` has had for a month and
+  this table never did — written relative, not against a hard-coded 9, so the
+  next column is a template change rather than a test edit.
+
+  One existing test caught a real mistake during the work:
+  `TestTheRosterKeyExplainsTheTargetRows::test_it_is_absent_on_an_opponent`
+  failed because the new header's `title` used the phrase "suggested buy",
+  which made an opponent's panel — where no target row can render — name a row
+  state it does not have. Reworded rather than exempted.
+
 ### Changed
 
 - **The auction grid is back to three columns, reverting the 2026-09-17
@@ -3371,7 +3439,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1475 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1538 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -3476,7 +3544,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1475 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1538 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

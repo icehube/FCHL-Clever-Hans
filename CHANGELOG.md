@@ -24,6 +24,31 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Seven guards had been skipping since the 2026-09-15 refresh, and three
+  mutants survived because no pool supplied their subject.** Found by the
+  2026-09-22 grill, which ran them at 740cd29 (zero skips) and at HEAD (seven).
+  Five were the buyout-eligibility tests for a group 2/3 player in the minors —
+  the population the 2026-08-07 scan bug hid — plus the markup-escaping
+  round-trip and the cap-counting-minor colour test. All seven now SUPPLY
+  their subject rather than skip: `tests/helpers.an_eligible_minor` benches a
+  team's cheapest group 2/3 player and demotes him through the same
+  `TeamState` methods `/toggle-bench` and `/move-to-minors` call, planted in
+  the two class fixtures right after `/reset`; the escaping test renames a
+  pool player to carry an apostrophe, moving his model price with him. The
+  three survivors were the team panel's buyout picker reading `roster_players`
+  (SRL held no eligible minor, so the set equality could not see one missing),
+  `_club_counts` without its Utah fold (the 2026-27 pool spells Utah
+  canonically on every row), and `_club_counts` counting `roster_players`
+  (the only count test moves a player onto the active roster). Each is now
+  killed by a planted subject — an eligible minor on SRL, one pool player and
+  one rostered player respelled as the alias, and a minor's club checked
+  against rosters plus minors — which also makes CLAUDE.md's "each fold has
+  its own test" true again. The full suite went from 10 skips to 3: two
+  legacy-schema checks that cannot apply to `players-23.csv`, and
+  `test_crash_recovery.py`'s renamed-keeper test, the same shape and filed in
+  `BACKLOG.md` because supplying it needs a pool fixture rather than a state
+  edit.
+
 - **A malformed `team_odds.json` stopped a saved draft from booting.** Found
   by the 2026-09-22 grill. `lifespan` calls `_load_nhl_odds` before it reads the
   saved state, and the loader caught `OSError`, `ValueError` and `KeyError` —

@@ -22,7 +22,7 @@ import pytest
 
 from config import BUYOUT_PENALTY_RATE, MY_TEAM
 from main import _dom_id
-from tests.helpers import buyout_options
+from tests.helpers import an_eligible_minor, buyout_options
 from trade import evaluate_buyout, execute_buyout
 
 
@@ -40,7 +40,14 @@ def _setup():
 
 
 def _find(state, group_in, minor):
-    """A BOT player in one of `group_in`, in minors or not. Skip if the data moves."""
+    """A BOT player in one of `group_in`, in minors or not. Skip if the data moves.
+
+    Except an eligible minor, which is planted: that case skipped on every run
+    after the 2026-09-15 refresh, and it is the one this file exists for. See
+    `an_eligible_minor`.
+    """
+    if minor and group_in <= {"2", "3"}:
+        return an_eligible_minor(state)
     pool = state.teams[MY_TEAM].all_players
     match = [p for p in pool if p.is_minor is minor and p.group in group_in]
     if not match:
@@ -158,6 +165,7 @@ class TestPanelOffersExactlyTheEligible:
 
         with TestClient(main.app) as c:
             c.post("/reset")
+            an_eligible_minor()  # the population the 2026-08-07 bug hid
             yield c
 
     def _panel(self, client):
@@ -184,8 +192,7 @@ class TestPanelOffersExactlyTheEligible:
         eligible_minors = [
             p for p in bot.minor_players if p.can_be_bought_out
         ]
-        if not eligible_minors:
-            pytest.skip("no group 2/3 players in BOT's minors in current data")
+        assert eligible_minors, "the class fixture plants one"
 
         missing = [p.name for p in eligible_minors if p.name not in offered]
         assert not missing, f"eligible minors hidden from the panel: {missing}"
@@ -235,6 +242,7 @@ class TestUIMatchesEligibility:
 
         with TestClient(main.app) as c:
             c.post("/reset")
+            an_eligible_minor()  # the population the 2026-08-07 bug hid
             yield c
 
     @pytest.fixture(scope="class")
@@ -301,8 +309,7 @@ class TestUIMatchesEligibility:
 
         bot = main.auction_state.teams[MY_TEAM]
         eligible_minors = {p.name for p in bot.minor_players if p.can_be_bought_out}
-        if not eligible_minors:
-            pytest.skip("BOT holds no group 2/3 minors in current data")
+        assert eligible_minors, "the class fixture plants one"
 
         missing = eligible_minors - set(main.buyout_indicators)
         assert not missing, f"scan skipped buyout-eligible minors: {sorted(missing)}"
@@ -315,8 +322,7 @@ class TestUIMatchesEligibility:
 
         bot = main.auction_state.teams[MY_TEAM]
         eligible_minors = [p for p in bot.minor_players if p.can_be_bought_out]
-        if not eligible_minors:
-            pytest.skip("BOT holds no group 2/3 minors in current data")
+        assert eligible_minors, "the class fixture plants one"
 
         html = client.get(f"/team-view/{MY_TEAM}").text
         for p in eligible_minors:

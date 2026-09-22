@@ -19,6 +19,7 @@ from config import (
 )
 from tests.helpers import (
     a_buyout_candidate,
+    an_eligible_minor,
     a_roster_player,
     assign,
     buyout_options,
@@ -2885,7 +2886,7 @@ class TestTheBuyoutPicker:
             f"first option is {first!r} — a pre-selected real candidate"
         )
 
-    def test_a_name_the_markup_escapes_still_round_trips(self, client):
+    def test_a_name_the_markup_escapes_still_round_trips(self, client, monkeypatch):
         """`buyout_options` must hand back `Player.name`, not the escaped form.
 
         Jinja escapes the attribute, so an apostrophe name comes out of the
@@ -2902,13 +2903,21 @@ class TestTheBuyoutPicker:
         import main
         from markupsafe import escape
 
-        victim = next(
-            (n for n in main.auction_state.available_players
-             if str(escape(n)) != n),
-            None,
-        )
+        pool = main.auction_state.available_players
+        victim = next((n for n in pool if str(escape(n)) != n), None)
         if victim is None:
-            pytest.skip("no pool name today contains a character Jinja escapes")
+            # SUPPLIED since 2026-09-22: the 2026-09-15 refresh left no such
+            # name in the pool, and a skip here was a guard that never ran.
+            # Any pool player will do — a purchase is always group 2 or 3.
+            source = next(iter(pool))
+            player = pool.pop(source)
+            player.name = victim = f"{source} O'Probe"
+            pool[victim] = player
+            prices = dict(main.model_prices)
+            prices[victim] = prices.pop(source)
+            monkeypatch.setattr(main, "model_prices", prices)
+            main._recompute()
+        assert str(escape(victim)) != victim
 
         assign(client, victim, main.MY_TEAM, 1.0)
         p = main.auction_state.teams[main.MY_TEAM].find_player(victim)
@@ -3098,6 +3107,10 @@ class TestBuyingOutAnotherTeamsPlayer:
         """
         import main
 
+        # A group 2/3 minor is a legal buyout, and SRL holds none in this pool,
+        # so a picker reading `roster_players` passed here until 2026-09-22 —
+        # the 2026-08-07 scan bug rebuilt in the new control. Planted.
+        an_eligible_minor(code="SRL")
         html = client.get("/team-view/SRL").text
         offered = set(team_buyout_options(html, "SRL"))
         srl = main.auction_state.teams["SRL"]
@@ -3214,6 +3227,20 @@ class TestTheNhlOddsView:
         import main
 
         alias, canonical = next(iter(main.NHL_TEAM_ALIASES.items()))
+        # PLANTED since 2026-09-22. The 2026-27 pool spells Utah canonically
+        # on every row, so the fold had no subject and removing it survived
+        # the whole suite. One pool player respelled as the alias is the
+        # 2025-26 file in miniature.
+        respelled = next(
+            p for p in main.auction_state.available_players.values()
+            if p.nhl_team == canonical
+        )
+        respelled.nhl_team = alias
+        rostered_respelled = next(
+            p for t in main.auction_state.teams.values() for p in t.all_players
+            if p.nhl_team == canonical
+        )
+        rostered_respelled.nhl_team = alias
         table = _odds_table(client.get("/nhl-odds").text)
         assert alias not in table, f"{alias} is an alias of {canonical}, not a club"
         assert canonical in table
@@ -3226,6 +3253,14 @@ class TestTheNhlOddsView:
         assert table[canonical][1] == str(spelled_in_pool), (
             f"{canonical} shows {table[canonical][1]} in the pool against "
             f"{spelled_in_pool} actually there — the alias fold is not happening"
+        )
+        on_rosters = sum(
+            1 for t in main.auction_state.teams.values() for p in t.all_players
+            if main._nhl_canonical(p.nhl_team) == canonical
+        )
+        assert table[canonical][2] == str(on_rosters), (
+            f"{canonical} shows {table[canonical][2]} rostered against "
+            f"{on_rosters} — the rostered count is not folded"
         )
 
     def test_the_odds_are_the_loaded_odds(self, client):
@@ -3252,6 +3287,32 @@ class TestTheNhlOddsView:
         after = _odds_table(client.get("/nhl-odds").text)[club]
         assert int(after[1]) == int(before[1]) - 1, f"{club} pool count: {before} -> {after}"
         assert int(after[2]) == int(before[2]) + 1, f"{club} rostered: {before} -> {after}"
+
+    def test_a_minor_is_counted_as_rostered(self, client):
+        """`rostered` reads `all_players`, and nothing else checked it.
+
+        A minor is drafted and off the board. Counting `roster_players`
+        instead survived the whole suite until 2026-09-22, because the only
+        count test moves a player the auction puts on the active roster.
+        """
+        import main
+
+        teams = main.auction_state.teams.values()
+        minor = next(p for t in teams for p in t.minor_players if p.nhl_team)
+        club = main._nhl_canonical(minor.nhl_team)
+        on_roster = sum(
+            1 for t in teams for p in t.roster_players
+            if main._nhl_canonical(p.nhl_team) == club
+        )
+        in_minors = sum(
+            1 for t in teams for p in t.minor_players
+            if main._nhl_canonical(p.nhl_team) == club
+        )
+        rostered = _odds_table(client.get("/nhl-odds").text)[club][2]
+        assert rostered == str(on_roster + in_minors), (
+            f"{club}: {rostered} rostered, against {on_roster} on rosters and "
+            f"{in_minors} in the minors"
+        )
 
     def test_a_club_with_no_odds_entry_is_named(self, client):
         """`_get_team_probability` falls through to the default SILENTLY.
@@ -4346,9 +4407,11 @@ class TestCapCountingMinorsAreColoured:
         return main.auction_state.teams[MY_TEAM].minor_players
 
     def test_a_cap_counting_minor_is_warned_and_undimmed(self, client):
+        # Planted, not skipped: this skipped on every run after the 2026-09-15
+        # refresh. See `an_eligible_minor`.
+        an_eligible_minor()
         on_cap = [p for p in self._bot_minors() if p.counts_on_cap]
-        if not on_cap:
-            pytest.skip("BOT has no cap-counting minor in this pool")
+        assert on_cap
         rows = self._minors_rows(client.get(f"/team-view/{MY_TEAM}").text)
         for p in on_cap:
             row = rows.get(p.name)

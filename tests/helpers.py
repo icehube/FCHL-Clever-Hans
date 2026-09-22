@@ -190,6 +190,45 @@ def a_buyout_candidate(state=None, with_club=False):
     return max(eligible, key=lambda p: p.salary / max(p.projected_points, 1))
 
 
+def an_eligible_minor(state=None, code: str | None = None):
+    """A group 2/3 player in `code`'s minors — demoted into place if need be.
+
+    Five buyout-eligibility guards and a cap-colour guard used to
+    `pytest.skip` when BOT held no such player, and the 2026-09-15 refresh
+    made that permanent: every one of them skipped from then on, including the
+    guard for the 2026-08-07 bug (the scan reporting on 11 of BOT's 15
+    eligible players), and read as coverage. The population is real mid-draft
+    — every player bought past 24 lands in it — it just does not come with
+    the pool. So SUPPLY it: bench BOT's cheapest group 2/3 active player and
+    send him down, through the same `TeamState` methods `/toggle-bench` and
+    `/move-to-minors` call. One already on the bench is preferred, because
+    benching can be refused on a full bench and demoting a benched player
+    cannot.
+
+    Defaults to the live `main.auction_state`, which it re-solves afterwards
+    so market prices, the MILP and the scan's figure to beat all describe the
+    roster the panel will render; a state passed in is left to its caller.
+    """
+    import main
+
+    live = state is None
+    if live:
+        state = main.auction_state
+    team = state.teams[code or main.MY_TEAM]
+    already = [p for p in team.minor_players if p.can_be_bought_out]
+    if already:
+        return already[0]
+    active = [p for p in team.roster_players if p.can_be_bought_out]
+    assert active, f"{team.code} has no group 2/3 player to demote — the fixture is wrong"
+    victim = min(active, key=lambda p: (not p.is_bench, p.salary, p.name))
+    team.set_bench(victim.name, True)
+    team.send_to_minors(victim.name)
+    assert victim in team.minor_players and victim.counts_on_cap
+    if live:
+        main._recompute()
+    return victim
+
+
 def buyout_options(html: str) -> list[str]:
     """The names the Buyout Analyzer offers, read off its picker.
 

@@ -24,6 +24,15 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The bench slot label rendered at 30% opacity.** Found by the 2026-09-22
+  grill. A bench row is `opacity-50` and the slot cell was `opacity-60`, and
+  opacity multiplies down the tree, so `BF1` came out at 0.30: by estimate
+  about 2:1 against `--bg-panel`, under even the 3:1 large-text floor, on the
+  one label that says why the row is dimmed. The cell now dims on a starter
+  only, so a bench label sits at the row's 0.5. `TestTheBenchLabelIsReadable`
+  multiplies the row's and the cell's opacity classes; the reverted template
+  fails it.
+
 - **`POST /buyout` with a blank `team_code` bought out BOT's player.** Found by
   the 2026-09-22 grill. The field defaults to `MY_TEAM` so the Buyout
   Analyzer, the older caller, can omit it, and FastAPI substitutes a form

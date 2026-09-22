@@ -275,6 +275,31 @@ class TestTheColumnIsWiredUp:
         assert n_bench_after == n_bench_before + 1
 
 
+def _opacity(classes: str) -> float:
+    out = 1.0
+    for pct in re.findall(r"\bopacity-(\d+)\b", classes):
+        out *= int(pct) / 100
+    return out
+
+
+class TestTheBenchLabelIsReadable:
+    def test_a_bench_label_is_not_dimmed_twice(self, client):
+        """`opacity` multiplies down the tree: a bench row is `opacity-50` and
+        the slot cell was `opacity-60`, so `BF1` rendered at 0.30. The label
+        is the only thing on the row that says why it is dimmed."""
+        victim = a_roster_player(MY_TEAM)
+        client.post("/toggle-bench", data={"team_code": MY_TEAM, "player_name": victim.name})
+
+        body = _roster_table(client.get(f"/team-view/{MY_TEAM}").text)
+        row = next(r for r in re.findall(r"<tr\b.*?</tr>", body, re.S) if victim.name in r)
+        row_class = re.match(r'<tr class="([^"]*)"', row).group(1)
+        slot_cell = re.findall(r"<td([^>]*)>", row)[1]
+        assert "opacity-50" in row_class, "the fixture did not bench him"
+        assert _opacity(row_class) * _opacity(slot_cell) >= 0.5, (
+            f"the bench label renders at {_opacity(row_class) * _opacity(slot_cell):.2f}"
+        )
+
+
 class TestTheRosterTableIsNotSilentlyOffset:
     """Header-to-cell agreement for the roster table.
 

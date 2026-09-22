@@ -45,6 +45,15 @@ They are dropped; PTS comes from the workbook.
 `ENT` (the entry-draft class, 885 rows) is held back through the same mechanism
 `convert_legacy_players.convert` uses, and reported rather than filtered, so the
 size of that decision is visible.
+
+**A re-run REFUSES to overwrite placements it did not make** unless `--force`.
+The derived STATUS is only the starting point: `bake_roster_state.py` writes
+the operator's recalls and demotions back into this file, and dropping a player
+from the league is a hand edit that deletes his row. Converting over that file
+again restores the group-derived STATUS and every deleted row, and before
+2026-09-22 it did so with nothing said beyond a blank-club line for the one
+deleted row that happened to have no NHL club. `placements_undone` lists what
+would be lost and `main` stops there.
 """
 
 import argparse
@@ -535,6 +544,60 @@ def no_nhl_club(rows: list[dict]) -> list[dict]:
     return [r for r in rows if not r["NHL TEAM"]]
 
 
+def _roster_key(row: dict) -> tuple[str, str, str]:
+    return row["PLAYER"], row["POS"], row["FCHL TEAM"]
+
+
+def _on_a_team(row: dict) -> bool:
+    return bool(row["FCHL TEAM"]) and row["FCHL TEAM"] not in _PLACEHOLDER_TEAMS
+
+
+def placements_undone(
+    existing: list[dict], converted: list[dict]
+) -> list[tuple[dict, str | None]]:
+    """Rostered rows this conversion would put back the way the export has them.
+
+    Two ways, each `(new row, STATUS the dest has)`:
+
+    - **a placement reverted** -- the same player on the same team, with the
+      dest's STATUS differing from the derived one. That is a bake, or a hand
+      edit; the conversion itself only ever writes the derived value.
+    - **a row restored** -- a rostered player the dest does not carry at all,
+      reported with `None`. Deleting the row is how a player is dropped from
+      the league (see `no_nhl_club`), and this is that decision being undone.
+      "At all" is load-bearing: matched on name and position across every team
+      and placeholder, so a player who merely changed teams, or signed out of
+      the free-agent pool, is not mistaken for one somebody deleted.
+
+    Keyed on (PLAYER, POS, FCHL TEAM) and compared as a multiset of statuses,
+    because the export can carry one name twice on a team and a dict keyed on
+    it would silently keep one of them. Rows on no team carry a blank STATUS by
+    construction and are not compared.
+    """
+    had: dict[tuple, list[str]] = collections.defaultdict(list)
+    for row in existing:
+        had[_roster_key(row)].append(row["STATUS"])
+    anywhere = {(row["PLAYER"], row["POS"]) for row in existing}
+    new: dict[tuple, list[dict]] = collections.defaultdict(list)
+    for row in converted:
+        if _on_a_team(row):
+            new[_roster_key(row)].append(row)
+
+    undone: list[tuple[dict, str | None]] = []
+    for key, rows in new.items():
+        if key in had:
+            if sorted(had[key]) != sorted(r["STATUS"] for r in rows):
+                undone.extend((r, "/".join(sorted(had[key]))) for r in rows)
+        elif key[:2] not in anywhere:
+            undone.extend((r, None) for r in rows)
+    return undone
+
+
+def read_canonical(path: str) -> list[dict]:
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
 def write_csv(path: str, rows: list[dict], columns: list[str]) -> None:
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns)
@@ -570,6 +633,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--season", default="2026-2027", help="league_year for the goalie stats block"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite a dest whose placements differ from the derived ones "
+        "(a baked or hand-edited pool); without it the run is refused",
     )
     parser.add_argument(
         "--goalie-stats",
@@ -639,6 +708,35 @@ def main(argv: list[str] | None = None) -> int:
             "test_every_rfa_has_a_prior_team will fail: "
             + ", ".join(missing_prior)
         )
+
+    # Last, so every report above has printed, and before ANY write -- the
+    # goalie stats below included, since a refused run must leave both files
+    # exactly as it found them.
+    undone = (
+        placements_undone(read_canonical(args.dest), converted)
+        if os.path.exists(args.dest)
+        else []
+    )
+    if undone:
+        print(f"\n{args.dest} carries placements this conversion would undo ({len(undone)}):")
+        for row, had in undone:
+            print(
+                f"    {row['PLAYER']:28} {row['FCHL TEAM']:4} "
+                f"{had or '(no row)'} -> {row['STATUS']}"
+            )
+        print(
+            "  They were made after the last conversion: by bake_roster_state.py, "
+            "or by hand -- a deleted row is a player dropped from the league."
+        )
+        if not args.force:
+            print(
+                f"refused: {len(undone)} placement(s) in {args.dest} would be "
+                "discarded; nothing was written. Re-bake after converting, or "
+                "pass --force to discard them.",
+                file=sys.stderr,
+            )
+            return 1
+        print("  --force: discarding them.")
 
     write_csv(args.dest, converted, CANONICAL_COLUMNS)
     print(

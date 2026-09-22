@@ -24,6 +24,26 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Re-running `convert_fchl_online.py` silently undid the bake and every
+  hand-deleted row.** Found by the 2026-09-22 grill. The converter derives
+  STATUS from the contract group and wrote its output over `dest`
+  unconditionally, while `bake_roster_state.py` writes the operator's recalls
+  and demotions into that same file and dropping a player from the league is a
+  deleted row. Both docstrings said not to do it; nothing stopped it. Measured
+  on a copy of the live pool: a default re-run reverted Holloway, Nazar and
+  Perreault's recalls to MINOR and brought Laine back onto BOT's active roster
+  at $2.3M, and the only one of the four it mentioned was Laine, in the
+  blank-NHL-club list, as an unexplained flagged row. `placements_undone` now
+  compares the conversion with the existing dest before anything is written
+  (goalie stats included) and `main` lists them and exits 1 unless `--force`.
+  On that copy it named exactly those four, and a row-multiset comparison of
+  the baked file against a forced conversion differs in exactly those four
+  rows, so nothing it would discard goes unreported; re-running over its own
+  output exits 0. A restored row is matched on name and position across every
+  team, not just the one it lands on, so a player who signed out of the pool
+  or changed teams in a new export is not mistaken for a deletion. Five
+  mutants, all killed; CLAUDE.md and the bake's docstring now say it refuses.
+
 - **`/bid-check` counted a repeated bidder code twice and broke ties by click
   order.** Found by the 2026-09-22 grill. `live_opponents` walked the
   submitted list as-is, and `bidders` is a free comma-separated string: with

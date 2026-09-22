@@ -53,8 +53,10 @@ silently:
 
 **Do not run `convert_fchl_online.py` against a file this has baked.** That
 converter derives STATUS from the contract group (2/3 -> START, A-F -> MINOR)
-and would overwrite every placement here. It builds a NEW season's pool from the
-league export; this edits the season already in progress.
+and would overwrite every placement here, so since 2026-09-22 it lists them and
+refuses unless `--force`. It builds a NEW season's pool from the league export;
+this edits the season already in progress. Converting a fresh export means
+re-baking after, from a state that still holds the prep.
 
 Run:
     python bake_roster_state.py              # dry run: print the diff

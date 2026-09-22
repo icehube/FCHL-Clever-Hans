@@ -214,3 +214,120 @@ class TestTheLivePoolHasNoCopiedProjection:
             f"players sharing a name at different positions carry the same "
             f"projection, which is one player's points copied onto another: {copied}"
         )
+
+
+class TestARerunRefusesToUndoPlacements:
+    """`main` over a dest that was baked or hand-edited after it was converted.
+
+    The derived STATUS is a starting point that `bake_roster_state.py` writes
+    over, and dropping a player from the league is a deleted row. On 2026-09-22
+    a re-run over the live pool would have reverted three recalls and brought a
+    dropped player back, with only the last of the four mentioned anywhere.
+
+    Driven through `main` with both readers patched, so it needs no workbook and
+    no openpyxl; the teams and odds files are the real ones, read only.
+    """
+
+    # Group A derives MINOR and group 3 derives START.
+    EXPORT = [
+        ["Sample Prospect    A", "F", "BOT", "EDM", "21", "$0.5", "", "", ""],
+        ["Sample Keeper    3", "D", "BOT", "EDM", "27", "$2.3", "", "", ""],
+        ["Sample Signing    3", "F", "BOT", "EDM", "26", "$1.1", "", "", ""],
+        ["Sample Free    3", "G", "UFA", "EDM", "30", "$0.0", "", "", ""],
+    ]
+    POINTS = {
+        normalize_name(r[0].rsplit(None, 1)[0]): [(r[1], 20)] for r in EXPORT
+    }
+
+    def _run(self, tmp_path, monkeypatch, *extra, export=None):
+        import convert_fchl_online as cfo
+
+        monkeypatch.setattr(cfo, "read_export", lambda _p: export or self.EXPORT)
+        monkeypatch.setattr(cfo, "read_projections", lambda _p: (self.POINTS, {}))
+        monkeypatch.setattr(cfo, "read_goalie_stats", lambda _p, _s: [])
+        return cfo.main([
+            "export.csv", "dobber.xlsx", str(tmp_path / "players.csv"),
+            "--prior", str(tmp_path / "no-prior.csv"),
+            "--goalie-stats", str(self._goalies(tmp_path)),
+            *extra,
+        ])
+
+    @staticmethod
+    def _goalies(tmp_path):
+        path = tmp_path / "goalies.csv"
+        if not path.exists():
+            path.write_text("league_year,player_name,proj_wins,proj_so,proj_gp\n")
+        return path
+
+    def _rows(self, tmp_path):
+        with (tmp_path / "players.csv").open(newline="") as f:
+            return list(csv.DictReader(f))
+
+    def _rewrite(self, tmp_path, rows):
+        with (tmp_path / "players.csv").open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _refused(self, tmp_path, monkeypatch, capsys):
+        before = {p: p.read_bytes() for p in tmp_path.iterdir()}
+        assert self._run(tmp_path, monkeypatch) == 1
+        err = capsys.readouterr()
+        assert "refused" in err.err
+        assert {p: p.read_bytes() for p in tmp_path.iterdir()} == before, (
+            "a refused run wrote something — the goalie stats count too"
+        )
+        return err.out
+
+    def test_a_first_conversion_writes(self, tmp_path, monkeypatch):
+        assert self._run(tmp_path, monkeypatch) == 0
+        assert {r["PLAYER"]: r["STATUS"] for r in self._rows(tmp_path)}[
+            "Sample Prospect"
+        ] == "MINOR"
+
+    def test_a_rerun_over_its_own_output_is_not_refused(self, tmp_path, monkeypatch):
+        assert self._run(tmp_path, monkeypatch) == 0
+        assert self._run(tmp_path, monkeypatch) == 0
+
+    def test_a_baked_recall_is_refused(self, tmp_path, monkeypatch, capsys):
+        self._run(tmp_path, monkeypatch)
+        rows = self._rows(tmp_path)
+        for r in rows:
+            if r["PLAYER"] == "Sample Prospect":
+                r["STATUS"] = "START"
+        self._rewrite(tmp_path, rows)
+        capsys.readouterr()
+
+        out = self._refused(tmp_path, monkeypatch, capsys)
+        assert "Sample Prospect" in out and "START -> MINOR" in out
+
+    def test_a_deleted_row_is_refused(self, tmp_path, monkeypatch, capsys):
+        self._run(tmp_path, monkeypatch)
+        self._rewrite(
+            tmp_path, [r for r in self._rows(tmp_path) if r["PLAYER"] != "Sample Keeper"]
+        )
+        capsys.readouterr()
+
+        out = self._refused(tmp_path, monkeypatch, capsys)
+        assert "Sample Keeper" in out and "(no row) -> START" in out
+
+    def test_force_discards_them(self, tmp_path, monkeypatch, capsys):
+        self._run(tmp_path, monkeypatch)
+        rows = [r for r in self._rows(tmp_path) if r["PLAYER"] != "Sample Keeper"]
+        self._rewrite(tmp_path, rows)
+
+        assert self._run(tmp_path, monkeypatch, "--force") == 0
+        assert "Sample Keeper" in {r["PLAYER"] for r in self._rows(tmp_path)}
+
+    def test_a_signing_out_of_the_pool_is_not_a_deleted_row(self, tmp_path, monkeypatch):
+        """The dest had him as a free agent; the export has him on a team. That
+        is the league moving, not an edit being undone — matching on the team
+        as well would call him deleted and refuse every refresh."""
+        self._run(tmp_path, monkeypatch)
+        rows = self._rows(tmp_path)
+        for r in rows:
+            if r["PLAYER"] == "Sample Signing":
+                r["FCHL TEAM"], r["STATUS"] = "UFA", ""
+        self._rewrite(tmp_path, rows)
+
+        assert self._run(tmp_path, monkeypatch) == 0

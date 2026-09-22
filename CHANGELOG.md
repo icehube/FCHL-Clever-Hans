@@ -24,6 +24,29 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The NHL odds modal could describe a different file from the prices, and
+  label itself with a third.** Found by the 2026-09-22 grill. Three things read
+  `team_odds.json` at three different times: the table (`main.nhl_odds`) once
+  at boot; the prices, frozen onto each `Player.team_probability` whenever
+  `build_initial_state` builds a draft; and the season label, read at render
+  time off `data_loader.last_odds_season`, which *every* `load_team_odds` call
+  rebinds. So a `/reset` after the file changed re-priced the pool and
+  relabelled the modal off the new file while the table stayed on the old one
+  — a modal presenting itself as the price-model input, showing figures the
+  prices did not use under a season they did not come from. `/reset` and
+  `/load-scenario` now re-read the table alongside the rebuild, and the label
+  is `main.nhl_odds_season`, captured by the same read as the table, the
+  `loaded_disambiguations` split applied to the season. The case a reload
+  cannot fix is a saved draft booted after the file changed, which prices on
+  its frozen odds by design; each row now carries a `priced at` figure
+  whenever its pool players' frozen odds differ from the file at the 2dp the
+  table prints, with a footer saying what that means. Pinned by
+  `TestTheOddsViewDescribesTheOddsThePricesUse`, which serves a changed file to
+  every loader through a monkeypatch and plants the frozen mismatch; five
+  mutants, all killed — dropping either reload, reading the loader's global for
+  the label, never flagging, and comparing unrounded (which flags every club on
+  a fresh league).
+
 - **Re-running `convert_fchl_online.py` silently undid the bake and every
   hand-deleted row.** Found by the 2026-09-22 grill. The converter derives
   STATUS from the contract group and wrote its output over `dest`
@@ -3760,7 +3783,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1547 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1556 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -3865,7 +3888,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1547 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1556 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

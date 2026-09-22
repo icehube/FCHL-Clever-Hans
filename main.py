@@ -665,9 +665,18 @@ buyout_indicators: dict[str, str] = {}  # player_name -> "buyout" or "keep"
 # Stanley Cup odds per NHL club, as PERCENT, for the navbar's odds view. Loaded
 # in `lifespan` INDEPENDENTLY of the state, because `build_initial_state` — the
 # only other caller — runs on a fresh boot only, so a restored draft would
-# otherwise have no odds at all. Carries the alias keys `load_team_odds` adds
-# (`UTH` alongside `UTA`), so anything iterating it for display has to drop them.
+# otherwise have no odds at all. Re-read by `/reset` and `/load-scenario`, which
+# re-run `build_initial_state` and so re-price the pool off whatever the file
+# says NOW. Carries the alias keys `load_team_odds` adds (`UTH` alongside
+# `UTA`), so anything iterating it for display has to drop them.
 nhl_odds: dict[str, float] = {}
+# The season THAT read recorded — the view's label, snapshotted with the table.
+# Not `data_loader.last_odds_season` read at render time: every
+# `load_team_odds` call rebinds that, `build_initial_state` included, so until
+# 2026-09-22 a `/reset` over a changed file relabelled the boot-time table
+# with the new file's season. Same split as `loaded_disambiguations` against
+# `last_disambiguations`, for the same reason.
+nhl_odds_season: str = ""
 
 # Exact projected points per LIVE OPPONENT, from a real MILP solve, filled only
 # by GET /solve-standings and cleared by _recompute(). Empty means "nobody has
@@ -1787,12 +1796,13 @@ def _load_nhl_odds() -> None:
     copy of a saved draft). The season is blanked with the table, since the
     loader records it before it reads the odds.
     """
-    global nhl_odds
+    global nhl_odds, nhl_odds_season
     try:
         nhl_odds = data_loader.load_team_odds()
+        nhl_odds_season = data_loader.last_odds_season
     except Exception as e:
         nhl_odds = {}
-        data_loader.last_odds_season = ""
+        nhl_odds_season = ""
         logging.getLogger("uvicorn.error").warning(
             "No NHL odds (%s: %s) — the odds view will say so", type(e).__name__, e
         )
@@ -1827,6 +1837,25 @@ def _club_counts() -> tuple[Counter, Counter]:
     return pool, rostered
 
 
+def _priced_at() -> dict[str, set[float]]:
+    """The Cup odds each club's pool players are actually PRICED at, to 2dp.
+
+    Frozen onto every `Player.team_probability` when the draft was built, and
+    never re-read from the file after: a saved draft boots without opening it.
+    So once `team_odds.json` changes under a draft in progress, the table
+    `nhl_odds` holds and the figure the prices use are two different numbers,
+    and the modal — which presents the odds as the price-model input — would
+    show the one that is not.
+    """
+    priced: dict[str, set[float]] = {}
+    for p in auction_state.available_players.values():
+        if p.nhl_team:
+            priced.setdefault(_nhl_canonical(p.nhl_team), set()).add(
+                round(p.team_probability, 2)
+            )
+    return priced
+
+
 def _odds_rows() -> list[dict]:
     """One row per NHL club: odds, players left in the pool, players rostered.
 
@@ -1834,14 +1863,20 @@ def _odds_rows() -> list[dict]:
     folds the pool: `load_team_odds` carries `UTH` AND `UTA` pointing at one
     number, so iterating it raw prints Utah twice with the pool split between
     them.
+
+    `stale` lists the frozen figures (see `_priced_at`) that disagree with the
+    file at the precision the table prints. Empty on every row unless the file
+    changed after the draft began, which is the point: it is a tripwire.
     """
     pool, rostered = _club_counts()
+    priced = _priced_at()
     rows = [
         {
             "code": code,
             "odds": odds,
             "in_pool": pool.get(code, 0),
             "rostered": rostered.get(code, 0),
+            "stale": sorted(v for v in priced.get(code, ()) if v != round(odds, 2)),
         }
         for code, odds in nhl_odds.items()
         if _nhl_canonical(code) == code
@@ -1885,10 +1920,9 @@ async def nhl_odds_view(request: Request):
         "request": request,
         "odds_rows": _odds_rows(),
         "odds_unlisted": _odds_unlisted(),
-        # Read off the module, never from-imported: `last_odds_season` is a
-        # REBIND, which is the exact hazard the `import data_loader` comment at
-        # the top of this file names.
-        "odds_season": data_loader.last_odds_season,
+        # The season the TABLE was read with, not the loader's latest — see
+        # `nhl_odds_season`.
+        "odds_season": nhl_odds_season,
         "odds_default": DEFAULT_TEAM_PROBABILITY,
     })
 
@@ -2364,6 +2398,9 @@ async def reset(request: Request):
     # raises rather than half-loading.
     _startup_warnings.clear()
     auction_state = build_initial_state()
+    # The pool was just priced off the odds file as it is now; the table has to
+    # be too, or the modal describes the file as it was at boot.
+    _load_nhl_odds()
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()
@@ -2407,6 +2444,7 @@ async def load_scenario(request: Request, name: str = Form(...)):
         )
     new_state._snapshots.append(prior)
     auction_state = new_state
+    _load_nhl_odds()  # built through build_initial_state too — see /reset
     model_prices = predict_all_prices(auction_state.available_players, model_params)
     _recompute()
     _save_state()

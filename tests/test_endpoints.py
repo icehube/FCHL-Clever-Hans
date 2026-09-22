@@ -3408,9 +3408,108 @@ class TestTheNhlOddsView:
         monkeypatch.setattr(main, "nhl_odds", main.nhl_odds)
         monkeypatch.setattr(data_loader, "last_odds_season", data_loader.last_odds_season)
 
+        monkeypatch.setattr(main, "nhl_odds_season", main.nhl_odds_season)
+
         main._load_nhl_odds()
         assert main.nhl_odds == {}
-        assert data_loader.last_odds_season == ""
+        assert main.nhl_odds_season == ""
+
+
+class TestTheOddsViewDescribesTheOddsThePricesUse:
+    """Three readers of `team_odds.json` that could each describe a different file.
+
+    The table (`nhl_odds`, read at boot), the label (`last_odds_season`, which
+    every `load_team_odds` call rebinds) and the prices (each player's
+    `team_probability`, frozen when the draft was built). Until 2026-09-22 a
+    `/reset` over a changed file re-priced the pool and relabelled the view off
+    the new file while the table stayed on the old one.
+    """
+
+    def _changed_file(self, tmp_path, monkeypatch):
+        """The real odds file with a new season and its top club's odds halved,
+        served to every `load_team_odds` caller from here on."""
+        import json
+
+        import data_loader
+        import main
+
+        data = json.loads(Path("data/team_odds.json").read_text())
+        top = max(data["odds"], key=data["odds"].get)
+        data["season"] = "2099-2100"
+        data["odds"][top] /= 2
+        changed = tmp_path / "team_odds.json"
+        changed.write_text(json.dumps(data))
+
+        real = data_loader.load_team_odds
+        monkeypatch.setattr(
+            data_loader, "load_team_odds", lambda path=None: real(str(changed))
+        )
+        # Restored at teardown so the next test's reset is not the only thing
+        # standing between it and this file.
+        monkeypatch.setattr(main, "nhl_odds", main.nhl_odds)
+        monkeypatch.setattr(main, "nhl_odds_season", main.nhl_odds_season)
+        return top, round(data["odds"][top] * 100, 2)
+
+    @pytest.mark.parametrize("rebuild", ["reset", "scenario"])
+    def test_rebuilding_the_draft_reads_the_file_again(
+        self, client, tmp_path, monkeypatch, rebuild
+    ):
+        import scenarios
+
+        top, halved = self._changed_file(tmp_path, monkeypatch)
+        if rebuild == "reset":
+            client.post("/reset")
+        else:
+            client.post("/load-scenario", data={"name": next(iter(scenarios.SCENARIOS))})
+
+        body = client.get("/nhl-odds").text
+        assert "2099-2100 season" in body
+        assert _odds_table(body)[top][0] == pytest.approx(halved, abs=0.005), (
+            f"the pool was re-priced off the changed file but the table still "
+            f"shows {top} at its boot-time odds"
+        )
+        assert "priced at" not in body, "prices and table were built from one file"
+
+    def test_the_label_is_the_season_the_table_was_read_with(
+        self, client, tmp_path, monkeypatch
+    ):
+        """Any other `load_team_odds` caller — a scenario builder, the
+        pre-auction runbook, a fixture — rebinds the loader's global. It must
+        not relabel a table it did not reload."""
+        import data_loader
+
+        self._changed_file(tmp_path, monkeypatch)
+        before = client.get("/nhl-odds").text
+        monkeypatch.setattr(data_loader, "last_odds_season", data_loader.last_odds_season)
+        data_loader.load_team_odds()
+
+        after = client.get("/nhl-odds").text
+        assert "2099-2100" not in after
+        assert after == before
+
+    def test_a_fresh_league_flags_nothing(self, client):
+        assert "priced at" not in client.get("/nhl-odds").text
+
+    def test_odds_frozen_under_an_older_file_are_flagged(self, client):
+        """The saved-draft case: `lifespan` loads the table from the file as it
+        is now, and the pool keeps the odds it was built with. PLANTED by
+        re-freezing one club's pool players, which is what an older file
+        leaves behind."""
+        import main
+
+        code = next(
+            main._nhl_canonical(p.nhl_team)
+            for p in main.auction_state.available_players.values() if p.nhl_team
+        )
+        frozen = round(main.nhl_odds[code] + 1.23, 2)
+        for p in main.auction_state.available_players.values():
+            if main._nhl_canonical(p.nhl_team) == code:
+                p.team_probability = frozen
+
+        body = client.get("/nhl-odds").text
+        assert f"priced at {frozen:.2f}%" in body
+        assert "has changed since this draft was built" in body
+        assert body.count(">priced at ") == 1, "only the re-frozen club disagrees"
 
 
 class TestRoundThreeMutators:

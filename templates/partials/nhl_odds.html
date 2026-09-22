@@ -31,7 +31,11 @@
         {% for row in odds_rows %}
         <tr>
             <td class="flex items-center gap-2">{{ nhl_logo(row.code) }}<span class="font-mono text-xs">{{ row.code }}</span></td>
-            <td class="text-right font-semibold">{{ "%.2f"|format(row.odds) }}%</td>
+            <td class="text-right font-semibold">{{ "%.2f"|format(row.odds) }}%
+                {#- The figure the prices actually use, when it is not this one.
+                    Only reachable once team_odds.json changes under a draft in
+                    progress: each player's odds were frozen when it was built. #}
+                {%- for v in row.stale %}<div class="text-xs text-warning font-normal" title="This club's undrafted players are priced at these odds, frozen when the draft was built — team_odds.json has changed since">priced at {{ "%.2f"|format(v) }}%</div>{% endfor %}</td>
             {# Zero is worth showing as a dash: "0" in a column of counts reads
                as a measurement, and what it means here is that a contender has
                been picked clean. #}
@@ -53,6 +57,13 @@
     {% for row in odds_unlisted %}<span class="font-mono">{{ row.code }}</span> ({{ row.count }}){% if not loop.last %}, {% endif %}{% endfor %}
 </p>
 {% endif %}
+{% if odds_rows|selectattr('stale')|list %}
+<p class="text-xs text-warning mt-2">
+    team_odds.json has changed since this draft was built. Prices still use the
+    odds each player was frozen at (marked "priced at"); a Reset re-prices the
+    pool off the file and discards the draft.
+</p>
+{% endif %}
 <p class="text-xs opacity-60 mt-1">
     {% if odds_season %}{{ odds_season }} season. {% endif %}Vig removed, so the
     listed clubs sum to {{ "%.2f"|format(odds_rows|sum(attribute='odds')) }}%.
@@ -61,5 +72,5 @@
 {# Reachable: a saved state boots without ever opening team_odds.json, so a
    missing file costs this view and nothing else. Say which file, because the
    answer is to put it back rather than to re-run the draft. #}
-<p class="text-sm opacity-70">No odds loaded — <span class="font-mono">data/team_odds.json</span> was missing or unreadable at startup.</p>
+<p class="text-sm opacity-70">No odds loaded — <span class="font-mono">data/team_odds.json</span> was missing or unreadable at startup or at the last reset.</p>
 {% endif %}

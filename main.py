@@ -18,7 +18,7 @@ from copy import deepcopy
 from functools import lru_cache, partial
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1901,7 +1901,7 @@ async def explain(
     request: Request,
     player_name: str,
     inline: bool = False,
-    price: float | None = None,
+    price: str | None = None,
 ):
     """Why not bid: counterfactual explanation.
 
@@ -1915,7 +1915,21 @@ async def explain(
     price. Optional, because omitting it has to keep meaning "the market
     price" — that is what the lazy mount fires on every panel swap, and making
     it mandatory would put a 200ms solve on the trigger instead of the click.
+
+    It is parsed here rather than typed `float` because the button sends the
+    box as it stands, and a blank box sends `price=`: a `float` parameter
+    answered that with a 422, which reached the operator as "Request failed
+    (422)" for pressing Recompute before typing a bid. Blank means no bid is on
+    the table, so the card answers at the forecast and its marker says so.
+    Anything else still has to parse — a browser number input cannot send
+    garbage, so a 422 for it is a client bug worth hearing about.
     """
+    if price is not None and not price.strip():
+        price = None
+    try:
+        bid = None if price is None else float(price)
+    except ValueError:
+        raise HTTPException(422, f"price must be a number, got {price!r}") from None
     template = (
         "partials/counterfactual.html" if inline else "partials/explanation.html"
     )
@@ -1924,7 +1938,7 @@ async def explain(
     # Only the bid panel's mount owns a live price, so only it gets the button
     # that reads one — see counterfactual.html.
     ctx["cf_inline"] = inline
-    cf = _counterfactual_context(player_name, price)
+    cf = _counterfactual_context(player_name, bid)
     if cf is not None:
         ctx.update(cf)
     return _render(request, template, ctx)

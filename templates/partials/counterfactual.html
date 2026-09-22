@@ -13,15 +13,21 @@
     <div class="flex items-center justify-between gap-2">
         <h3 class="font-bold text-sm">{{ cf_player.name }} ({{ cf_player.position }}, {{ cf_player.projected_points }}pts)</h3>
         <div class="flex items-center gap-1">
-        {# Which price the card is conditioned on. The verdict below already
-           names the figure; this names the BASIS, which is the whole
-           difference between a card that loaded itself and one the operator
-           asked for — same job as #proj-basis on the Proj column, and a native
+        {# Which price the card is conditioned on — the basis, and for a
+           Recompute the FIGURE too. It read a bare "at your bid" until
+           2026-09-22, and that went stale the moment the box changed: typing
+           a new price swaps #bid-advice alone, never this card, so it went on
+           saying "at your bid" about a bid no longer on the table (measured in
+           Chrome: the card read "at your bid · Worth having at $7.4M" beside
+           a box reading 11.0 and advice reading DROP). The figure makes the
+           staleness visible instead of hiding it. "at market" needs none: the
+           forecast only moves on a pick, and a pick re-renders the whole
+           panel. Same job as #proj-basis on the Proj column, and a native
            `title` for the same reason: this body is mounted inside panels that
            scroll, and a DaisyUI bubble in a scroller is clipped with no flip
            logic to save it. #}
             <span class="text-xs opacity-60 whitespace-nowrap"
-                  title="{% if cf_at_bid %}Solved at the price asked for, not at the forecast — raise the bid and ask again to re-sharpen.{% else %}Solved at the expected clearing price, which is what this card loads at.{% if cf_inline %} Press Recompute to re-solve at the bid on the table.{% endif %}{% endif %}">{{ "at your bid" if cf_at_bid else "at market" }}</span>
+                  title="{% if cf_at_bid %}Solved at the price asked for, not at the forecast — raise the bid and ask again to re-sharpen.{% else %}Solved at the expected clearing price, which is what this card loads at.{% if cf_inline %} Press Recompute to re-solve at the bid on the table.{% endif %}{% endif %}">{{ ("at $%.1fM bid"|format(cf_price)) if cf_at_bid else "at market" }}</span>
         {# Recompute at the price on the table. Four things here are
            load-bearing:
 

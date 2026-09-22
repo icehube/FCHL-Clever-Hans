@@ -557,14 +557,45 @@ class TestRecomputingAtTheLiveBid:
         assert "bid-counterfactual" not in body
 
     def test_the_marker_says_which_price_is_on_screen(self, client):
-        """Same job as `#proj-basis`: the basis, not the figure.
+        """Same job as `#proj-basis`, and a recompute names its figure.
 
-        The verdict names the dollars either way, so without this the two
-        cards are indistinguishable at a glance — and the one that matters mid
-        auction is whether you are looking at a forecast or at the table.
+        The verdict names the dollars either way, so without the basis the two
+        cards are indistinguishable at a glance. The figure is there because
+        typing a new bid swaps `#bid-advice` and never this card: a bare "at
+        your bid" went on describing a bid that had left the box.
         """
         name = _a_player().name
         assert "at market" in client.get(f"/explain/{name}?inline=1").text
         sharpened = client.get(f"/explain/{name}?inline=1&price=3.0").text
-        assert "at your bid" in sharpened
+        assert "at $3.0M bid" in sharpened
         assert "at market" not in sharpened
+        assert "at your bid" not in sharpened
+
+    @pytest.mark.parametrize("blank", ["", "%20%20"])
+    def test_an_empty_box_answers_at_market_rather_than_422(self, client, blank):
+        """Recompute sends the box as it stands, and it can be empty.
+
+        A `float` query param turned `price=` into a 422 — "Request failed
+        (422)" in a toast, for pressing a button before typing a bid.
+        """
+        name = _a_player().name
+        r = client.get(f"/explain/{name}?inline=1&price={blank}")
+        assert r.status_code == 200, r.text[:200]
+        assert "at market" in r.text
+        assert r.text == client.get(f"/explain/{name}?inline=1").text
+
+    def test_a_price_that_is_not_a_number_is_still_refused(self, client):
+        r = client.get(f"/explain/{_a_player().name}?inline=1&price=abc")
+        assert r.status_code == 422
+
+    def test_the_marker_names_the_price_it_was_SOLVED_at(self, client):
+        """The legal price, not the typed one — the card solves at the former.
+
+        `_legal_salary` quantizes to $0.1M and clamps to the league range, so a
+        marker echoing the raw query would name a price nothing was solved at.
+        """
+        name = _a_player().name
+        assert "at $3.0M bid" in client.get(f"/explain/{name}?inline=1&price=3.04").text
+        assert f"at ${MAX_SALARY:.1f}M bid" in client.get(
+            f"/explain/{name}?inline=1&price=99"
+        ).text

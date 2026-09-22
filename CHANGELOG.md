@@ -24,6 +24,25 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The counterfactual card's "at your bid" went stale the moment the bid
+  changed, and Recompute on an empty box answered with a 422.** Found by the
+  2026-09-22 grill, both in the 2026-09-12 Recompute control. After a
+  Recompute, typing a new price swaps `#bid-advice` and never the card, so it
+  went on describing a bid that had left the box — confirmed in Chrome, the
+  card read "at your bid · Worth having at $7.4M" beside a box reading 11.0
+  and advice reading DROP. The marker now names the figure it was solved at
+  (`at $7.4M bid`), so the staleness is on screen instead of hidden; "at
+  market" stays bare, because the forecast only moves on a pick and a pick
+  re-renders the whole panel. It is the SOLVED price, through
+  `_legal_salary`, not the typed one — a test sends 3.04 and 99 and reads
+  $3.0M and $11.4M back. Separately, the button sends the box as it stands, and
+  a blank box sends `price=`, which `/explain`'s `float` parameter turned into
+  "Request failed (422)" for pressing Recompute before typing a bid. The
+  parameter is now parsed by hand: blank means no bid is on the table, so the
+  card answers at the forecast and says "at market"; anything else must still
+  parse, since a browser number input cannot send garbage and a 422 for it is
+  a client bug worth hearing about.
+
 - **`bake_roster_state.py` could revert a hand-entered penalty, truncate the
   live pool, and bake a different pool's state than the server loads.** Found
   by the 2026-09-22 grill; four defects in one script, and the first is a

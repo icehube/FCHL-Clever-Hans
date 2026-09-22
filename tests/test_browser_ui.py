@@ -184,7 +184,7 @@ class TestRecomputeUsesThePriceOnTheTable:
         with page.expect_response(re.compile(r"/explain/.*price=")):
             page.click("#bid-panel .counterfactual-card button:text-is('Recompute')")
         page.wait_for_selector(
-            "#bid-panel .counterfactual-card:has-text('at your bid')"
+            "#bid-panel .counterfactual-card:has-text('at $7.4M bid')"
         )
 
         text = page.locator("#bid-panel .counterfactual-card").inner_text()

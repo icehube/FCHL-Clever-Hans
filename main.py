@@ -1888,8 +1888,9 @@ def _odds_rows() -> list[dict]:
 def _odds_unlisted() -> list[dict]:
     """Clubs the pool uses that the odds file does not name.
 
-    `players.csv` puts the FCHL placeholder `UFA` in the NHL TEAM column on 9
-    rows, and `_get_team_probability` answers for it with
+    The 2025-26 `players.csv` put the FCHL placeholder `UFA` in the NHL TEAM
+    column on 9 rows (the converters blank it now — see `_odds_no_club`), and
+    `_get_team_probability` answers for such a code with
     `DEFAULT_TEAM_PROBABILITY` — silently. Showing them is the point: a club
     RESPELLED by a data refresh lands here too, and it would otherwise price a
     whole roster at the default with nothing on screen to say so.
@@ -1900,6 +1901,25 @@ def _odds_unlisted() -> list[dict]:
         ({"code": code, "count": n} for code, n in seen.items() if code not in nhl_odds),
         key=lambda r: r["code"],
     )
+
+
+def _odds_no_club() -> int:
+    """Undrafted players with NO NHL club, each priced at the default too.
+
+    `_get_team_probability("")` falls through to `DEFAULT_TEAM_PROBABILITY`
+    exactly as an unknown club does, but `_club_counts` skips a blank club, so
+    until 2026-09-22 the footer that exists to name default-priced players
+    left these out — 142 of them on `players-23-converted.csv`, whose NHL join
+    lost its donor.
+
+    The POOL only, unlike `_odds_unlisted`, and deliberately. A blank is not a
+    club a refresh could respell across a whole roster; what it costs is a
+    price, and only undrafted players are priced. Counting rostered ones too
+    would put the live pool's three blank-club minors — prospects nothing
+    prices, already reported by the converter — in this footer permanently,
+    and a tripwire that always fires is wallpaper.
+    """
+    return sum(1 for p in auction_state.available_players.values() if not p.nhl_team)
 
 
 @app.get("/nhl-odds", response_class=HTMLResponse)
@@ -1920,6 +1940,7 @@ async def nhl_odds_view(request: Request):
         "request": request,
         "odds_rows": _odds_rows(),
         "odds_unlisted": _odds_unlisted(),
+        "odds_no_club": _odds_no_club(),
         # The season the TABLE was read with, not the loader's latest — see
         # `nhl_odds_season`.
         "odds_season": nhl_odds_season,

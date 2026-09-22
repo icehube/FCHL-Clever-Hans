@@ -46,15 +46,18 @@
         </tbody>
     </table>
 </div>
-{% if odds_unlisted %}
-{# Clubs the pool uses that the odds file does not name. `players.csv` carries
-   the FCHL placeholder `UFA` on 9 rows, and `_get_team_probability` answers for
-   it with the default — silently. A club RESPELLED by a data refresh lands here
-   too, which is the UTA/UTH failure in the pricing column rather than the logo
-   one, so this row is a tripwire and not a footnote. #}
+{% if odds_unlisted or odds_no_club %}
+{# Players `_get_team_probability` prices at the default — silently. Two kinds:
+   a club the odds file does not name (the 2025-26 players.csv carried the FCHL
+   placeholder `UFA` on 9 rows, and a club RESPELLED by a data refresh lands
+   here too, which is the UTA/UTH failure in the pricing column rather than the
+   logo one), and an undrafted player with no club at all, which is what the
+   converters now write in place of the placeholder. A tripwire, not a
+   footnote. #}
 <p class="text-xs opacity-70 mt-2">
     Priced at the {{ "%.1f"|format(odds_default) }}% default (no odds entry):
-    {% for row in odds_unlisted %}<span class="font-mono">{{ row.code }}</span> ({{ row.count }}){% if not loop.last %}, {% endif %}{% endfor %}
+    {% for row in odds_unlisted %}<span class="font-mono">{{ row.code }}</span> ({{ row.count }}){% if not loop.last or odds_no_club %}, {% endif %}{% endfor %}
+    {%- if odds_no_club %}no NHL club ({{ odds_no_club }} undrafted){% endif %}
 </p>
 {% endif %}
 {% if odds_rows|selectattr('stale')|list %}

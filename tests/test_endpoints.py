@@ -3343,6 +3343,34 @@ class TestTheNhlOddsView:
             assert code in body, f"{code} is priced at the default and is not shown"
         assert f"{main.DEFAULT_TEAM_PROBABILITY:.1f}% default" in body
 
+    def test_an_undrafted_player_with_no_club_is_named_too(self, client):
+        """A blank club is priced at the default like an unknown one, and
+        `_club_counts` skips blanks, so the footer used to leave them out —
+        142 of them on the 2023 pool. PLANTED: the live pool has none."""
+        import main
+
+        pool = main.auction_state.available_players.values()
+        next(p for p in pool if p.nhl_team).nhl_team = ""
+        blank = sum(1 for p in pool if not p.nhl_team)
+
+        body = client.get("/nhl-odds").text
+        assert f"no NHL club ({blank} undrafted)" in body
+        assert f"{main.DEFAULT_TEAM_PROBABILITY:.1f}% default" in body
+
+    def test_a_rostered_player_with_no_club_is_not(self, client):
+        """Nothing prices him, so he is no tripwire — the live pool's own
+        blank-club rows are rostered minors and would sit in the footer for
+        good."""
+        import main
+
+        before = main._odds_no_club()
+        rostered = next(
+            p for t in main.auction_state.teams.values() for p in t.all_players
+            if p.nhl_team
+        )
+        rostered.nhl_team = ""
+        assert main._odds_no_club() == before
+
     def test_the_footer_names_the_season_the_odds_came_from(self, client):
         """The one reason `load_team_odds` records a season at all.
 

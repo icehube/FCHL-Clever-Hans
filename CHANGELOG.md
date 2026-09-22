@@ -24,6 +24,21 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The odds footer that names default-priced players left out the ones with
+  no NHL club.** Found by the 2026-09-22 grill. `_get_team_probability("")`
+  falls through to `DEFAULT_TEAM_PROBABILITY` exactly as an unknown club does,
+  but `_club_counts` skips a blank club, so the footer existing to catch
+  silent default pricing could not see them. Measured per pool: **142**
+  undrafted blank-club players on `players-23-converted.csv`, 0 on
+  `players-25.csv` and `players.csv`. `_odds_no_club` counts them and the
+  footer names them as `no NHL club (N undrafted)`. Undrafted only, unlike the
+  unknown-club entries, because a blank costs a price and only the pool is
+  priced: counting rostered ones would put the live pool's 3 blank-club minors
+  in the footer for good. The template comment and `_odds_unlisted`'s
+  docstring still said `players.csv` carries `UFA` on 9 rows, true of the
+  2025-26 file only; both now say so. Planted, since the live pool has no
+  subject; three mutants, all killed.
+
 - **The NHL odds modal could describe a different file from the prices, and
   label itself with a third.** Found by the 2026-09-22 grill. Three things read
   `team_odds.json` at three different times: the table (`main.nhl_odds`) once

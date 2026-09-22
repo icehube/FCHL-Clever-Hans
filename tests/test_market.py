@@ -395,6 +395,24 @@ class TestLiveOpponents:
         assert ceiling == rich_and_full.physical_max_bid
         assert ceiling > MIN_SALARY, "a full team's budget must reach the ceiling"
 
+    def test_a_repeated_code_is_one_opponent(self):
+        """`/bid-check` splits a free string, so nothing upstream dedupes it."""
+        teams = {"A": _make_team("A"), "B": _make_team("B")}
+        assert live_opponents(["A", "A", "B", "A"], teams) == ["A", "B"]
+
+    def test_a_repeated_code_is_not_its_own_second_bidder(self):
+        """BOT observing: the ceiling is the second-highest DISTINCT opponent."""
+        teams = {
+            "A": _make_team("A", keeper_salary=10.0, num_keepers=5,
+                            keeper_positions={"F": 5}),
+            "B": _make_team("B", keeper_salary=40.0, num_keepers=5,
+                            keeper_positions={"F": 5}),
+        }
+        assert teams["A"].physical_max_bid > teams["B"].physical_max_bid >= MIN_SALARY
+        assert compute_live_ceiling(["A", "A", "B"], teams) == round(
+            teams["B"].physical_max_bid, 1
+        )
+
     def test_bot_alone_has_no_opponents(self):
         """The uncontested case: BOT is the only bidder left."""
         teams = {
@@ -447,6 +465,10 @@ class TestBidWinner:
 
     def test_sole_opponent_wins_when_bot_is_out(self):
         assert bid_winner(["LIVE"], self._teams()) == "LIVE"
+
+    def test_a_repeated_code_is_still_one_bidder(self):
+        assert bid_winner(["LIVE", "LIVE"], self._teams()) == "LIVE"
+        assert bid_winner([MY_TEAM, MY_TEAM, "BROKE"], self._teams()) == MY_TEAM
 
     def test_no_bidders_no_winner(self):
         assert bid_winner([], self._teams()) is None

@@ -164,9 +164,17 @@ def live_opponents(
 
     Excludes BOT, unknown codes, done teams, and teams that can't reach the
     floor. An empty result means nobody can outbid BOT — the uncontested case.
+
+    Each code once, first mention wins. `/bid-check` takes the bidder list as a
+    free comma-separated string, and a repeated code used to count twice: with
+    BOT observing, `SRL,SRL,MAC` made SRL its own second-highest bidder and hid
+    MAC from the ceiling, and `bid_winner` saw two live bidders where there was
+    one. The bidder grid toggles each team once, so only a hand-made request
+    reaches it — which is what makes it the kind of thing to fix at the root
+    rather than trust the caller about.
     """
     return [
-        code for code in active_bidders
+        code for code in dict.fromkeys(active_bidders)
         if code in teams
         and code != exclude_team
         and not teams[code].is_done

@@ -1591,9 +1591,19 @@ async def bid_check(
         # they have to be right: an inconsistent MarketInfo is a trap for
         # whoever reads one next. Same reasoning `floor_demand` carries, and
         # the same convention compute_market_ceiling uses — sort the eligible
-        # opponents by physical max, descending, and take the first two.
+        # opponents by physical max, descending, and take the first two. "Same"
+        # includes the TIE-break, which is why this walks `auction_state.teams`
+        # rather than `opponents`: a stable sort keeps whatever order it was
+        # given, and that function is given the teams dict, while `opponents`
+        # is in the order the bidders were toggled. Until 2026-09-22 two teams
+        # on the same max named a different `highest_bidder` depending on who
+        # was clicked first.
+        live = set(opponents)
         ranked = sorted(
-            ((code, auction_state.teams[code].physical_max_bid) for code in opponents),
+            (
+                (code, team.physical_max_bid)
+                for code, team in auction_state.teams.items() if code in live
+            ),
             key=lambda x: -x[1],
         )
         live_info = MarketInfo(

@@ -6541,6 +6541,55 @@ class TestTheLiveMarketInfoDescribesTheNamedBidders:
         assert forward.second_bidder == reverse.second_bidder
         assert forward.highest_bid == pytest.approx(reverse.highest_bid)
 
+    def _two_tied_opponents(self):
+        """Two opponents on one physical max below the cap, in TEAMS-dict order.
+
+        Planted rather than found: a fresh league ties every team at
+        `MAX_SALARY` by clamping, which would make this pass, but only because
+        the keeper salaries leave everyone above the cap this season.
+        """
+        import main
+
+        codes = [c for c in main.auction_state.teams if c != main.MY_TEAM][:2]
+        target = 6.0
+        for code in codes:
+            team = main.auction_state.teams[code]
+            # physical_max = remaining - spots*MIN + MIN while spots remain.
+            squeeze(code, target - MIN_SALARY + team.total_spots_remaining * MIN_SALARY)
+        maxes = [main.auction_state.teams[c].physical_max_bid for c in codes]
+        assert maxes[0] == pytest.approx(maxes[1]) and maxes[0] < MAX_SALARY, maxes
+        return codes
+
+    @pytest.mark.parametrize("submitted", ["dict-order", "reversed"])
+    def test_a_tie_is_broken_by_team_order_not_by_click_order(
+        self, client, monkeypatch, submitted
+    ):
+        """`compute_market_ceiling`'s convention, tie-break included.
+
+        The sibling above uses three DISTINCT maxes, so it cannot see a tie: a
+        stable sort over the bidders as submitted passed it, and named whichever
+        tied team was toggled first.
+        """
+        first, second = self._two_tied_opponents()
+        bidders = [first, second] if submitted == "dict-order" else [second, first]
+        info = self._capture(client, monkeypatch, bidders)
+        assert (info.highest_bidder, info.second_bidder) == (first, second), (
+            f"tied on the same max, {first} precedes {second} in the teams "
+            f"dict and must be named highest however the bidders were toggled"
+        )
+
+    def test_a_repeated_bidder_counts_once(self, client, monkeypatch):
+        """A hand-made `bidders=A,A,B` is two opponents, not three."""
+        ranked, maxes = self._three_unequal_opponents(client)
+        rich, _, poor = ranked
+        info = self._capture(client, monkeypatch, [rich, rich, poor])
+        assert info.demand_count == 2
+        assert (info.highest_bidder, info.second_bidder) == (rich, poor)
+        assert info.market_ceiling == pytest.approx(round(maxes[poor], 1)), (
+            f"with BOT observing the ceiling is the second-highest DISTINCT "
+            f"opponent; counting {rich} twice made it {rich}'s own max"
+        )
+
     def test_a_lone_bot_bidder_names_nobody(self, client, monkeypatch):
         """BOT is excluded, so toggling only BOT leaves no opponent to name."""
         import main

@@ -24,6 +24,29 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **`/bid-check` counted a repeated bidder code twice and broke ties by click
+  order.** Found by the 2026-09-22 grill. `live_opponents` walked the
+  submitted list as-is, and `bidders` is a free comma-separated string: with
+  BOT observing, `SRL,SRL,MAC` made SRL its own second-highest bidder, so the
+  live ceiling was SRL's max and MAC vanished from it, and `bid_winner` saw two
+  live bidders where there was one and returned no winner. The bidder grid
+  toggles each team once, so only a hand-made request could reach this; it is
+  fixed at the root anyway, because all three consumers (`compute_live_ceiling`,
+  `bid_winner`, `/bid-check`'s `demand_count`) read that one function.
+  `live_opponents` now yields each code once, first mention wins.
+
+  Separately, `bid_check`'s comment said its `ranked` list used
+  `compute_market_ceiling`'s convention, and it did not for ties: a stable sort
+  over `opponents` keeps the order the bidders were toggled in, while
+  `compute_market_ceiling` sorts the teams dict. Two opponents on the same max
+  named a different `highest_bidder` depending on who was clicked first. Nothing
+  outside tests reads the field; the fix walks `auction_state.teams` so the
+  comment is true. The existing order-independence test could not see this:
+  it builds three **distinct** maxes, so no tie exists. The new one plants two
+  opponents on one sub-cap max with `squeeze` rather than relying on a fresh
+  league's clamp at `MAX_SALARY`. Mutation-checked: dropping the dedupe fails 4
+  tests, restoring the click-order sort fails the reversed tie case.
+
 - **`convert_legacy_players.py --nhl-teams X` crashed, and the default run
   never reported its join.** Found by the 2026-09-22 grill. The flag is
   `action="append"`, so it arrives as a list, and `main()` passed that list

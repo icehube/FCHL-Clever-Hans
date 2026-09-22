@@ -33,7 +33,7 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 - [2026-09-11] [grill] `tests/test_browser_ui.py:1246 (test_no_tooltip_renders_outside_the_scrollable_content)` — **the `counted >= 10` floor now sits at exactly 10**, with zero slack: the 2026-09-11 removal of the league-table `data-tip` took the measured count from 11 to 10, so the next tooltip deleted anywhere in the app fails this rather than the named `required` inventory, and the failure message ("the page must render the bid panel's four and the team panel's stat tiles") will not describe what actually happened — deferred because that is the tripwire working as designed and the STATES are deterministic, so it is not flaky; revisit only if a legitimate removal trips it, at which point the fix is to re-derive the floor from the `required` inventory rather than to lower a magic number
 
-- [2026-09-11] [grill] `main.py:2041 (trade_execute)` — **a trade whose form
+- [2026-09-11] [grill] `main.py:2051 (trade_execute)` — **a trade whose form
   has been edited since the evaluate is still executable if JavaScript does not
   run.** `/trade-execute` posts only `trade_id` and acts on the server's
   `last_trade_eval`, so the *only* thing standing between a modified selection

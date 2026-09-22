@@ -1764,12 +1764,20 @@ def _load_nhl_odds() -> None:
     odds are already baked into each `Player.team_probability`), so raising here
     would make startup stricter than it was for a reference table. A fresh boot
     still fails loudly — `build_initial_state` reads the same file and raises.
+
+    Broad `Exception` for the reason `_load_saved_state` gives, and because the
+    narrow tuple it replaced was a list of the ways a file can be MISSING, not
+    malformed: `{"odds": []}` raised AttributeError and a string probability
+    TypeError, both straight out of `lifespan` (measured 2026-09-22 against a
+    copy of a saved draft). The season is blanked with the table, since the
+    loader records it before it reads the odds.
     """
     global nhl_odds
     try:
         nhl_odds = data_loader.load_team_odds()
-    except (OSError, ValueError, KeyError) as e:
+    except Exception as e:
         nhl_odds = {}
+        data_loader.last_odds_season = ""
         logging.getLogger("uvicorn.error").warning(
             "No NHL odds (%s: %s) — the odds view will say so", type(e).__name__, e
         )

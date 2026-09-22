@@ -3319,6 +3319,38 @@ class TestTheNhlOddsView:
         assert "<table" not in body
         assert "team_odds.json" in body
 
+    @pytest.mark.parametrize("content", [
+        pytest.param("{not json", id="unparseable"),
+        pytest.param('{"season": "x"}', id="no-odds-key"),
+        pytest.param('{"season": "x", "odds": []}', id="odds-a-list"),
+        pytest.param('{"season": "x", "odds": {"EDM": "0.1"}}', id="odds-a-string"),
+        pytest.param('{"season": "x", "odds": {"EDM": null}}', id="odds-null"),
+        pytest.param("[]", id="top-level-a-list"),
+    ])
+    def test_a_malformed_odds_file_degrades_rather_than_failing_the_boot(
+        self, monkeypatch, tmp_path, content
+    ):
+        """`lifespan` calls this before it reads the saved state, so a raise
+        here is a draft that cannot boot — over a reference table the saved
+        state never needed. It caught three exception types until 2026-09-22,
+        and four of these six raised straight through it (AttributeError,
+        TypeError) — measured by restoring the tuple. The season goes too: a file that named
+        one before failing would label an empty table with it.
+        """
+        import data_loader
+        import main
+
+        bad = tmp_path / "team_odds.json"
+        bad.write_text(content)
+        real = data_loader.load_team_odds
+        monkeypatch.setattr(data_loader, "load_team_odds", lambda: real(str(bad)))
+        monkeypatch.setattr(main, "nhl_odds", main.nhl_odds)
+        monkeypatch.setattr(data_loader, "last_odds_season", data_loader.last_odds_season)
+
+        main._load_nhl_odds()
+        assert main.nhl_odds == {}
+        assert data_loader.last_odds_season == ""
+
 
 class TestRoundThreeMutators:
     """Round 3 mutators: minors movement, scenario load, change_log + cascade."""

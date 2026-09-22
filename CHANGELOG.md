@@ -24,6 +24,20 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **A malformed `team_odds.json` stopped a saved draft from booting.** Found
+  by the 2026-09-22 grill. `lifespan` calls `_load_nhl_odds` before it reads the
+  saved state, and the loader caught `OSError`, `ValueError` and `KeyError` —
+  the ways a file can be missing or unparseable, not the ways it can be the
+  wrong shape. `{"odds": []}` raised AttributeError and a string probability
+  TypeError, both straight out of startup (reproduced end to end against a copy
+  of a saved draft); before b02c4d4 a saved-state boot never opened the file
+  at all, so this was a regression against the rule that degrading beats
+  failing to boot. Now broad `Exception`, like `_load_saved_state`, and the
+  season label is blanked with the table, because the loader records it before
+  it reads the odds and an empty view would otherwise be labelled with a
+  season. Parametrized over six shapes; restoring the narrow tuple fails four,
+  dropping the season reset fails four.
+
 - **The counterfactual card's "at your bid" went stale the moment the bid
   changed, and Recompute on an empty box answered with a 422.** Found by the
   2026-09-22 grill, both in the 2026-09-12 Recompute control. After a

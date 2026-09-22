@@ -24,6 +24,18 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **`POST /buyout` with a blank `team_code` bought out BOT's player.** Found by
+  the 2026-09-22 grill. The field defaults to `MY_TEAM` so the Buyout
+  Analyzer, the older caller, can omit it, and FastAPI substitutes a form
+  field's default for a *blank* value as well as a missing one. So the team
+  panel's picker rendering `value=""` would have bought out BOT's player of
+  that name, with a success toast. Reproduced against a scratch state:
+  `team_code=""` removed a BOT player and logged the buyout. The handler now
+  reads the raw field (Starlette caches the parsed form) and refuses a blank
+  one; an absent one is still the Analyzer acting on BOT, and a test pins
+  both. Requiring the field would have been cleaner and touched 27 test call
+  sites for an API change nobody asked for.
+
 - **Eleven documentation claims the 2026-09-22 grill found false, and the
   reference guard's blind spot for worktrees.** Each was re-measured rather
   than reworded:

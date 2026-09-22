@@ -3097,6 +3097,32 @@ class TestBuyingOutAnotherTeamsPlayer:
         assert toast_of(r).get("type") == "error", toast_of(r)
         assert len(main.auction_state.transaction_log) == before
 
+    @pytest.mark.parametrize("blank", ["", "  "], ids=["empty", "spaces"])
+    def test_a_blank_team_is_refused_rather_than_read_as_bot(self, client, blank):
+        """FastAPI hands a blank form field the DEFAULT, and the default is BOT
+        — so a picker that rendered no team bought out BOT's player of that
+        name, with a success toast. Only an absent field is the Analyzer.
+
+        `empty` is the case FastAPI rewrites and the one the guard exists for;
+        `spaces` is not rewritten, and `execute_buyout`'s unknown-team check
+        refuses it without the guard — kept so neither path can regress."""
+        import main
+
+        mine = a_buyout_candidate()
+        before = len(main.auction_state.transaction_log)
+        r = client.post("/buyout", data={"player": mine.name, "team_code": blank})
+        assert toast_of(r).get("type") == "error", toast_of(r)
+        assert main.auction_state.teams[main.MY_TEAM].find_player(mine.name) is not None
+        assert len(main.auction_state.transaction_log) == before
+
+    def test_an_absent_team_is_still_the_analyzer_acting_on_bot(self, client):
+        import main
+
+        mine = a_buyout_candidate()
+        r = client.post("/buyout", data={"player": mine.name})
+        assert toast_of(r).get("type") == "success", toast_of(r)
+        assert main.auction_state.teams[main.MY_TEAM].find_player(mine.name) is None
+
     def test_it_offers_exactly_that_teams_eligible_set(self, client):
         """The set equality CLAUDE.md asks for, asserted on an OPPONENT.
 

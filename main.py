@@ -2217,6 +2217,16 @@ async def buyout(
     recorded leaves their cap wrong in every calculation the tool makes about
     them, the market ceiling included.
     """
+    # ABSENT means the Analyzer; BLANK means a form that lost its team, and must
+    # not mean BOT. FastAPI substitutes the default for both, so the only way to
+    # tell them apart is the raw field (Starlette caches the parsed form, so
+    # this re-reads nothing). Until 2026-09-22 `team_code=""` bought out BOT's
+    # player of that name with a success toast.
+    if not (await request.form()).get("team_code", MY_TEAM).strip():
+        return _toast(
+            _render(request, "partials/all_panels.html"),
+            "Buyout failed: no team was named", "error",
+        )
     # Capture player info before execute_buyout removes them. `.get`, because
     # an unknown code has to reach execute_buyout's own refusal rather than
     # KeyError-ing here — one definition of "which teams exist".

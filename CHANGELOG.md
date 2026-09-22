@@ -24,6 +24,25 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The roster-slot parity guard read one table on one panel, and the slot
+  docs claimed the last number is the holding.** Found by the 2026-09-22
+  grill. `TestTheRosterTableIsNotSilentlyOffset` counted cells against headers
+  on BOT's roster table only, so a `<td>` dropped from an opponent's rows or
+  from the Minors table survived the whole suite, browser tests included. It
+  is now a sweep over both tables, on BOT's panel and SRL's, after arranging
+  one row of every kind the template branches on — keeper, purchase, benched,
+  cap-counting minor and, on BOT's panel, a MILP suggested buy — and it
+  asserts each branch actually rendered, so a quiet pool cannot make it
+  vacuous. Four branch-specific dropped-cell mutants (Minors table, suggested
+  buys only, opponents only, bench rows only) all fail it. Separately,
+  `_roster_slots`' docstring, CLAUDE.md and the test module said the last
+  number in a position group is how many of that position the team holds.
+  That is true only until the first Bench click: `F1`..`F5` with a `BF1` is six
+  forwards, which is what `roster_needs` counts. They now say the last STARTER
+  number is how many start and the holding adds the group's bench labels; the
+  same places, and `shortcuts.js`, still wrote the bench labels as
+  `B1`..`B4`, which have read `BF1`..`BG4` since 2026-09-20.
+
 - **`tests/measure_replay.py` printed a headline its own fidelity check had
   invalidated, and exited 0.** Found by the 2026-09-22 grill. Re-run at HEAD
   over the 2026-09-13 draft it reported **47/139** picks capping a pool price

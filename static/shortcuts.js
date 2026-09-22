@@ -324,7 +324,7 @@ function sortTable(th) {
 /* Renumber the leading # cell of every visible row 1..N, for the Available
    Players table alone — which the tbody id below, not the column, is what
    decides. The team panel's roster table grew a `#` column of its own on
-   2026-09-20 holding lineup slots (F1/D1/B1, from main._roster_slots); those
+   2026-09-20 holding lineup slots (F1/D1/BF1, from main._roster_slots); those
    are labels rather than an ordinal sequence and renumbering them 1..N would
    destroy them. It is out of reach because its tbody carries no id, so do not
    relax the guard to "has a leading # cell".

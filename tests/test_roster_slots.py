@@ -8,8 +8,9 @@ never the running count beside the player.
 
 `main._roster_slots` labels each row `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for
 players who will start, `BF1`..`BG4` for benched ones, and nothing at all for a
-MILP suggested buy. The last number in a group is then literally how many of
-that position the team holds.
+MILP suggested buy. The last starter number in a group is how many of that
+position start; the holding adds the group's bench labels (`F1`..`F5` plus a
+`BF1` is six forwards), and the two agree until somebody is benched.
 
 The unit tests below drive the function directly because it is a pure pass over
 already-sorted rows; the endpoint tests check the column is actually wired to
@@ -22,7 +23,7 @@ import pytest
 
 import main
 from config import MY_TEAM
-from tests.helpers import a_roster_player, section_of
+from tests.helpers import a_roster_player, an_eligible_minor, assign, pool_top, section_of
 
 
 # --------------------------------------------------------------------------
@@ -287,22 +288,46 @@ class TestTheRosterTableIsNotSilentlyOffset:
     test edit.
     """
 
-    def test_every_row_has_a_cell_for_every_header(self, client):
-        table = _roster_table(client.get(f"/team-view/{MY_TEAM}").text)
-        head, body = table.split("</thead>", 1)
-        headers = len(re.findall(r"<th[\s>]", head))
-        assert headers, "the roster table rendered no headers at all"
+    @pytest.mark.parametrize("code", [MY_TEAM, "SRL"])
+    def test_every_row_of_every_table_has_a_cell_for_every_header(self, client, code):
+        """Both tables, both kinds of panel, and every row branch.
 
-        rows = re.findall(r"<tr\b.*?</tr>", body, re.S)
-        assert rows, "the roster table rendered no rows — this checks nothing"
-        for row in rows:
-            # Counted ONCE and reused: re-running the regex inside the f-string
-            # is how this message came to report 5 cells for an 8-cell row
-            # during a mutation check — the inline copy was escaped differently
-            # and matched only the bare `<td>`s, so the guard fired correctly
-            # and then described the wrong thing.
-            cells = len(re.findall(r"<td[\s>]", row))
-            assert cells == headers, (
-                f"{headers} headers but {cells} cells — a column is silently "
-                f"offset"
-            )
+        This read BOT's roster table alone until 2026-09-22, and the grill
+        found a cell dropped from an opponent's rows or from the Minors table
+        surviving the whole suite, browser tests included. So every table in the
+        panel is swept, on BOT's panel and an opponent's, after arranging one
+        row of each kind the template branches on: a keeper, a purchase
+        (`text-success`), a benched player, a minor that counts on the cap, and
+        — BOT only — a MILP suggested buy (`text-info`).
+        """
+        team = main.auction_state.teams[code]
+        assign(client, pool_top()[0], code, 1.0)
+        an_eligible_minor(code=code)
+        benched = next(p for p in team.keeper_players if not p.is_bench)
+        client.post("/toggle-bench", data={"team_code": code, "player_name": benched.name})
+        assert team.find_player(benched.name).is_bench
+
+        panel = section_of(client.get(f"/team-view/{code}").text, "team-panel")
+        tables = re.findall(r"<table\b.*?</table>", panel, re.S)
+        assert len(tables) == 2, f"expected the roster and Minors tables, found {len(tables)}"
+        seen = ""
+        for table in tables:
+            head, body = table.split("</thead>", 1)
+            headers = len(re.findall(r"<th[\s>]", head))
+            assert headers, "a table rendered no headers at all"
+            rows = re.findall(r"<tr\b.*?</tr>", body, re.S)
+            assert rows, "a table rendered no rows — this checks nothing"
+            for row in rows:
+                seen += row.split(">", 1)[0]
+                # Counted ONCE and reused: re-running the regex inside the
+                # f-string is how this message once reported 5 cells for an
+                # 8-cell row — the inline copy was escaped differently.
+                cells = len(re.findall(r"<td[\s>]", row))
+                assert cells == headers, (
+                    f"{headers} headers but {cells} cells — a column is silently "
+                    f"offset:\n{row[:200]}"
+                )
+        for marker in ("text-success", "opacity-50"):
+            assert marker in seen, f"no row carried {marker} — a branch went unchecked"
+        if code == MY_TEAM:
+            assert "text-info" in seen, "no suggested-buy row — a branch went unchecked"

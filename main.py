@@ -586,12 +586,17 @@ templates.env.globals["asset_version"] = _asset_version
 def _roster_slots(rows: list[dict]) -> list[dict]:
     """Label each team-panel roster row with its lineup slot, in display order.
 
-    `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for players who will start, `B1`..`B4`
-    for benched ones, and an EMPTY label for a MILP suggested-buy row. The last
-    number rendered in a position group is therefore literally how many of that
-    position the team holds, which is the question this column exists to answer
-    and which nothing on the panel answered before — `roster_needs` gives the
-    aggregate (`Needs: 3F · 1D`), never the running count beside the player.
+    `F1`..`F12`, `D1`..`D6`, `G1`..`G2` for players who will start, `BF1`..`BG4`
+    for benched ones (position letter, then one running bench number), and an
+    EMPTY label for a MILP suggested-buy row. The last STARTER number in a
+    position group is how many of that position start, and the position's
+    holding is that plus its bench labels — `F1`..`F5` with a `BF1` is six
+    forwards, which is what `roster_needs` counts. The two are the same number
+    until somebody is benched; this said "the last number is the holding" until
+    2026-09-22, which is false from the first Bench click. Either way it
+    answers what nothing on the panel answered before — `roster_needs` gives
+    the aggregate (`Needs: 3F · 1D`), never the running count beside the
+    player.
 
     Order is the caller's, not this function's: it must be applied AFTER
     `team_panel.html`'s `pos_rank` + points sort, because the number means "the
@@ -613,7 +618,7 @@ def _roster_slots(rows: list[dict]) -> list[dict]:
     the overflow would overwrite a decision that is theirs — `is_bench` is set
     through `/toggle-bench` and `TeamState.set_bench` already caps the bench at
     `BENCH_SIZE`. On a correctly-benched full roster the sequence lands exactly
-    on F1-12, D1-6, G1-2, B1-4 without any clamp.
+    on F1-12, D1-6, G1-2 and a bench numbered 1-4 without any clamp.
 
     A bench label carries its position too — `BF1`, `BD2` — while the NUMBER
     stays one running sequence across every position rather than restarting per

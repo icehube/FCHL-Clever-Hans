@@ -24,6 +24,19 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **`convert_legacy_players.py --nhl-teams X` crashed, and the default run
+  never reported its join.** Found by the 2026-09-22 grill. The flag is
+  `action="append"`, so it arrives as a list, and `main()` passed that list
+  to `os.path.exists` — a TypeError on every explicit `--nhl-teams`. The whole
+  report was also gated on the flag, so the default run, the one anybody makes,
+  filled the column from `DEFAULT_NHL_SOURCES` and printed nothing: the 162
+  players it left blank on the 2023 pool went unnamed, which is the reason the
+  report names them at all. Now every source is reported — found and used, or
+  not found and skipped — the filled count and every unresolved name print on
+  the default run, and a run with no source at all says every player will
+  price at `DEFAULT_TEAM_PROBABILITY`. Four in-process tests; restoring either
+  half of the bug fails them.
+
 - **The roster-slot parity guard read one table on one panel, and the slot
   docs claimed the last number is the holding.** Found by the 2026-09-22
   grill. `TestTheRosterTableIsNotSilentlyOffset` counted cells against headers

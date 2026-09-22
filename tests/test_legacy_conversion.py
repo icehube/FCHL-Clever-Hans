@@ -213,6 +213,52 @@ class TestTeamsTheLeagueDoesNotHave:
             assert str(len(names)) in r.stderr
 
 
+class TestTheNhlJoinIsReported:
+    """`main()` over the real legacy file, in process, for its stderr report.
+
+    `--nhl-teams` is `action="append"`, so the script receives a list, and it
+    passed that list to `os.path.exists` until 2026-09-22 — every explicit
+    `--nhl-teams` was a TypeError. The report was also gated on the flag, so the
+    default run said nothing about the clubs it could not fill.
+    """
+
+    def _run(self, tmp_path, capsys, *extra):
+        from convert_legacy_players import main as convert_main
+
+        rc = convert_main([str(LEGACY_CSV), str(tmp_path / "out.csv"), *extra])
+        return rc, capsys.readouterr().err
+
+    def test_an_explicit_source_runs_and_reports(self, tmp_path, capsys):
+        rc, err = self._run(tmp_path, capsys, "--nhl-teams", "data/players.csv")
+        assert rc == 0
+        assert "NHL TEAM: filled" in err and "from data/players.csv" in err
+
+    def test_the_default_run_reports_and_names_what_it_left_blank(self, tmp_path, capsys):
+        rc, err = self._run(tmp_path, capsys)
+        assert rc == 0
+        assert "NHL TEAM: filled" in err
+        with open(tmp_path / "out.csv") as f:
+            blank = [r["PLAYER"] for r in csv.DictReader(f) if not r["NHL TEAM"]]
+        assert blank, "the legacy pool has players no donor pool knows"
+        assert f"unresolved, left blank: {blank[0]}" in err
+
+    def test_a_missing_source_is_named_and_the_rest_still_used(self, tmp_path, capsys):
+        rc, err = self._run(
+            tmp_path, capsys,
+            "--nhl-teams", str(tmp_path / "gone.csv"), "--nhl-teams", "data/players.csv",
+        )
+        assert rc == 0
+        assert "gone.csv not found" in err
+        assert "from data/players.csv" in err
+
+    def test_no_source_at_all_says_every_player_prices_at_the_default(
+        self, tmp_path, capsys
+    ):
+        rc, err = self._run(tmp_path, capsys, "--nhl-teams", str(tmp_path / "gone.csv"))
+        assert rc == 0
+        assert "DEFAULT_TEAM_PROBABILITY" in err
+
+
 class TestTheConvertedPoolIsDraftable:
     def test_the_committed_file_matches_a_fresh_conversion(self, converted):
         """So the artifact cannot drift from the script that derives it."""

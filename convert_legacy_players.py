@@ -370,15 +370,25 @@ def main(argv: list[str] | None = None) -> int:
             )
         rows = list(reader)
 
+    sources = args.nhl_teams or list(DEFAULT_NHL_SOURCES)
     converted, skipped, unresolved = convert_all(
-        rows, league_team_codes(args.teams), args.nhl_teams or DEFAULT_NHL_SOURCES
+        rows, league_team_codes(args.teams), sources
     )
     biddable = _require_biddables(converted)
 
-    if args.nhl_teams and os.path.exists(args.nhl_teams):
+    # `--nhl-teams` is `action="append"`, so it arrives as a LIST. This passed
+    # that list to `os.path.exists` until 2026-09-22 — a TypeError on any
+    # explicit `--nhl-teams` — and gated the whole report on the flag, so the
+    # DEFAULT run, which is the one anybody actually makes, filled the column
+    # and printed nothing about it: 162 blank clubs on the 2023 pool, unnamed.
+    present = [path for path in sources if os.path.exists(path)]
+    for path in sources:
+        if path not in present:
+            print(f"NHL TEAM: {path} not found — skipped", file=sys.stderr)
+    if present:
         filled = len(converted) - len(unresolved)
         print(
-            f"NHL TEAM: filled {filled}/{len(converted)} from {args.nhl_teams}",
+            f"NHL TEAM: filled {filled}/{len(converted)} from {', '.join(present)}",
             file=sys.stderr,
         )
         # Named, not just counted: each is either two real players sharing a name
@@ -386,10 +396,10 @@ def main(argv: list[str] | None = None) -> int:
         # does not cover, which is a fixable gap. A bare count hides which.
         for name in unresolved:
             print(f"    unresolved, left blank: {name}", file=sys.stderr)
-    elif args.nhl_teams:
+    else:
         print(
-            f"NHL TEAM: {args.nhl_teams} not found — left blank, so every player "
-            f"will price at DEFAULT_TEAM_PROBABILITY",
+            "NHL TEAM: no source found — left blank, so every player will price "
+            "at DEFAULT_TEAM_PROBABILITY",
             file=sys.stderr,
         )
 

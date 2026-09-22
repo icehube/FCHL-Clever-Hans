@@ -85,11 +85,11 @@ def _default_state_dir() -> str:
     alternate pool against `data/state/` would load the real draft's JSON,
     backfill it from the wrong CSV, and then save over it. pytest did exactly
     that until `conftest.py` started redirecting the directory.
+
+    The derivation lives in `data_loader.default_state_dir` so that
+    `bake_roster_state.py` can share it without importing the web app.
     """
-    if data_loader.PLAYERS_CSV == data_loader.DEFAULT_PLAYERS_CSV:
-        return "data/state"
-    stem = os.path.splitext(os.path.basename(data_loader.PLAYERS_CSV))[0]
-    return f"data/state-{stem}"
+    return data_loader.default_state_dir()
 
 
 STATE_DIR = os.environ.get("FCHL_STATE_DIR") or _default_state_dir()

@@ -107,7 +107,7 @@ All state-modifying endpoints trigger: update state -> recompute market prices -
 - **An NHL club badge is built only by `main._nhl_logo_src`** (the `nhl_logo_src` filter) and rendered only by `templates/macros/nhl.html`. Same rule as `_dom_id`, and it was learned the same way: the assets are named by the **canonical** tricode, `config.NHL_TEAM_ALIASES` declares `{"UTH": "UTA"}`, and the file on disk was `UTH.svg` — named after the *alias* — while six templates pasted the raw CSV value into the path. So which pool you loaded decided whether Utah had a logo: the 2025-26 `players.csv` spelled it `UTH` on 78 rows and worked by accident, `players-25.csv` spells it `UTA` on 30 and 404'd on every one. (The 2026-27 `players.csv` spells it `UTA` on 37, so the accident is gone and the canonical name is what the file now says.) The macro also owns the blank guard, and the 2026-09-15 refresh made it matter far more: 3 rows of `players.csv`, 3 of `players-25.csv` and **162** of `players-23-converted.csv` have no club, up from 7, because the legacy NHL join lost most of its donor. **A blank club is two different things**, and `convert_fchl_online.no_nhl_club` now reports them at conversion time rather than letting them collapse: a club the odds file does not know (what the 162 are), and the export's `UFA` placeholder, which is the league saying **this player has no NHL contract**. The second is a roster decision, not a data problem — a cap-counting player who will not play a game — and it was silent until 2026-09-17, when the one such row (group 3, $2.3M, on an active roster) had to be found by hand. `tests/test_fchl_online_conversion.py` now fails on a new one, scoped to `data/players.csv` alone because only the live pool is built from an export carrying that signal. `/nhl_logos/.svg` is a broken image plus a 404. `UFA.svg` is the FCHL placeholder the 2025-26 `players.csv` carried on 9 rows — no pool carries it today, since `convert_fchl_online.py` blanks it — and `ARI.svg` is a retired club; neither is cruft. Two guards, and they catch different things: `test_no_template_builds_the_path_itself` stops the six sites drifting back one at a time, and `TestLiveDataInvariants::test_every_nhl_club_in_every_pool_has_a_logo` is parametrized over **every** `data/players*.csv`, so a refresh that respells a club fails at pytest rather than on screen. The `pre-auction-check` runbook could not have caught it: it hardcoded `data/players.csv` and compared raw spellings, which is the same mistake the templates made.
 
 - **Atomic saves**: `_save_state()` writes to `.tmp` then `os.replace()` (POSIX atomic). Previous state kept as `.backup`.
-- **Startup recovery**: `lifespan` walks current → `.backup` → fresh, and a file that fails to **parse** is renamed `.corrupt` rather than left in place — otherwise the next save rotates it over the good backup and both copies are gone. `_load_saved_state` catches broad `Exception` on purpose: at startup of a tool that may be four hours into a live auction, degrading beats failing to boot. **Only the parse decides usability.** The three `_backfill_*` calls each get their own net and are never fatal — none is load-bearing for the draft record, and folding them into the parse net meant one raise on a legacy snapshot renamed a byte-perfect draft `.corrupt` and started fresh, silently. Any degraded startup sets `_startup_warning`, which `_context` passes to `base.html` as a banner **outside `#app`** (a panel swap replaces `#app`, so an inside banner would vanish on the first pick); `POST /reset` clears it. Pinned by `tests/test_crash_recovery.py`. **On draft day**: the backup is one save behind by construction, so a recovery costs the most recent transaction — check the last pick is still there and re-enter it if not.
+- **Startup recovery**: `lifespan` walks current → `.backup` → fresh, and a file that fails to **parse** is renamed `.corrupt` rather than left in place — otherwise the next save rotates it over the good backup and both copies are gone. `_load_saved_state` catches broad `Exception` on purpose: at startup of a tool that may be four hours into a live auction, degrading beats failing to boot. **Only the parse decides usability.** The four `_backfill_*` calls each get their own net and are never fatal — none is load-bearing for the draft record, and folding them into the parse net meant one raise on a legacy snapshot renamed a byte-perfect draft `.corrupt` and started fresh, silently. Any degraded startup sets `_startup_warning`, which `_context` passes to `base.html` as a banner **outside `#app`** (a panel swap replaces `#app`, so an inside banner would vanish on the first pick); `POST /reset` clears it. Pinned by `tests/test_crash_recovery.py`. **On draft day**: the backup is one save behind by construction, so a recovery costs the most recent transaction — check the last pick is still there and re-enter it if not.
 - **Two banners, not one.** `#startup-warning` describes *this boot* and `/reset` clears it; `#data-warning` describes *the CSV* (duplicate names the loader had to rename) and survives a reset, because the renames do. Merging them breaks both directions: a permanent data note turns the degraded-boot alarm into wallpaper — which is exactly what `test_the_happy_path_shows_no_banner` guards — and routing the renames through `_warn_at_startup` would make them vanish on a reset that repopulates them. `_data_warning()` composes at render time rather than being pushed at startup, so it always describes the pool actually loaded; booting onto a *saved* state says nothing, correctly. It reads `data_loader.loaded_disambiguations`, written **only** by `build_initial_state`, not `last_disambiguations`, which any `load_players` caller resets — a test fixture or the pre-auction runbook loading a different CSV would otherwise blank the banner for whatever ran next.
 - **Undo restores by enumeration, not by a list.** `rollback_to` (which `restore_snapshot` delegates to) loops over `fields(self)` and copies everything except `_snapshots` — never re-introduce hand-written `self.X = restored.X` lines, because a field added to `AuctionState` would silently stop being restored, on the one operation with nothing behind it. The `_snapshots` skip is load-bearing: snapshots are written with `include_snapshots=False`, so the restored chain is always empty and copying it makes `Ctrl+Z` work exactly once per session. `to_json`/`from_json` are still hand-written, so two guards in `tests/test_state.py::TestSnapshotFieldsCannotDrift` cover them — one structural (fields == JSON keys), one behavioural (every field survives a round trip); they catch different mutants and neither is redundant.
 - **A new mutating `@app.post` either snapshots or joins `NO_SNAPSHOT_NEEDED`** in `tests/test_state.py::TestEveryMutatingPostTakesASnapshot`, in the same commit, with the reason. It walks `main.py`'s ast, so forgetting fails the suite instead of surfacing as a wrong `Ctrl+Z` four hours into a draft. Two shapes count and they live in two constants, because the ast walk matches them differently: `save_snapshot()` (an `auction_state.method()` call) and `with _undoable(rollback=...)` (a bare name). `capture_snapshot()` deliberately does not, because capturing without committing snapshots nothing — and since 2026-08-20 neither does `commit_snapshot()`, whose only caller in `main.py` is `_undoable`: accepting the name would accept a hand-rolled pairing that an endpoint can get half right. If a fifth endpoint ever needs the raw pair, put `commit_snapshot` back in `SNAPSHOTTING_CALLS` and say why the context manager did not fit.
@@ -279,30 +279,41 @@ move together from the pricer repo. Then:
 
 **Preparing a baseline that survives `/reset`.** `POST /reset` rebuilds every
 team from `data/players.csv` + `data/fchl_teams.json` and reads the saved state
-not at all, so pre-draft prep — recalling a prospect, demoting a keeper, entering
-a cap penalty — is destroyed by the first reset after it. None of the three
-`_backfill_*` helpers saves it: they fill a blank NHL club, set `is_keeper`, and
-copy a logo. **Nothing moves a player between the roster and the minors.** So the
-baseline lives in the data files, and `bake_roster_state.py` puts it there:
+not at all, so pre-draft prep — recalling a prospect, demoting a keeper — is
+destroyed by the first reset after it. None of the four `_backfill_*` helpers
+saves it: they fill a blank NHL club, set `is_keeper`, copy a logo, and repair a
+legacy snapshot's model inputs. **Nothing moves a player between the roster and
+the minors.** So the baseline lives in the data files, and `bake_roster_state.py`
+puts it there:
 
-1. Prep in the UI — recalls, demotions, penalties.
+1. Prep in the UI — recalls and demotions.
 2. `.venv/bin/python bake_roster_state.py` — dry run, prints the diff.
 3. Read it, then re-run with `--write`, `git diff`, and commit.
 4. Test freely. `/reset` now returns to the prepared baseline.
 
-It carries **only** which list a player is in (`STATUS`) and `TeamState.penalties`,
-and it **refuses** on a state holding transactions or acquired players rather than
-writing draft picks into the pool file as keepers. It never adds or deletes a row:
-dropping a player from the league — the no-NHL-contract case, where the CBA
-charges no buyout penalty because there is no contract to buy out — is a
-deliberate hand edit, and deleting his row is the only way to say "gone this
-season". Two things it cannot carry and reports every run: `is_done`, and bench
-flags, which have no column and cost nothing — **`is_bench` reaches no engine
-module**, `lineup_points` scores the best 12F/6D/2G from every roster player
-regardless, and none of `total_salary`/`roster_count`/`spendable_budget`/
-`physical_max_bid` reads it. Do **not** re-run `convert_fchl_online.py` over a
-baked file: it derives `STATUS` from the contract group and would overwrite every
-placement.
+It carries **exactly one thing**, which list a player is in (`STATUS`), and it
+**refuses** on a state holding transactions or acquired players rather than
+writing draft picks into the pool file as keepers; a refusal exits 1 with the
+reason on stderr and both files byte-identical. **Penalties and salaries are
+hand edits of the data files** — `penalty` in `fchl_teams.json`, `SALARY` in the
+pool — and the bake only REPORTS where the state disagrees, with both figures.
+It carried penalties until 2026-09-22 and that half could only do harm: no
+pre-draft UI action produces a penalty it would accept (`execute_buyout` logs a
+transaction), so a disagreement meant a state older than a hand edit, and baking
+it reverted the edit — SHF's $2.8M went to $0.0M. `fchl_teams.json` is also
+shared by every pool while `players.csv` is not. Its defaults follow the server's
+(`FCHL_PLAYERS_CSV`, `FCHL_STATE_DIR`, via `data_loader.default_state_dir`), and
+it writes `.tmp` then `os.replace`, having rendered the whole file first. It
+never adds or deletes a row: dropping a player from the league — the
+no-NHL-contract case, where the CBA charges no buyout penalty because there is
+no contract to buy out — is a deliberate hand edit, and deleting his row is the
+only way to say "gone this season". Two things it cannot carry and reports every
+run: `is_done`, and bench flags, which have no column and cost nothing —
+**`is_bench` reaches no engine module**, `lineup_points` scores the best
+12F/6D/2G from every roster player regardless, and none of
+`total_salary`/`roster_count`/`spendable_budget`/`physical_max_bid` reads it. Do
+**not** re-run `convert_fchl_online.py` over a baked file: it derives `STATUS`
+from the contract group and would overwrite every placement.
 
 Any *other* failure is a real one. `tests/test_data_loader.py` is split three
 ways so this holds: loader **rules** run against `tests/fixtures/players_sample.csv`

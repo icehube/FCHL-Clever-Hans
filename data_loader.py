@@ -29,6 +29,24 @@ _PLACEHOLDER_TEAMS = {"UFA", "RFA"}
 PLAYERS_CSV = os.environ.get("FCHL_PLAYERS_CSV", "data/players.csv")
 DEFAULT_PLAYERS_CSV = "data/players.csv"
 
+
+def default_state_dir() -> str:
+    """Where the saved draft for the pool in `PLAYERS_CSV` lives by default.
+
+    `data/state` for the default pool and `data/state-<stem>` for any other, for
+    the reason `main._default_state_dir` records. `FCHL_STATE_DIR` is applied by
+    each caller, not here, so this stays the derivation alone. It lives here
+    rather than in `main.py` so a command-line tool can ask the same question
+    without importing the web app — `bake_roster_state.py` hardcoded
+    `data/state` and `data/players.csv` until 2026-09-22, which under
+    `FCHL_PLAYERS_CSV` aimed it at different files than the server was using.
+    """
+    if PLAYERS_CSV == DEFAULT_PLAYERS_CSV:
+        return "data/state"
+    stem = os.path.splitext(os.path.basename(PLAYERS_CSV))[0]
+    return f"data/state-{stem}"
+
+
 # Renames the most recent load_players() applied: original name -> [new names].
 # Module-level rather than a third element of the return tuple, because both
 # callers unpack positionally and neither wants it. Reset on every call.

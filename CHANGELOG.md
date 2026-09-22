@@ -24,6 +24,62 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **`bake_roster_state.py` could revert a hand-entered penalty, truncate the
+  live pool, and bake a different pool's state than the server loads.** Found
+  by the 2026-09-22 grill; four defects in one script, and the first is a
+  design error rather than a bug, so the fix is a narrower contract.
+
+  **The penalty half could only ever do harm, and it is gone.** It wrote
+  `TeamState.penalties` into `fchl_teams.json`. But no pre-draft UI action
+  produces a penalty the bake would accept: the one real writer is
+  `execute_buyout`, which logs a transaction, and `require_pre_draft` refuses
+  any state holding one. So a state disagreeing with the teams file about a
+  penalty was always a state OLDER than a hand edit of it, and baking it
+  reverted the edit. Measured on copies: a prep state saved before SHF's $2.8M
+  was entered by hand planned `SHF $2.8M -> $0.0M` beside the three recalls it
+  was run for. And `fchl_teams.json` is shared by every pool while
+  `players.csv` is not, so an alternate pool's state, baked into a copy of its
+  own pool, planned JHN and LGN at $0.3M and SHF back to $0.0M — the live
+  draft's teams file rewritten from a practice pool. The bake now carries
+  exactly one thing, `STATUS`, and REPORTS every penalty disagreement with
+  both figures, reading the teams file and never opening it for writing.
+  Salaries get the same treatment for the same reason: `/adjust-salary`
+  correcting an export error on a keeper exited 0 and printed nothing, so the
+  correction vanished at the next reset without a word. It is now named with
+  both figures; it is not carried, because a UI correction and a hand edit of
+  `SALARY` are indistinguishable from the state.
+
+  **The write truncated the pool before it knew it could finish.** The file
+  was opened `"w"` and written row by row, so the first row `DictWriter` could
+  not serialise raised after the header was on disk: a trailing comma parses
+  with a `None` key, and one of them took the live pool from 53313 bytes to
+  274 — a header and five rows, which on screen looks exactly like a finished
+  draft. Now a ragged row is refused by line number before anything is
+  planned, the whole file is rendered in memory first, and it lands through
+  `.tmp` + `os.replace`, the pattern `main._save_state` uses.
+
+  **The defaults ignored the pool selection.** `--state` and `--players` were
+  hardcoded to `data/state/auction_state.json` and `data/players.csv`, so under
+  `FCHL_PLAYERS_CSV` the bake read different files than the server it was
+  meant to mirror. The derivation `main._default_state_dir` owned moved to
+  `data_loader.default_state_dir` so a command-line tool can share it without
+  importing the web app, and the defaults are read at call time through the
+  same two variables the server reads.
+
+  Refusals now print `refused: <reason>` on stderr and exit 1 instead of a
+  traceback; every refusal test still asserts both files byte-identical.
+  `TestPenalties` (three tests asserting the write) became
+  `TestPenaltiesAreReportedNeverWritten`, the no-`penalty`-line refusal went
+  with the line rewrite it guarded, and new tests cover the salary report on
+  both lists, the ragged-row refusal, a failing `os.replace`, ordinal and club
+  suffixed name pairs mapping back row by row, a blank-`FCHL TEAM` row, the
+  bench and `is_done` reports, and both env overrides. Mutation-checked: 13 of
+  14 mutants die. The survivor renders after the dry-run exit instead of
+  before it, and is equivalent while ragged rows are refused up front — a
+  ragged row is the only thing `DictWriter` rejects in a file of strings.
+  CLAUDE.md's baseline section and the bake's docstring also said
+  "three `_backfill_*` helpers"; there are four.
+
 - **The defenceman Elias Pettersson carried the forward's projection: 69
   points against the 10 DobberHockey gives him.** Found by the 2026-09-22
   grill of the 2026-09-11..20 batch, and the most expensive thing it found:

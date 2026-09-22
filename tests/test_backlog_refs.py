@@ -78,13 +78,21 @@ def _anchor_lines(source: str, anchor: str) -> list[int]:
 
 
 def _resolve(path: str) -> Path | None:
-    """Repo-relative path, or a unique basename match under the repo."""
+    """Repo-relative path, or a unique basename match under the repo.
+
+    The basename search skips `.claude/` as well as the virtualenv and git
+    dirs, because agents run with `isolation: "worktree"` check a full copy of
+    the repo out under `.claude/worktrees/`: while one exists every bare
+    `main.py:NNN` matches twice, resolves to nothing, and a correct reference
+    fails (hit during the 2026-09-22 grill). A reference INTO `.claude/` is
+    written repo-relative and takes the direct branch above.
+    """
     direct = REPO / path
     if direct.exists():
         return direct
     matches = [
         p for p in REPO.rglob(Path(path).name)
-        if ".venv" not in p.parts and ".git" not in p.parts
+        if not {".venv", ".git", ".claude"} & set(p.relative_to(REPO).parts)
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -282,3 +290,19 @@ def test_the_anchor_rule_can_actually_fail():
     for blank in ("   ", "``", " ` ` "):
         with pytest.raises(AssertionError, match="is nothing once"):
             test_reference_resolves("self-test", path, line, blank)
+
+
+def test_a_worktree_copy_does_not_make_a_basename_ambiguous(tmp_path, monkeypatch):
+    import sys
+
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "thing.py").write_text("")
+    copy = tmp_path / ".claude" / "worktrees" / "agent-x" / "pkg"
+    copy.mkdir(parents=True)
+    (copy / "thing.py").write_text("")
+    (tmp_path / ".claude" / "rules").mkdir()
+    (tmp_path / ".claude" / "rules" / "a-rule.md").write_text("")
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+
+    assert _resolve("thing.py") == tmp_path / "pkg" / "thing.py"
+    assert _resolve(".claude/rules/a-rule.md") == tmp_path / ".claude" / "rules" / "a-rule.md"

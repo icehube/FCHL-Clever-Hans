@@ -128,7 +128,8 @@ else:
 ```
 
 A blank `NHL TEAM` is not a gap — `templates/macros/nhl.html` draws nothing for
-those. `UFA.svg` is the FCHL placeholder `players.csv` carries on 9 rows, and
+those. `UFA.svg` is the FCHL placeholder the 2025-26 `players.csv` carried on 9 rows
+(no pool does today — the converters blank it), and
 `ARI.svg` is a retired club kept because deleting it buys nothing; neither is
 cruft to clean up.
 

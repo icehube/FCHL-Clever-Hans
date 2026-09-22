@@ -24,6 +24,47 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Eleven documentation claims the 2026-09-22 grill found false, and the
+  reference guard's blind spot for worktrees.** Each was re-measured rather
+  than reworded:
+  - "`main.py` hardcodes `STATE_DIR` with no env override" — in the
+    `isolated_state_dir` BACKLOG entry, CLAUDE.md's layout bullet and three
+    `tests/measure_*.py` docstrings. `FCHL_STATE_DIR` landed in `3eb6ed9` on
+    2026-09-07, eight days before the incident that entry records. The entry
+    is rewritten, and its proposed guard is marked as one that would not have
+    caught the incident: that script loaded the default pool over the default
+    state, so the CSVs agreed.
+  - `data-formats.md`'s "166 of 170 MINOR rows are A–E" (the 2025-26 file;
+    today 163 of 167, the rest `F`) and "no A–F player is a starter" (true as
+    converted, false since the `c27ed02` bake made three BOT prospects
+    starters). This also falsified "every buyout-ineligible contract is in the
+    minors by construction".
+  - Present-tense `UTH on 78 rows` / `UFA on 9 rows` / `705-row` in `main.py`,
+    two test docstrings, the pre-auction runbook and the `_context` BACKLOG
+    entry. These describe the 2025-26 pool; on the 2026-27 pool it is 0, 0 and
+    678.
+  - "The penalty sits on BOT's cap", in CLAUDE.md and `search_results.html`.
+    It sits on whichever team bought him out, since 2026-09-12.
+  - "The reconstructed ceiling rises at four points", in `measure_replay.py`,
+    a test docstring and the 2026-09-13 entry. Re-run at `bb8850a`, it rises at
+    **three** (picks 115, 120, 122), and the rise at 120 follows three
+    move-to-minors records and no team-done at all.
+  - `.gitignore` said the converter's docstring says where the paid workbook
+    comes from; it names only the path.
+  - The BACKLOG count prose still said thirteen after two entries landed
+    beneath it.
+
+  `tests/test_backlog_refs.py::_resolve`'s basename fallback now skips
+  `.claude/`: while an `isolation: "worktree"` agent's checkout exists there,
+  every bare `main.py:NNN` matched twice and failed a correct reference. That
+  is pinned by a test with a planted worktree copy; the mutant that drops the
+  exclusion fails it. Re-anchoring for this batch also found three references
+  that stayed green while pointing at the wrong line (two `_search_rows`
+  references on a docstring and a comment, one `buyout` reference). The guard
+  checks only the symbol's span, and the #13/#15 commits had re-anchored only
+  its failures, so CLAUDE.md's re-anchor rule now says every reference into a
+  shifted file.
+
 - **The odds footer that names default-priced players left out the ones with
   no NHL club.** Found by the 2026-09-22 grill. `_get_team_probability("")`
   falls through to `DEFAULT_TEAM_PROBABILITY` exactly as an unknown club does,
@@ -161,8 +202,8 @@ rediscover the same non-problem.
   orders, buyout, unknown type). Nine mutants, nine killed. The rules file's
   "at most 5 of ~580 pool prices at once" at the 1.77x scale was also wrong
   about the denominator: the 5 was at pick 139 against 511 players, and 581 is
-  the pool at the first capped pick; the 2026-09-13 entry below still carries
-  the old figure as it was published.
+  the pool at the first capped pick; the 2026-09-13 entry below keeps the
+  figure as it was published, with the correction beside it.
 
 - **Seven guards had been skipping since the 2026-09-15 refresh, and three
   mutants survived because no pool supplied their subject.** Found by the
@@ -342,6 +383,25 @@ rediscover the same non-problem.
   state in `test_nomination.py::TestBothPricesReachThePanel`, and
   `_scenario_drained_late_draft`'s docstring no longer promises a pick.
 
+
+
+### Investigated
+
+- **The 2026-09-07 "15 corrupted player names" entry no longer describes any
+  pool in the repo, and was closed with no code change.** It recorded two
+  careless find-and-replaces in `data/players.csv`: a case-insensitive `ARI` ->
+  `UTH` that hit the substring inside seven names (`Eetu LuostUTHnen`), and `-`
+  -> `0` in eight more (`Oliver Ekman0Larsson`), plus 9 rows with the FCHL
+  placeholder `UFA` in the NHL TEAM column and a possible duplicated Ryan
+  O'Reilly. It was deferred on the grounds that the file is regenerated before
+  every draft and the fix belonged upstream. The 2026-09-15 refresh was that
+  regeneration: `players.csv` is now built by `convert_fchl_online.py` from the
+  league's own export, which carries none of the damage. Measured 2026-09-22
+  over all four `data/players*.csv`: **zero** `UTH`-inside-a-name, **zero**
+  letter-digit-zero-letter names, **zero** `UFA` NHL clubs, and exactly one
+  Ryan O'Reilly per pool. `normalize_name` and the header search keep folding
+  both patterns, because the next export could reintroduce them, which is also
+  why CLAUDE.md's search bullet still describes the digit-zero case.
 
 ## [2026-09-20]
 
@@ -879,8 +939,11 @@ what the data was doing for it.
   - **The change log is not optional and omitting it fails silently.**
     `team-done` moves teams in and out of the set the ceiling reads — the
     2026-09-13 draft flipped it 19 times, four of them back to *still
-    drafting*, which is why the reconstructed ceiling rises at four points — and
-    `move-to-minors` changes `total_spots_remaining`, hence `physical_max_bid`.
+    drafting* — and `move-to-minors` changes `total_spots_remaining`, hence
+    `physical_max_bid`. (This said the un-dones made the reconstructed ceiling
+    rise "at four points". Re-measured by the 2026-09-22 grill at `bb8850a`: it
+    rises at **three**, picks 115, 120 and 122, and the one at 120 follows
+    three move-to-minors records and no team-done at all.)
     Transactions alone give a different ceiling and no error.
   - **Descriptions are parsed, which couples the file to `main._log_change`'s
     wording.** `ChangeRecord` has no player field; the name exists only inside a
@@ -951,7 +1014,8 @@ what the data was doing for it.
   the live `players.csv`'s **$11.36M** (p99 $5.00M against $6.76M, 324 of 705
   players with a lag against none). Scaling every model price by 1.77x to match
   that top, the ceiling would have capped something on **32 of 139** picks
-  (first at 69) — but at most **5 of ~580** pool prices at once. So the
+  (first at 69) — but at most **5 of ~580** pool prices at once (corrected
+  2026-09-22: the 5 was at pick 139, against 511 players). So the
   magnitude survives the compression, which is what makes the decision safe on a
   rehearsal pool.
 
@@ -3798,7 +3862,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1556 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1559 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -3903,7 +3967,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1556 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1559 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

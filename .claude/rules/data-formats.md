@@ -155,17 +155,21 @@ players**, which on screen is indistinguishable from a finished draft.
 no biddables. It synthesizes `GROUP` from team + status — `UFA -> 3`,
 `RFA -> RFA2`, `MINOR -> A`, otherwise `3`. `MINOR -> A` is the consequential
 one: it keeps those salaries **off cap** and out of buyout eligibility, matching
-the current file, where **166 of 170** MINOR rows are `A`-`E` (the other 4 are
-`F`, which behaves identically — it is in none of `RFA_GROUPS`,
-`MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`). On the 2026-27 file the match
-is exact rather than approximate, because STATUS is **derived** from the
-contract group there (owner decision 2026-09-15: `2`/`3` -> `START`, `A`-`F` ->
-`MINOR`), so no group-2/3 player is a minor and no `A`-`F` player is a starter.
-Two consequences worth knowing: the league's cap-used figure is understated,
-measured at $20.7M against the hand-maintained 2025-26 file (8.9% of rows
-wrong); and every buyout-INELIGIBLE contract is now in the minors by
-construction, which is why `test_trade_buyout_undo.py::_ineligible` searches
-`all_players` rather than `roster_players`. Rows on a team code
+the hand-maintained 2025-26 file it was measured against, where **166 of 170**
+MINOR rows were `A`-`E` (the other 4 were `F`, which behaves identically — it
+is in none of `RFA_GROUPS`, `MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`). On
+the 2026-27 file STATUS is **derived** from the contract group instead (owner
+decision 2026-09-15: `2`/`3` -> `START`, `A`-`F` -> `MINOR`), so **as
+converted** no group-2/3 player is a minor and no `A`-`F` player is a starter.
+**The bake then moves players between the lists, so only the first half still
+holds on the live file.** Re-measured 2026-09-22: 167 MINOR rows, 163 `A`-`E`
+and 4 `F`, none in group 2/3 — and **three** `A`-`F` starters, the BOT
+prospects recalled in the `c27ed02` bake. Two consequences worth knowing: the
+league's cap-used figure is understated, measured at $20.7M against the
+hand-maintained 2025-26 file (8.9% of rows wrong); and a buyout-INELIGIBLE
+contract can sit on either list — in the minors by construction, on the active
+roster once baked there — which is why `test_trade_buyout_undo.py::_ineligible`
+searches `all_players` rather than `roster_players`. Rows on a team code
 `fchl_teams.json` does not have are held back and printed, rather than being
 swallowed by `build_initial_state` (which ignores unknown codes in silence).
 

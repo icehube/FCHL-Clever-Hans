@@ -6,8 +6,9 @@ wide, and by how much" so a layout fix targets the right thing. The 2026-08-08
 diagnosis of the off-screen team panel named `#bid-limits` as the forcer and
 proposed a fix for it; running this is what showed the forcer is somewhere else.
 
-State safety: `main.py` hardcodes `STATE_DIR = "data/state"` with no env
-override, so importing and serving the app writes the OPERATOR'S state. This
+State safety: `main.STATE_DIR` defaults to `data/state`, the OPERATOR'S live
+draft, and only `FCHL_STATE_DIR` moves it — which nothing sets for a script, so
+importing and serving the app writes that state. This
 redirects `main.STATE_DIR` to a temp dir before the app is imported anywhere
 else, exactly as `tests/conftest.py::isolated_state_dir` does — which is what
 makes the `POST /reset` below safe. Never remove that redirect to "just point it

@@ -131,10 +131,13 @@ def load_events(path: Path) -> list[TransactionRecord | ChangeRecord]:
     `team-done` moves a team in and out of the set `compute_market_ceiling`
     reads, so a reconstruction without it holds a finished team's dead budget in
     the ceiling for the rest of the draft — and the 2026-09-13 draft flipped
-    that switch 19 times, four of them back to still-drafting, which is why the
-    reconstructed ceiling RISES at four points. `move-to-minors` changes
-    `total_spots_remaining` and therefore `physical_max_bid`, which is the
-    ceiling's only input.
+    that switch 19 times, four of them back to still-drafting. `move-to-minors`
+    changes `total_spots_remaining` and therefore `physical_max_bid`, which is
+    the ceiling's only input. Between them they are why the reconstructed
+    ceiling RISES, which it does at three picks (115, 120, 122 at `bb8850a`):
+    two follow an un-done, and the one at 120 follows three move-to-minors
+    records and no team-done at all. The other two un-dones raised nothing,
+    one of them reversed before the next pick.
 
     Parsed through `state`'s own `_from_dict` helpers rather than by reading the
     keys here: the same rule `measure_spend.py` records, and a hand-copied key

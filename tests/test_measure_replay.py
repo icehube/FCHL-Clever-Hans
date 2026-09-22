@@ -355,9 +355,9 @@ class TestTheChangeLogIsNotOptional:
         assert [r.ceiling for r in rows] == [3.0, 1.0]
 
     def test_marking_a_team_still_drafting_puts_it_back(self):
-        """Four of the draft's 19 team-done records were un-dones, which is why
-        the reconstructed ceiling rises at four points rather than only falling.
-        A parser reading 'marked as' and stopping would miss the direction."""
+        """Four of the draft's 19 team-done records were un-dones, and two of
+        the reconstructed ceiling's three rises follow one. A parser reading
+        'marked as' and stopping would miss the direction."""
         prices = {"Sample One": 0.5, "Sample Two": 0.5}
         state = _state(_pool(**prices), _team("AAA", 5.0), _team("BBB", 3.0))
         state.teams["BBB"].is_done = True

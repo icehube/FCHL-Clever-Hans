@@ -62,8 +62,9 @@ not been swept is not yet known to be correct.
 State safety: this imports `scenarios`, `optimizer` and `market` and NOT `main`,
 which is what makes a `STATE_DIR` redirect unnecessary — `scenarios.load` builds
 a state and never saves. That is asserted below rather than assumed, because
-`main.py` hardcodes `STATE_DIR = "data/state"` with no env override, so anything
-that imports and drives the app writes the OPERATOR'S state. If a future edit
+`main.STATE_DIR` defaults to the OPERATOR'S live `data/state` unless
+`FCHL_STATE_DIR` is set, so anything that imports and drives the app from a
+script writes that state. If a future edit
 here needs `main`, the redirect goes in first, exactly as `measure_ceiling.py`
 and `measure_layout.py` do.
 
@@ -107,7 +108,7 @@ from state import AuctionState, Player, TeamState, lineup_points
 from tests.helpers import set_headroom
 
 assert "main" not in sys.modules, (
-    "measure_marginal imported main, which hardcodes STATE_DIR to the operator's "
+    "measure_marginal imported main, whose STATE_DIR defaults to the operator's "
     "real state. Redirect main.STATE_DIR to a temp dir before anything touches "
     "it, the way measure_ceiling.py does, or drop the import."
 )

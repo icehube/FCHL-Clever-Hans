@@ -43,8 +43,9 @@ Thumbs.db
 # ignored anyway — it is a 1.3MB paid third-party file, the converter is run
 # once a season by hand, and its OUTPUT is what the repo needs to carry. The
 # league's own roster export beside it is committed, because that half is ours.
-# So a `players.csv` rebuild needs the workbook fetched again; the converter's
-# docstring says where from.
+# So a `players.csv` rebuild needs the workbook fetched again. The converter's
+# docstring names the path it reads, not where to get it: it is DobberHockey's
+# paid draft list, and nothing in the repo records where it was bought.
 data/*.pdf
 data/*.xlsx
 

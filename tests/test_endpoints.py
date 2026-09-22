@@ -3216,7 +3216,7 @@ class TestTheNhlOddsView:
         assert len(canonical) == 32, f"{len(canonical)} clubs, not 32"
 
     def test_the_alias_is_folded_into_one_row(self, client):
-        """`team_odds.json` says `UTA` and players.csv says `UTH` on 78 rows.
+        """`team_odds.json` says `UTA`; the 2025-26 players.csv said `UTH` (78 rows).
 
         Two failure modes, one row: iterating the odds dict raw prints Utah
         TWICE (the loader adds the alias key pointing at the same number), and
@@ -5450,8 +5450,8 @@ class TestOneLogoPathForTheWholeApp:
     def test_a_clubs_label_does_not_depend_on_which_pool_is_loaded(self):
         """The invariant, rather than a spelling check on one club.
 
-        `players.csv` spells Utah `UTH` on 78 rows and `players-25.csv` spells
-        it `UTA` on 30, so before the canonical filter the same club read two
+        The 2025-26 `players.csv` spelled Utah `UTH` on 78 rows and
+        `players-25.csv` spells it `UTA` on 30, so before the canonical filter the same club read two
         different ways depending on the file -- and the operator has no way to
         know which is "right" from the screen.
 

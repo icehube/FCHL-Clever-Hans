@@ -18,8 +18,9 @@ A first pass at this measured the idle one and concluded the panel's "Should win
 it" figure never appears. It does — routinely, from mid-draft. Both are reported
 here so the next reader cannot repeat that.
 
-State safety: `main.py` hardcodes `STATE_DIR = "data/state"` with no env
-override, so importing and driving the app writes the OPERATOR'S state. This
+State safety: `main.STATE_DIR` defaults to `data/state`, the OPERATOR'S live
+draft, and only `FCHL_STATE_DIR` moves it — which nothing sets for a script, so
+importing and driving the app writes that state. This
 redirects `main.STATE_DIR` to a temp dir before anything else touches it,
 exactly as `tests/measure_layout.py` and `tests/conftest.py` do. Never remove
 that: a measurement run must not be able to touch a live draft.

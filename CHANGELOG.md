@@ -20,6 +20,75 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-22]
+
+### Fixed
+
+- **The defenceman Elias Pettersson carried the forward's projection: 69
+  points against the 10 DobberHockey gives him.** Found by the 2026-09-22
+  grill of the 2026-09-11..20 batch, and the most expensive thing it found:
+  `Elias Pettersson (VAN D)` loaded as the pool's **#2 defenceman** (behind an
+  86, ahead of a 68), `pos_rank` 2, a $3.33M model price, and **every one of
+  the eleven teams' MILPs bought him** — BOT's plan was 1362 points with him and
+  1355 without, on a player who in reality projects at 10.
+
+  The mechanism was a two-step collapse in `convert_fchl_online.read_projections`.
+  Dobber lists the pair as `Elias Pettersson` (VAN C, 69) and `Elias Pettersson
+  (d)`; `normalize_name` strips the parenthetical, so both reduce to one key.
+  The defenceman's display row is `#N/A` in every column — the workbook's own
+  lookup into its raw `Paste` table searches for the suffixed name, which the
+  raw table spells without the suffix — so the converter skipped it, the key
+  held only the forward, and the exact join, which checked neither position
+  nor club, gave **both** export rows 69. His real projection had been in the
+  same workbook all along: the `Paste` sheet lists him as VAN LD, 72 GP, 10.07
+  points.
+
+  Fixed at both ends. `data/players.csv` is **hand-edited** to 10, one line,
+  and deliberately not regenerated: re-running the converter over a baked file
+  reverts every placement the bake made (Holloway, Nazar and Perreault back to
+  MINOR, and the hand-deleted Laine row back). Verified the other way round
+  instead — the fixed converter, run to a temp file against the same inputs,
+  reproduces the committed pool keyed row for row with exactly those four
+  known differences and the Pettersson correction, and the goalie stats
+  byte-identical. The converter's exact index is now a list per name tagged
+  with position, a name the workbook carries once still matches on the name
+  alone (the export and Dobber disagree about position for the same player in
+  at least one case, so gating every match would drop him), a shared name is
+  resolved by position and misses rather than guesses when nothing agrees, and
+  a display row that is `#N/A` throughout falls back to the raw table — after
+  the whole sheet is read, so the answer cannot depend on Dobber's sort order.
+  Measured over the workbook: 1 of 906 display rows is `#N/A` and 1 key is
+  shared, and they are the same player.
+
+  `.claude/rules/data-formats.md` had described the pair as "the rename doing
+  its job" because both rows carried points — true, and the wrong question:
+  the rename keeps the names apart and says nothing about whose projection each
+  row holds. `tests/test_fchl_online_conversion.py` pins the resolution on a
+  synthetic workbook (openpyxl behind `importorskip`, as a dev-only
+  dependency), including the ordering case and the refusal, plus a live-pool
+  tripwire failing any same-name pair across positions that shares a nonzero
+  projection. Mutation-checked: a name-only `match_points` and an inline
+  raw-table pass each fail two tests, and the tripwire fires on the pre-fix
+  pool. `TestDataFingerprint` does not move, since it pins no per-player
+  points.
+
+  One test broke on the correction without being wrong about the code, which
+  is the 2026-09-17 lesson collecting again.
+  `TestDrainedLateDraft::test_the_nomination_panel_has_a_model_price_to_strike_through`
+  asserted that the scenario's nomination panel shows a capped pick. The RFA
+  half picks the wanted RFA with the best points per market dollar, and a
+  capped star's dollar is the ceiling by construction; on the old pool BOT's
+  plan held exactly one RFA, a capped star, so he won by default. The corrected
+  projection re-sorted the scenario's price-ordered drain — 47 players changed
+  teams — left a $1.8M goalie in the pool, and he out-valued the star at 36
+  points per dollar against 26. Replaced with
+  `test_the_plan_wants_a_player_the_ceiling_cut`, which asserts what the
+  scenario can actually guarantee (the capped branch has a subject) and fails
+  on an uncapped market; the rendering is already pinned against a supplied
+  state in `test_nomination.py::TestBothPricesReachThePanel`, and
+  `_scenario_drained_late_draft`'s docstring no longer promises a pick.
+
+
 ## [2026-09-20]
 
 ### Added

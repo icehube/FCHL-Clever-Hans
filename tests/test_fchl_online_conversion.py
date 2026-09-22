@@ -16,12 +16,22 @@ he counts against the cap all season and will not play a game. On 2026-09-17
 there was exactly one, and he had to be found by hand because nothing said so.
 """
 
+import collections
 import csv
 from pathlib import Path
 
 import pytest
 
-from convert_fchl_online import ACTIVE_GROUPS, no_nhl_club
+from convert_fchl_online import (
+    ACTIVE_GROUPS,
+    GOALIE_SHEET,
+    PASTE_SHEET,
+    SKATER_SHEET,
+    match_points,
+    no_nhl_club,
+    read_projections,
+)
+from convert_legacy_players import normalize_name
 
 REPO = Path(__file__).resolve().parent.parent
 LIVE_POOL = REPO / "data/players.csv"
@@ -100,3 +110,107 @@ class TestTheLivePoolHasNoRosteredPlayerWithoutAnNhlContract:
         assert blank, "no blank-club rows at all — has the pool schema changed?"
         assert all(r["STATUS"] == "MINOR" for r in blank)
         assert all(r["GROUP"] not in ACTIVE_GROUPS for r in blank)
+
+
+class TestTwoPlayersSharingOneName:
+    """The 2026-27 workbook carried two Elias Petterssons and the pool got 69 twice.
+
+    Dobber lists the defenceman as `Name (d)`, `normalize_name` strips the
+    suffix, and his display row is `#N/A` because the sheet's own lookup into
+    its raw table fails on the suffixed name. The old exact index was a plain
+    name -> points dict, so the `#N/A` row was skipped, the key held only the
+    forward, and both export rows matched it — a 10-point defenceman priced as
+    the pool's #2 D. Names here are synthetic: the pool must never be named in a
+    test, and this has to hold for the NEXT pair, not for that one.
+    """
+
+    TWINS = {"sample twin": [("F", 60), ("D", 10)]}
+
+    def test_a_shared_name_is_resolved_by_position(self):
+        assert match_points("Sample Twin", "VAN", "F", self.TWINS, {}) == (60, None)
+        assert match_points("Sample Twin", "VAN", "D", self.TWINS, {}) == (10, None)
+
+    def test_a_shared_name_nobody_agrees_with_is_a_miss_not_a_guess(self):
+        """A goalie called Sample Twin matches neither skater. Returning either
+        one's points is the original bug with a different victim."""
+        assert match_points("Sample Twin", "VAN", "G", self.TWINS, {}) == (None, None)
+
+    def test_a_name_carried_once_ignores_position(self):
+        """The export and the workbook disagree about position for the SAME
+        player (one is F in the export and RD in the workbook), so gating a
+        unique name on position would drop a real player. Only a shared name
+        needs the tie-break."""
+        once = {"sample single": [("D", 8)]}
+        assert match_points("Sample Single", "ANA", "F", once, {}) == (8, None)
+
+
+def _workbook(path, skaters, paste):
+    """A minimal DobberHockey-shaped workbook: display sheet, goalies, raw table."""
+    openpyxl = pytest.importorskip("openpyxl")
+    book = openpyxl.Workbook()
+    book.remove(book.active)
+    sheet = book.create_sheet(SKATER_SHEET)
+    sheet.append(["Quick Jumps:"])  # the real file opens with navigation rows
+    sheet.append(["Rank", "Player", "Pos", "Team", "Goals", "Assists", "Points"])
+    for row in skaters:
+        sheet.append(row)
+    sheet = book.create_sheet(GOALIE_SHEET)
+    sheet.append(["Rank", "Player", "Team", "Wins", "SO"])
+    sheet = book.create_sheet(PASTE_SHEET)
+    sheet.append([None])
+    sheet.append(["player", "pr gp", "pr goals", "pr pts", "pr pim", "pos", "F=1, D=2", "team"])
+    for row in paste:
+        sheet.append(row)
+    book.save(path)
+    return str(path)
+
+
+class TestAnUnprojectedDisplayRowReadsTheRawTable:
+    """What `read_projections` does with the `#N/A` half of the pair."""
+
+    FORWARD = [1, "Sample Twin", "C", "VAN", 20, 40, 60]
+    DEFENCE = [2, "Sample Twin (d)", "#N/A", "#N/A", "#N/A", "#N/A", "#N/A"]
+    PASTE = [
+        ["Sample Twin", 76, 20, 60.2, 0, "C", None, "VAN"],
+        ["Sample Twin", 72, 3, 10.4, 0, "LD", None, "VAN"],
+    ]
+
+    def _entries(self, tmp_path, skaters, paste=PASTE):
+        exact, _loose = read_projections(_workbook(tmp_path / "d.xlsx", skaters, paste))
+        return sorted(exact[normalize_name("Sample Twin")])
+
+    def test_both_halves_carry_their_own_projection(self, tmp_path):
+        assert self._entries(tmp_path, [self.FORWARD, self.DEFENCE]) == [("D", 10), ("F", 60)]
+
+    def test_the_order_of_the_display_rows_does_not_matter(self, tmp_path):
+        """The raw-table pass runs after the whole sheet is read. Run inline, a
+        `#N/A` row met BEFORE its twin would see two unclaimed entries and
+        refuse, so the answer would depend on Dobber's sort order."""
+        assert self._entries(tmp_path, [self.DEFENCE, self.FORWARD]) == [("D", 10), ("F", 60)]
+
+    def test_it_refuses_when_the_raw_table_leaves_more_than_one(self, tmp_path):
+        paste = self.PASTE + [["Sample Twin", 70, 2, 12.0, 0, "RD", None, "BOS"]]
+        assert self._entries(tmp_path, [self.FORWARD, self.DEFENCE], paste) == [("F", 60)]
+
+
+class TestTheLivePoolHasNoCopiedProjection:
+    """The live-data tripwire for the same bug, in case the next workbook finds
+    a new way to collapse two players onto one key."""
+
+    def test_no_same_name_pair_across_positions_shares_a_projection(self):
+        with LIVE_POOL.open(newline="") as f:
+            rows = list(csv.DictReader(f))
+        by_name = collections.defaultdict(list)
+        for r in rows:
+            by_name[normalize_name(r["PLAYER"])].append(r)
+        copied = [
+            name
+            for name, group in by_name.items()
+            if len({r["POS"] for r in group}) > 1
+            and len({r["PTS"] for r in group}) == 1
+            and group[0]["PTS"] != "0"
+        ]
+        assert not copied, (
+            f"players sharing a name at different positions carry the same "
+            f"projection, which is one player's points copied onto another: {copied}"
+        )

@@ -57,7 +57,16 @@ Two ways a collision breaks things. Both were live in the 2025-26 file; the
   players who share a club as well as a name, so he escalates to the `(TEAM
   POS)` tier: `Elias Pettersson (VAN F)` and `Elias Pettersson (VAN D)`. Both
   are biddable, both carry points, and both are therefore draftable — which is
-  the rename doing its job.
+  the rename doing its job. **The rename only keeps the NAMES apart; it says
+  nothing about whether each row carries its own projection**, and until
+  2026-09-22 the defenceman carried the forward's: 69 points against the 10
+  Dobber projects, making him the pool's #2 D in every team's plan. The
+  converter's exact join had collapsed the two onto one key — see
+  `convert_fchl_online.read_projections` — and this sentence called the result
+  correct because both rows *had* points, without asking whose. A same-name
+  pair is now resolved by position at conversion, and
+  `tests/test_fchl_online_conversion.py` fails a live pool where two such
+  players share a projection.
 - **a roster row and a biddable row** — different dicts, nothing overwrites, so
   the same name is owned *and* draftable. `Jack Hughes` and `Elias Pettersson`
   were both this shape in the 2025-26 file, hidden only by the zero-point

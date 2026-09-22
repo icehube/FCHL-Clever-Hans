@@ -914,24 +914,33 @@ class TestDrainedLateDraft:
             f"panels show the capped branch at all is luck"
         )
 
-    def test_the_nomination_panel_has_a_model_price_to_strike_through(self):
-        """The two-price line, outside an endgame.
+    def test_the_plan_wants_a_player_the_ceiling_cut(self):
+        """The two-price line is reachable here, outside an endgame.
 
-        Both figures always render; the ▼ and the strike-through only when the
-        ceiling cut the price. A recommendation whose two figures agree renders a
-        panel that cannot show what this scenario was built to show.
+        BOT's MILP plans on market prices, so a capped player it wants is one the
+        nomination panel's target half can land on, with a model figure to strike
+        through. **Whether it DOES land on one is the pool's call, not this
+        scenario's**, and this test asserted that it did until 2026-09-22: the
+        target half picks the wanted player with the best points per market
+        dollar, and a capped star's dollar is by construction the ceiling. On the
+        pool before that day BOT's plan held one RFA, a capped star, so he won
+        uncontested; correcting one unrelated projection re-sorted the drain,
+        left a $1.8M goalie in the pool, and he out-valued the star at 36 points
+        per dollar against 26. Nothing in the code changed. The capped branch's
+        rendering is pinned against a SUPPLIED state in
+        `test_nomination.py::TestBothPricesReachThePanel`; what this scenario
+        owes is that the branch has a subject.
         """
         state = scenarios.load(LATE_DRAFT)
-        model, live, _ = _priced(state)
-        picks = [p for p in optimizer.recommend_nomination(state, live, model) if p]
-        assert picks, "no nomination recommendation at all"
-        assert any(p.capped for p in picks), (
-            "neither nomination pick is capped: "
-            + ", ".join(
-                f"{p.player.name} model ${p.model_price:.1f}M vs market "
-                f"${p.expected_price:.1f}M"
-                for p in picks
-            )
+        model, live, info = _priced(state)
+        plan = optimizer.solve_optimal_roster(
+            state.teams[MY_TEAM], state.available_players, live
+        )
+        assert plan.status == "Optimal", f"BOT's plan is {plan.status}"
+        capped = [p.name for p in plan.roster if market.is_capped(model[p.name], live[p.name])]
+        assert capped, (
+            f"BOT's plan wants nobody the ${info.market_ceiling}M ceiling cut: "
+            + ", ".join(f"{p.name} ${model[p.name]:.1f}M" for p in plan.roster)
         )
 
     def test_the_forecast_says_something_about_the_player(self):

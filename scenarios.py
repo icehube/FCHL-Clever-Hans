@@ -695,9 +695,13 @@ def _scenario_drained_late_draft(state: AuctionState) -> None:
     What it is for: this is the only loadable state where the bid panel's
     forecast half says something about a player rather than reporting `at_cap`.
     A bid check on the priciest RFA against the two richest rivals reads BID,
-    worth $4.0M, "Should win it" $3.6M — and the nomination panel shows him at a
-    $3.3M market price against a $9.5M model price, which is the struck-through
-    figure the two-price line was built for, outside an endgame.
+    worth $4.0M, "Should win it" $3.6M — and BOT's plan wants capped players,
+    so the nomination panel's struck-through figure has a subject outside an
+    endgame. Whether the panel's pick IS one of them is decided by points per
+    market dollar against every uncapped player BOT also wants, which is the
+    pool's call: on 2026-09-22 a one-player data correction turned the RFA
+    half from a capped star into a $1.8M goalie with nothing else changed. See
+    `test_the_plan_wants_a_player_the_ceiling_cut`.
     """
     price = _model_price(state)
     reserved = _reserved_top(price)

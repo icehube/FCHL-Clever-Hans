@@ -83,6 +83,12 @@ ACTIVE_GROUPS = {"2", "3"}
 
 SKATER_SHEET = "Points&Potential"
 GOALIE_SHEET = "Goaltenders"
+# The workbook's raw projection table, which every display sheet looks players
+# up in. Consulted only when a display row is `#N/A` -- see `read_projections`.
+PASTE_SHEET = "Paste"
+
+# DobberHockey writes skater positions as lines; the pool writes F/D/G.
+_DOBBER_POSITION = {"C": "F", "LW": "F", "RW": "F", "LD": "D", "RD": "D"}
 GOALIE_STATS_COLUMNS = ["league_year", "player_name", "proj_wins", "proj_so", "proj_gp"]
 
 
@@ -162,7 +168,30 @@ def find_header_row(rows: list[tuple], required: list[str]) -> tuple[int, dict[s
     raise ValueError(f"no header row containing {required} in the first 15 rows")
 
 
-def read_projections(path: str) -> tuple[dict[str, int], dict[tuple, list]]:
+def read_paste_sheet(book) -> dict[str, list[tuple[str, str, float]]]:
+    """The raw projection table: normalized name -> [(position, club, points)].
+
+    Every display sheet fills its row by looking the player up in this one, BY
+    NAME. That lookup is what fails for `Elias Pettersson (d)`: the display
+    sheet disambiguates the defenceman with a suffix, the raw table lists him as
+    plain `Elias Pettersson`, and the lookup comes back `#N/A` in every column.
+    His projection is here all along (VAN LD, 72 GP, 10.07 points).
+    """
+    rows = list(book[PASTE_SHEET].iter_rows(values_only=True))
+    start, cols = find_header_row(rows, ["player", "pr pts", "pos", "team"])
+    out: dict[str, list[tuple[str, str, float]]] = collections.defaultdict(list)
+    for row in rows[start + 1 :]:
+        name = row[cols["player"]]
+        points = _number(row[cols["pr pts"]])
+        position = _DOBBER_POSITION.get(_text(row[cols["pos"]]), "")
+        if isinstance(name, str) and name.strip() and points is not None and position:
+            out[normalize_name(name)].append((position, _text(row[cols["team"]]), points))
+    return out
+
+
+def read_projections(
+    path: str,
+) -> tuple[dict[str, list[tuple[str, int]]], dict[tuple, list]]:
     """Projected FCHL points by player, plus a first-initial+surname index.
 
     FCHL scoring is Goals + Assists for skaters and 2*Wins + 3*SO for goalies.
@@ -170,24 +199,41 @@ def read_projections(path: str) -> tuple[dict[str, int], dict[tuple, list]]:
     rows (it differs only where this sheet rounds assists); G+A is the fallback
     when `Points` is `#N/A`.
 
+    **The exact index holds a LIST per name, each entry tagged with its
+    position** (`F`/`D`/`G`), because two players can share one. It was a plain
+    name -> points dict until 2026-09-22, and the 2026-27 workbook carries
+    exactly such a pair: `Elias Pettersson` (VAN C, 69) and `Elias Pettersson
+    (d)` (VAN LD). `normalize_name` strips the `(d)`, so both land on one key;
+    the defenceman's display row is `#N/A` (see `read_paste_sheet`), so it was
+    skipped, the key held only the forward, and **both export rows were given
+    69 points** — a 10-point defenceman priced as the pool's #2 D, in every
+    team's plan. `match_points` now resolves a shared name by position.
+
+    A display row that is `#N/A` in every column falls back to the raw Paste
+    table, taking the entry whose position is NOT already supplied by a display
+    row under the same name. That is the only row the rule has to find on this
+    workbook (1 of 906), and it refuses rather than guesses if more than one
+    entry is left.
+
     The loose index is returned UNRESOLVED -- a list per key, not a winner --
     because picking one is exactly the mistake `match_points` has to avoid.
     """
     openpyxl = _load_openpyxl()
     book = openpyxl.load_workbook(path, read_only=True, data_only=True)
 
-    exact: dict[str, int] = {}
+    exact: dict[str, list[tuple[str, int]]] = collections.defaultdict(list)
     loose: dict[tuple, list] = collections.defaultdict(list)
 
-    def add(name: str, club: str, points: int) -> None:
-        exact[normalize_name(name)] = points
+    def add(name: str, club: str, position: str, points: int) -> None:
+        exact[normalize_name(name)].append((position, points))
         parts = normalize_name(name).split()
         if len(parts) >= 2:
             loose[(parts[0][:1], parts[-1])].append((name, _text(club), points))
 
     sheet = book[SKATER_SHEET]
     rows = list(sheet.iter_rows(values_only=True))
-    start, cols = find_header_row(rows, ["Player", "Goals", "Assists", "Points"])
+    start, cols = find_header_row(rows, ["Player", "Pos", "Goals", "Assists", "Points"])
+    unprojected: list[str] = []
     for row in rows[start + 1 :]:
         name = row[cols["Player"]]
         if not isinstance(name, str) or not name.strip():
@@ -196,9 +242,21 @@ def read_projections(path: str) -> tuple[dict[str, int], dict[tuple, list]]:
         if points is None:
             goals, assists = _number(row[cols["Goals"]]), _number(row[cols["Assists"]])
             if goals is None or assists is None:
+                unprojected.append(name)
                 continue
             points = goals + assists
-        add(name, row[cols["Team"]], round(points))
+        position = _DOBBER_POSITION.get(_text(row[cols["Pos"]]), "")
+        add(name, row[cols["Team"]], position, round(points))
+
+    if unprojected:
+        paste = read_paste_sheet(book)
+        for name in unprojected:
+            key = normalize_name(name)
+            taken = {pos for pos, _ in exact.get(key, [])}
+            left = [e for e in paste.get(key, []) if e[0] not in taken]
+            if len(left) == 1:
+                position, club, points = left[0]
+                add(name, club, position, round(points))
 
     sheet = book[GOALIE_SHEET]
     rows = list(sheet.iter_rows(values_only=True))
@@ -210,10 +268,10 @@ def read_projections(path: str) -> tuple[dict[str, int], dict[tuple, list]]:
         wins, shutouts = _number(row[cols["Wins"]]), _number(row[cols["SO"]])
         if wins is None or shutouts is None:
             continue
-        add(name, row[cols["Team"]], round(2 * wins + 3 * shutouts))
+        add(name, row[cols["Team"]], "G", round(2 * wins + 3 * shutouts))
 
     book.close()
-    return exact, loose
+    return dict(exact), loose
 
 
 def read_goalie_stats(path: str, season: str) -> list[dict]:
@@ -252,11 +310,19 @@ def read_goalie_stats(path: str, season: str) -> list[dict]:
 
 
 def match_points(
-    name: str, club: str, exact: dict, loose: dict
+    name: str, club: str, position: str, exact: dict, loose: dict
 ) -> tuple[int | None, tuple | None]:
     """Projected points for one player: `(points, fallback_used_or_None)`.
 
-    Exact normalized name first. Then first-initial + surname, **gated on the
+    Exact normalized name first. A name the workbook carries ONCE matches on
+    the name alone, position unchecked — deliberately, because the export and
+    the workbook disagree about position for the same player (Ian Moore is F in
+    one and RD in the other), and gating every match on it would drop him. A
+    name the workbook carries more than once is resolved by `position`, and
+    returns no match unless exactly one entry agrees: guessing there is the
+    Pettersson bug (see `read_projections`).
+
+    Then first-initial + surname, **gated on the
     NHL club agreeing** — and that gate is the whole point. Measured on this
     file, an ungated fallback recovers 9 players of whom 5 are different people
     (`Jack Anderson` -> `Josh Anderson`, `Dryden Hunt` -> `Daemon Hunt`,
@@ -273,8 +339,12 @@ def match_points(
     across seasons — see that function.
     """
     key = normalize_name(name)
-    if key in exact:
-        return exact[key], None
+    entries = exact.get(key, [])
+    if len(entries) == 1:
+        return entries[0][1], None
+    if entries:
+        agreeing = [points for pos, points in entries if pos == position]
+        return (agreeing[0], None) if len(agreeing) == 1 else (None, None)
 
     parts = key.split()
     if len(parts) < 2:
@@ -402,7 +472,9 @@ def fill_points(
     fallbacks: list[tuple] = []
     unmatched: list[str] = []
     for row in rows:
-        points, fallback = match_points(row["PLAYER"], row["NHL TEAM"], exact, loose)
+        points, fallback = match_points(
+            row["PLAYER"], row["NHL TEAM"], row["POS"], exact, loose
+        )
         if points is None:
             unmatched.append(row["PLAYER"])
             continue

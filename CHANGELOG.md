@@ -24,6 +24,33 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **`tests/measure_replay.py` printed a headline its own fidelity check had
+  invalidated, and exited 0.** Found by the 2026-09-22 grill. Re-run at HEAD
+  over the 2026-09-13 draft it reported **47/139** picks capping a pool price
+  against the published 0/139 — because `fchl_teams.json`, `team_odds.json`
+  and the goalie stats have all moved since the draft — with 119 sold-price
+  mismatches and three teams off their saved budgets flagged forty lines
+  below the number anyone would quote. The fidelity checks now run before
+  anything prints, a divergence prints an INVALID banner above the headline
+  and again at the end, and `report` returns the exit status (1 for an
+  invalid replay or unreadable input, 0 for a faithful one or nothing to
+  measure). Three gaps closed alongside. The sold-price check could not see a
+  player nobody bought, and the headline counts exactly those, so the replay
+  now also re-prices the UNSOLD pool from the saved state's own `Player`
+  inputs, frozen at the draft — 65 of 510 disagree at HEAD, 0 at bb8850a,
+  where the whole instrument is clean on all four checks and reproduces the
+  published row exactly. A `trade_out` that no `trade_in` placed left the
+  player on no roster and out of the pool with nothing said; it is reported.
+  And sampling AFTER each pick instead of before — the off-by-one the 1-based
+  ordinals exist to prevent — passed every test and the real draft's
+  fidelity check, as did a buyout charging the full salary; both now fail,
+  along with tests for every `_apply` branch (trade, out/in in both logged
+  orders, buyout, unknown type). Nine mutants, nine killed. The rules file's
+  "at most 5 of ~580 pool prices at once" at the 1.77x scale was also wrong
+  about the denominator: the 5 was at pick 139 against 511 players, and 581 is
+  the pool at the first capped pick; the 2026-09-13 entry below still carries
+  the old figure as it was published.
+
 - **Seven guards had been skipping since the 2026-09-15 refresh, and three
   mutants survived because no pool supplied their subject.** Found by the
   2026-09-22 grill, which ran them at 740cd29 (zero skips) and at HEAD (seven).

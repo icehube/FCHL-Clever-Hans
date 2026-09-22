@@ -18,7 +18,14 @@ from pathlib import Path
 import pytest
 
 from config import MAX_SALARY, MIN_SALARY, MY_TEAM, ROSTER_SIZE, SALARY_CAP
-from state import AuctionState, ChangeRecord, Player, PlayerOnRoster, TeamState
+from state import (
+    AuctionState,
+    ChangeRecord,
+    Player,
+    PlayerOnRoster,
+    TeamState,
+    TransactionRecord,
+)
 from tests.measure_replay import (
     PickRow,
     ceiling_steps,
@@ -26,9 +33,11 @@ from tests.measure_replay import (
     fidelity,
     load_events,
     pool_for,
+    pool_mismatches,
     replay,
     report,
     summarize,
+    verdict,
 )
 
 MAIN = Path(__file__).resolve().parent.parent / "main.py"
@@ -193,6 +202,132 @@ class TestPickOrdinals:
         )
         assert not problems
         assert [r.pick for r in rows] == [1, 2]
+
+
+class TestItSamplesBeforeThePickLands:
+    """The row describes the market the pick was MADE in.
+
+    Sampled after `_apply` instead, every row describes the next pick's market:
+    the ceiling one pick late and a pool one player short — the same off-by-one
+    the 1-based ordinals exist to prevent, and the 2026-09-22 grill found that
+    mutant passing every test here and the real draft's own fidelity check.
+    """
+
+    def _drains_the_second_highest(self):
+        prices = {"Sold Sample": 2.0, "Left Sample": 0.5}
+        # AAA 5.0 and BBB 4.0: the ceiling is BBB's 4.0. BBB buys at 2.0,
+        # leaving it 2.0 — so a ceiling read after the pick says 2.0.
+        state = _state(_pool(**prices), _team("AAA", 5.0), _team("BBB", 4.0))
+        rows, problems = replay(
+            state, [_pick("Sold Sample", salary=2.0, model=2.0, team="BBB")], prices, (1.0,)
+        )
+        assert not problems
+        return rows[0]
+
+    def test_the_ceiling_is_the_one_bidding_happened_under(self):
+        assert self._drains_the_second_highest().ceiling == 4.0
+
+    def test_the_pool_still_holds_the_player_being_sold(self):
+        assert self._drains_the_second_highest().pool == 2
+
+
+def _txn(name: str, kind: str, team: str, salary: float = 1.0) -> TransactionRecord:
+    return TransactionRecord(
+        player_name=name, position="F", team_code=team, salary=salary,
+        model_price=salary, market_price=salary,
+        timestamp="2026-09-13T10:00:00", transaction_type=kind,
+    )
+
+
+class TestEveryTransactionTypeItApplies:
+    """`_apply`'s branches beyond a draft pick, none of which had a test.
+
+    The 2026-09-13 draft exercises all of them, so a broken branch showed up
+    only as a budget drifting in the fidelity block — which, until the INVALID
+    banner, printed below a headline that had already been believed.
+    """
+
+    def _two_teams(self):
+        aaa, bbb = _team("AAA", 5.0), _team("BBB", 3.0)
+        aaa.keeper_players.append(
+            PlayerOnRoster(name="Traded Sample", position="F", group="3", salary=2.0,
+                           projected_points=40)
+        )
+        aaa._invalidate_cache()
+        return _state(_pool(), aaa, bbb)
+
+    def test_a_trade_between_teams_moves_him(self):
+        state = self._two_teams()
+        _, problems = replay(state, [_txn("Traded Sample", "trade", "AAA→BBB")], {}, (1.0,))
+        assert not problems
+        assert state.teams["AAA"].find_player("Traded Sample") is None
+        assert state.teams["BBB"].find_player("Traded Sample") is not None
+
+    @pytest.mark.parametrize("order", ["out-first", "in-first"])
+    def test_an_out_and_an_in_land_him_once_in_either_order(self, order):
+        """`/trade-execute` logs both on one timestamp and not always out-first."""
+        state = self._two_teams()
+        out = _txn("Traded Sample", "trade_out", "AAA")
+        into = _txn("Traded Sample", "trade_in", "BBB")
+        events = [out, into] if order == "out-first" else [into, out]
+        _, problems = replay(state, events, {}, (1.0,))
+        assert not problems
+        assert state.teams["AAA"].find_player("Traded Sample") is None
+        held = state.teams["BBB"].find_player("Traded Sample")
+        assert held is not None and held.projected_points == 40, (
+            "he was rebuilt from the record rather than moved"
+        )
+
+    def test_a_trade_out_nothing_places_is_reported(self):
+        state = self._two_teams()
+        _, problems = replay(state, [_txn("Traded Sample", "trade_out", "AAA")], {}, (1.0,))
+        assert any("Traded Sample" in p and "trade_out" in p for p in problems), problems
+
+    def test_a_buyout_leaves_half_his_salary_on_the_cap(self):
+        state = self._two_teams()
+        before = state.teams["AAA"].penalties
+        _, problems = replay(
+            state, [_txn("Traded Sample", "buyout", "AAA", salary=2.0)], {}, (1.0,)
+        )
+        assert not problems
+        assert state.teams["AAA"].find_player("Traded Sample") is None
+        assert state.teams["AAA"].penalties == pytest.approx(before + 1.0)
+
+    def test_an_unknown_type_is_reported_rather_than_skipped(self):
+        state = self._two_teams()
+        _, problems = replay(state, [_txn("Traded Sample", "gift", "AAA")], {}, (1.0,))
+        assert any("gift" in p for p in problems), problems
+
+
+class TestTheUnsoldPoolIsChecked:
+    def test_an_agreeing_pool_is_clean(self):
+        assert pool_mismatches({"Sample One": 0.5}, {"Sample One": 0.504}) == []
+
+    def test_a_moved_price_is_reported_at_a_precision_that_shows_it(self):
+        (line,) = pool_mismatches({"Sample One": 0.506}, {"Sample One": 0.514})
+        assert "$0.514M" in line and "$0.506M" in line
+
+    def test_a_player_the_csv_lacks_is_reported(self):
+        (line,) = pool_mismatches({"Sample One": 0.5}, {})
+        assert "Sample One" in line and "not in this CSV" in line
+
+
+_SAME = [("AAA", (24, 0, 1.0), (24, 0, 1.0))]
+
+
+class TestTheVerdict:
+    def test_a_faithful_replay_has_no_banner(self):
+        assert verdict([], [], [], _SAME) == []
+
+    @pytest.mark.parametrize("sold, unsold, problems, teams", [
+        (["x"], [], [], _SAME),
+        ([], ["x"], [], _SAME),
+        ([], [], ["x"], _SAME),
+        ([], [], [], [("AAA", (24, 0, 1.0), (24, 0, 0.7))]),
+    ], ids=["sold", "unsold", "not-applied", "team"])
+    def test_any_one_divergence_invalidates_it(self, sold, unsold, problems, teams):
+        lines = verdict(sold, unsold, problems, teams)
+        assert lines and "INVALID" in lines[0]
 
 
 class TestTheChangeLogIsNotOptional:
@@ -393,7 +528,7 @@ class TestPoolDerivation:
 
 class TestReportDegradesInsteadOfRaising:
     def test_a_missing_file_is_not_an_error_at_all(self, tmp_path, capsys):
-        report(tmp_path / "nope.json")
+        assert report(tmp_path / "nope.json") == 0
         assert "no state file" in capsys.readouterr().out
 
     def test_a_corrupt_state_names_the_file(self, tmp_path, capsys):
@@ -402,21 +537,60 @@ class TestReportDegradesInsteadOfRaising:
         what the draft contained."""
         bad = tmp_path / "auction_state.json"
         bad.write_text("{not json")
-        report(bad)
+        assert report(bad) == 1, "no measurement was made"
         assert str(bad) in capsys.readouterr().out
 
     def test_a_missing_pool_says_which_one_it_looked_for(self, tmp_path, capsys):
         state = tmp_path / "auction_state.json"
         state.write_text(json.dumps({"teams": {}, "available_players": {}}))
-        report(state, pool=tmp_path / "nosuch.csv")
+        assert report(state, pool=tmp_path / "nosuch.csv") == 1
         out = capsys.readouterr().out
         assert "nosuch.csv" in out and "--pool" in out
 
     def test_an_empty_log_says_so_instead_of_replaying_nothing(self, tmp_path, capsys):
         state = tmp_path / "auction_state.json"
         state.write_text(AuctionState(teams={}, available_players={}).to_json())
-        report(state, pool=Path("data/players.csv"))
+        assert report(state, pool=Path("data/players.csv")) == 0
         assert "nothing to replay" in capsys.readouterr().out
+
+
+class TestAnInvalidReplaySaysSoFirst:
+    """End to end over the live pool: one pick, logged faithfully or not.
+
+    The live pool rather than `players_sample.csv` because `report` builds its
+    state through `build_initial_state`, which rewrites
+    `data_loader.loaded_disambiguations` in place — the data banner's source.
+    The live pool rewrites it with what it already held.
+    """
+
+    def _one_pick(self, tmp_path, logged_off_by: float) -> Path:
+        import data_loader
+        from price_model import load_model_params, predict_all_prices
+
+        state = data_loader.build_initial_state()
+        name = next(iter(state.available_players))
+        player = state.available_players.pop(name)
+        price = predict_all_prices({name: player}, load_model_params())[name].expected_price
+        state.teams[MY_TEAM].add_acquired_player(PlayerOnRoster.from_pool(player, 1.0))
+        state.transaction_log.append(_pick(name, salary=1.0, model=price + logged_off_by))
+        path = tmp_path / "auction_state.json"
+        path.write_text(state.to_json())
+        return path
+
+    def test_a_faithful_replay_exits_zero_with_no_banner(self, tmp_path, capsys):
+        assert report(self._one_pick(tmp_path, 0.0), pool=Path("data/players.csv")) == 0
+        out = capsys.readouterr().out
+        assert "INVALID" not in out
+        assert "0 mismatch(es) over 1 picks" in out
+        assert "unsold pool vs saved  : 0 mismatch(es)" in out
+
+    def test_a_divergence_exits_one_and_is_named_above_the_headline(self, tmp_path, capsys):
+        assert report(self._one_pick(tmp_path, 1.0), pool=Path("data/players.csv")) == 1
+        out = capsys.readouterr().out
+        assert "INVALID" in out
+        assert out.index("INVALID") < out.index("picks with >=1 capped"), (
+            "the banner printed below the headline it invalidates"
+        )
 
 
 class TestLoadEvents:

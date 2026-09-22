@@ -27,17 +27,33 @@ the same structural guarantee `measure_spend.py` has. It is narrower on purpose
 and the difference is one import away.
 
 **The replay is only worth anything if it lands where the draft landed**, so it
-checks itself two ways and prints both:
+checks itself four ways and prints all of them:
 
   * every drafted player's model price recomputed from the pool must equal the
     price the app LOGGED at the time (exact on all 139 picks of the 2026-09-13
     draft) — this is what catches being pointed at the wrong CSV, and it catches
     it far more sharply than a pool-size count, which several wrong pools pass;
+  * every UNSOLD player's model price must equal what the saved state's own
+    `Player` objects price at — the inputs the app actually held, frozen at the
+    draft. The sold-price check cannot see a player nobody bought, and the
+    headline is a count over exactly those players;
+  * every logged record must apply, and every `trade_out` must be placed by a
+    `trade_in` — a player lifted off a roster and never put back is on no
+    roster and out of the pool, and every budget after him is off by his salary;
   * every team's final roster count, minors count and remaining budget must
     equal the saved end state.
 
 A divergence there is the only way this instrument can lie, which is why the
-fidelity block prints unconditionally rather than only on failure.
+fidelity block prints unconditionally rather than only on failure — and why,
+since 2026-09-22, a divergence also prints an INVALID banner ABOVE the headline
+and exits 1. Until then the headline printed first and the exit status was 0 no
+matter what the block below it said: re-run after `fchl_teams.json`,
+`team_odds.json` and the goalie stats moved on from the draft, it reported
+**47/139** picks capped against the published 0/139, with 119 mismatches
+flagged forty lines further down. The published figures reproduce only
+against the data files as they stood at the draft (bb8850a for 2026-09-13), so
+reproduce them from a worktree at that commit — never by checking `data/` out
+over the live pool.
 
 Usage:
     .venv/bin/python -m tests.measure_replay                       # live state
@@ -293,6 +309,15 @@ def replay(
             kind = getattr(rec, "transaction_type", None) or getattr(rec, "kind", "?")
             problems.append(f"{rec.timestamp} {kind}: {type(exc).__name__}: {exc}")
 
+    # A trade_out stashes the player for the trade_in that places him. One left
+    # over means the log lifted him off a roster and never put him anywhere —
+    # he is on no team and not in the pool, so every budget after this point
+    # is off by his salary, and nothing else would say so.
+    for name in sorted(pending):
+        problems.append(
+            f"{name}: removed by a trade_out that no trade_in placed — on no "
+            "roster and not in the pool"
+        )
     return rows, problems
 
 
@@ -327,6 +352,53 @@ def price_mismatches(
         elif abs(got - rec.model_price) > 0.005:
             out.append(f"{rec.player_name}: pool ${got:.2f}M vs logged ${rec.model_price:.2f}M")
     return out
+
+
+def pool_mismatches(saved_prices: dict[str, float], model: dict[str, float]) -> list[str]:
+    """Unsold players whose replayed model price disagrees with the saved one.
+
+    `saved_prices` is the SAVED state's own pool put through the price model —
+    the `Player` inputs the app held at the draft, `team_probability` and
+    `pos_rank` included, frozen there. `price_mismatches` checks only the
+    players who sold, and the headline counts players who did not, so a CSV or
+    odds file that moved on after the draft could re-price the whole unsold
+    pool with that check clean.
+    """
+    out = []
+    for name, price in sorted(saved_prices.items()):
+        got = model.get(name)
+        if got is None:
+            out.append(f"{name}: in the saved pool, not in this CSV")
+        elif abs(got - price) > 0.005:
+            # Three places, not the sold check's two: the tolerance is half a
+            # cent, so two decimals printed "$0.51M vs $0.51M" as a mismatch.
+            out.append(f"{name}: pool ${got:.3f}M vs saved inputs ${price:.3f}M")
+    return out
+
+
+def verdict(
+    sold: list[str],
+    unsold: list[str],
+    problems: list[str],
+    teams: list[tuple[str, tuple, tuple]],
+) -> list[str]:
+    """The INVALID banner's lines, or [] when the replay landed where the draft did.
+
+    Pure, and separate from `report`, so the rule "any divergence invalidates
+    the headline" is one thing a test can call.
+    """
+    diverged = [code for code, got, want in teams if got != want]
+    if not (sold or unsold or problems or diverged):
+        return []
+    return [
+        "!!! INVALID REPLAY — the figures below describe a different auction !!!",
+        f"    {len(sold)} sold-price mismatch(es), {len(unsold)} pool-price "
+        f"mismatch(es), {len(problems)} record(s) not applied, "
+        f"{len(diverged)} team(s) off their saved end state"
+        + (f" ({', '.join(diverged)})" if diverged else ""),
+        "    Usually the data files moved on after the draft — see the fidelity "
+        "block. Exit status 1.",
+    ]
 
 
 def fidelity(state: AuctionState, saved: AuctionState) -> list[tuple[str, tuple, tuple]]:
@@ -384,10 +456,17 @@ def summarize(rows: list[PickRow], scales: tuple[float, ...] = SCALES) -> dict:
     }
 
 
-def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCALES) -> None:
+def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCALES) -> int:
+    """Print the replay; return the exit status.
+
+    0 for a faithful replay, and for the two cases with nothing to measure (no
+    state file, no picks). 1 when the replay is INVALID or its inputs could not
+    be read — a caller scripting this has to be able to tell a measurement from
+    a failure to make one, which the printed text alone did not let it do.
+    """
     if not path.exists():
         print(f"no state file at {path}")
-        return
+        return 0
 
     # The pool is checked first because it depends only on the PATH, and a
     # derived guess that missed is the likeliest way to be here — answering that
@@ -396,7 +475,7 @@ def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCA
     csv = Path(pool) if pool else pool_for(path)
     if not csv.exists():
         print(f"no pool CSV at {csv} — pass --pool")
-        return
+        return 1
 
     # Same degradation contract as `measure_spend.report`: a `.corrupt` state is
     # exactly what someone points this at — `lifespan` renames a file it cannot
@@ -410,15 +489,14 @@ def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCA
         events = load_events(path)
     except (json.JSONDecodeError, KeyError, OSError, AttributeError, TypeError) as exc:
         print(f"could not read {path}: {type(exc).__name__}: {exc}")
-        return
+        return 1
 
     data_loader.PLAYERS_CSV = str(csv)
     state = data_loader.build_initial_state(players_path=str(csv))
+    params = load_model_params()
     model = {
         name: pred.expected_price
-        for name, pred in predict_all_prices(
-            state.available_players, load_model_params()
-        ).items()
+        for name, pred in predict_all_prices(state.available_players, params).items()
     }
     started = len(state.available_players)
 
@@ -433,7 +511,22 @@ def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCA
     if not rows:
         extra = f" ({len(events)} other records)" if events else ""
         print(f"  no draft picks in the transaction log{extra} — nothing to replay")
-        return
+        return 0
+
+    # Every fidelity check is computed BEFORE the headline prints, so an invalid
+    # replay can say so above it rather than forty lines below it.
+    bad = price_mismatches(rows, model, picks)
+    saved_prices = {
+        name: pred.expected_price
+        for name, pred in predict_all_prices(saved.available_players, params).items()
+    }
+    pool_bad = pool_mismatches(saved_prices, model)
+    teams = fidelity(state, saved)
+    banner = verdict(bad, pool_bad, problems, teams)
+    for line in banner:
+        print(f"  {line}")
+    if banner:
+        print()
 
     s = summarize(rows, scales)
     print(f"  picks                 : {s['picks']}  of a {started}-player pool")
@@ -457,9 +550,12 @@ def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCA
               f"  (first: {first}, worst {row['worst']})")
 
     print("\n  --- replay fidelity (a divergence here invalidates everything above) ---")
-    bad = price_mismatches(rows, model, picks)
     print(f"  model price vs logged : {len(bad)} mismatch(es) over {len(picks)} picks")
     for line in bad[:5]:
+        print(f"      {line}")
+    print(f"  unsold pool vs saved  : {len(pool_bad)} mismatch(es) over "
+          f"{len(saved_prices)} unsold players")
+    for line in pool_bad[:5]:
         print(f"      {line}")
     if problems:
         print(f"  records not applied   : {len(problems)}")
@@ -467,11 +563,14 @@ def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCA
             print(f"      {line}")
     else:
         print(f"  records not applied   : 0 of {len(events)}")
-    for code, got, want in fidelity(state, saved):
+    for code, got, want in teams:
         flag = "" if got == want else "   <-- MISMATCH"
         print(f"      {code}  roster {got[0]:3} (saved {want[0]:3})"
               f"  minors {got[1]:3} (saved {want[1]:3})"
               f"  budget ${got[2]:6.2f}M (saved ${want[2]:6.2f}M){flag}")
+    if banner:
+        print(f"\n  {banner[0]}")
+    return 1 if banner else 0
 
 
 if __name__ == "__main__":
@@ -479,4 +578,4 @@ if __name__ == "__main__":
     ap.add_argument("state", nargs="?", default=str(DEFAULT_STATE))
     ap.add_argument("--pool", help="pool CSV (default: derived from the state directory)")
     args = ap.parse_args()
-    report(Path(args.state), Path(args.pool) if args.pool else None)
+    raise SystemExit(report(Path(args.state), Path(args.pool) if args.pool else None))

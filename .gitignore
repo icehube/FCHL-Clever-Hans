@@ -49,5 +49,10 @@ Thumbs.db
 data/*.pdf
 data/*.xlsx
 
+# A `.tmp` beside a data file is an atomic write interrupted between the write
+# and its `os.replace` (bake_roster_state.py writes `data/players.csv.tmp`) —
+# half a file, never data, and exactly what a `git add -A` would sweep up.
+data/*.tmp
+
 # LibreOffice lock files (created while a data workbook is open)
 .~lock.*#

@@ -389,7 +389,7 @@ class TestWhatItCannotCarryIsNamed:
 
 class TestTheWriteIsAtomic:
     def test_a_failure_mid_write_leaves_the_pool_file_whole(
-        self, tmp_path, files, monkeypatch
+        self, tmp_path, files, monkeypatch, capsys
     ):
         """The pool used to be opened "w" and written row by row, so any error
         after the header left it truncated — measured, 53313 bytes to 274."""
@@ -404,8 +404,8 @@ class TestTheWriteIsAtomic:
             raise OSError("disk full")
 
         monkeypatch.setattr(bake.os, "replace", boom)
-        with pytest.raises(OSError, match="disk full"):
-            _run(_write_state(tmp_path, state), players, teams, "--write")
+        assert _run(_write_state(tmp_path, state), players, teams, "--write") == 1
+        assert "disk full" in capsys.readouterr().err
         assert players.read_bytes() == before
         assert not (tmp_path / "players.csv.tmp").exists()
 
@@ -544,6 +544,16 @@ class TestItRefusesRatherThanGuesses:
         p.write_text(json.dumps({"players_data": []}))
         assert _run(p, players, teams, "--write") == 1
         assert "not an auction state file" in self.capsys.readouterr().err
+        assert (players.read_bytes(), teams.read_bytes()) == before
+
+    def test_a_missing_state_file_is_refused_not_a_traceback(self, tmp_path, untouched):
+        """A fresh checkout has no `data/state/`, so this is the likeliest first
+        run, and it printed a traceback."""
+        players, teams, before = untouched
+        missing = tmp_path / "no-state" / "auction_state.json"
+        assert _run(missing, players, teams, "--write") == 1
+        err = self.capsys.readouterr().err
+        assert err.startswith("error: ") and str(missing) in err, err
         assert (players.read_bytes(), teams.read_bytes()) == before
 
     def test_a_ragged_row_is_refused_before_anything_is_written(

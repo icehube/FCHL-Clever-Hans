@@ -24,6 +24,20 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The bake's likeliest first run printed a traceback, and an interrupted
+  write left a file `git add -A` would commit.** Found by the 2026-09-22
+  grill's re-review. `main` turned every `ValueError` into a `refused:` line
+  and let everything else through, so a fresh checkout — which has no
+  `data/state/` — ran `bake_roster_state.py` into a `FileNotFoundError`
+  traceback. An `OSError` now prints `error: <file>: <reason>` and exits 1;
+  `error` rather than `refused` because it is not a judgement about the state.
+  The same line covers a failed write, which the atomic-write test used to
+  assert raised: `write_atomically` already leaves the pool whole and removes
+  its `.tmp`, so the test now asserts exit 1, the reason on stderr, and both
+  of those. A kill between the write and `os.replace` still leaves
+  `data/players.csv.tmp` behind, and nothing ignored it; `.gitignore` now
+  carries `data/*.tmp`.
+
 - **Two test docstrings named coverage that does not exist.** Found by the
   2026-09-22 grill's re-review. `test_scenarios.py`'s
   `test_the_plan_wants_a_player_the_ceiling_cut`, rewritten earlier the same

@@ -426,12 +426,21 @@ def main(argv: list[str] | None = None) -> int:
     """`run`, with a refusal printed as a sentence and exit status 1.
 
     Every refusal is a ValueError whose message already says what was wrong and
-    that nothing was written; a traceback in front of it only buries that.
+    that nothing was written; a traceback in front of it only buries that. An
+    OSError is a sentence too, as `error:` rather than `refused:` since it is
+    not a judgement about the state: the likeliest first run of all is a fresh
+    checkout with no `data/state/`, and that printed a traceback. A write that
+    fails is covered by the same line, because `write_atomically` leaves the
+    pool file whole and removes its `.tmp`.
     """
     try:
         return run(argv)
     except ValueError as e:
         print(f"refused: {e}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        where = f"{e.filename}: " if e.filename else ""
+        print(f"error: {where}{e.strerror or e}", file=sys.stderr)
         return 1
 
 

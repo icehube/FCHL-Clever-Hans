@@ -51,9 +51,9 @@ matter what the block below it said: re-run after `fchl_teams.json`,
 `team_odds.json` and the goalie stats moved on from the draft, it reported
 **47/139** picks capped against the published 0/139, with 119 mismatches
 flagged forty lines further down. The published figures reproduce only
-against the data files as they stood at the draft (bb8850a for 2026-09-13), so
-reproduce them from a worktree at that commit — never by checking `data/` out
-over the live pool.
+against the data files as they stood at the draft (bb8850a for 2026-09-13): run
+THIS script from a worktree at that commit, whose own copy has two of the four
+checks, and never check `data/` out over the live pool.
 
 Usage:
     .venv/bin/python -m tests.measure_replay                       # live state
@@ -357,7 +357,11 @@ def price_mismatches(
     return out
 
 
-def pool_mismatches(saved_prices: dict[str, float], model: dict[str, float]) -> list[str]:
+def pool_mismatches(
+    saved_prices: dict[str, float],
+    model: dict[str, float],
+    sold: frozenset[str] = frozenset(),
+) -> list[str]:
     """Unsold players whose replayed model price disagrees with the saved one.
 
     `saved_prices` is the SAVED state's own pool put through the price model —
@@ -366,6 +370,12 @@ def pool_mismatches(saved_prices: dict[str, float], model: dict[str, float]) -> 
     players who sold, and the headline counts players who did not, so a CSV or
     odds file that moved on after the draft could re-price the whole unsold
     pool with that check clean.
+
+    Both directions, because a CSV row the draft never had is a pool the draft
+    never bid against: until 2026-09-22 only the saved side was walked, and an
+    appended 1-point goalie replayed a 650-player pool against the draft's 649
+    with no banner. A name in the CSV that is in neither the saved pool nor
+    `sold` is that row — every player leaves the pool by being drafted.
     """
     out = []
     for name, price in sorted(saved_prices.items()):
@@ -376,6 +386,8 @@ def pool_mismatches(saved_prices: dict[str, float], model: dict[str, float]) -> 
             # Three places, not the sold check's two: the tolerance is half a
             # cent, so two decimals printed "$0.51M vs $0.51M" as a mismatch.
             out.append(f"{name}: pool ${got:.3f}M vs saved inputs ${price:.3f}M")
+    for name in sorted(set(model) - set(saved_prices) - sold):
+        out.append(f"{name}: in this CSV, neither sold nor in the saved pool")
     return out
 
 
@@ -523,7 +535,9 @@ def report(path: Path, pool: Path | None = None, scales: tuple[float, ...] = SCA
         name: pred.expected_price
         for name, pred in predict_all_prices(saved.available_players, params).items()
     }
-    pool_bad = pool_mismatches(saved_prices, model)
+    pool_bad = pool_mismatches(
+        saved_prices, model, frozenset(r.player_name for r in picks)
+    )
     teams = fidelity(state, saved)
     banner = verdict(bad, pool_bad, problems, teams)
     for line in banner:

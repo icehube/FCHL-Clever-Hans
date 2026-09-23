@@ -311,6 +311,17 @@ class TestTheUnsoldPoolIsChecked:
         (line,) = pool_mismatches({"Sample One": 0.5}, {})
         assert "Sample One" in line and "not in this CSV" in line
 
+    def test_a_player_the_draft_never_had_is_reported(self):
+        (line,) = pool_mismatches({"Sample One": 0.5}, {"Sample One": 0.5, "Sample Two": 0.5})
+        assert "Sample Two" in line and "neither sold nor in the saved pool" in line
+
+    def test_a_player_who_sold_is_not_an_extra(self):
+        assert pool_mismatches(
+            {"Sample One": 0.5},
+            {"Sample One": 0.5, "Sample Two": 0.5},
+            frozenset({"Sample Two"}),
+        ) == []
+
 
 _SAME = [("AAA", (24, 0, 1.0), (24, 0, 1.0))]
 
@@ -563,16 +574,28 @@ class TestAnInvalidReplaySaysSoFirst:
     The live pool rewrites it with what it already held.
     """
 
-    def _one_pick(self, tmp_path, logged_off_by: float) -> Path:
+    def _one_pick(self, tmp_path, logged_off_by: float, move_unsold: bool = False) -> Path:
         import data_loader
         from price_model import load_model_params, predict_all_prices
 
+        params = load_model_params()
         state = data_loader.build_initial_state()
         name = next(iter(state.available_players))
         player = state.available_players.pop(name)
-        price = predict_all_prices({name: player}, load_model_params())[name].expected_price
+        price = predict_all_prices({name: player}, params)[name].expected_price
         state.teams[MY_TEAM].add_acquired_player(PlayerOnRoster.from_pool(player, 1.0))
         state.transaction_log.append(_pick(name, salary=1.0, model=price + logged_off_by))
+        if move_unsold:
+            # The saved inputs moving on one UNSOLD player is the shape the
+            # pool check exists for: odds or a CSV edited after the draft. The
+            # dearest one, so the move is not swallowed by the floor.
+            prices = predict_all_prices(state.available_players, params)
+            dearest = max(prices, key=lambda n: prices[n].expected_price)
+            unsold = state.available_players[dearest]
+            before = prices[dearest].expected_price
+            unsold.team_probability += 20.0
+            after = predict_all_prices({dearest: unsold}, params)[dearest].expected_price
+            assert abs(after - before) > 0.05, "the planted move did not move his price"
         path = tmp_path / "auction_state.json"
         path.write_text(state.to_json())
         return path
@@ -591,6 +614,18 @@ class TestAnInvalidReplaySaysSoFirst:
         assert out.index("INVALID") < out.index("picks with >=1 capped"), (
             "the banner printed below the headline it invalidates"
         )
+
+    def test_an_unsold_price_that_moved_invalidates_it(self, tmp_path, capsys):
+        """Every other check here is on the player who SOLD; the headline is
+        about the ones who did not. Until 2026-09-22 the pool check could be
+        pointed at the CSV's own pool, or left out of the verdict, with the
+        suite green."""
+        path = self._one_pick(tmp_path, 0.0, move_unsold=True)
+        assert report(path, pool=Path("data/players.csv")) == 1
+        out = capsys.readouterr().out
+        assert "0 mismatch(es) over 1 picks" in out, "the sold check should be clean"
+        assert "unsold pool vs saved  : 1 mismatch(es)" in out
+        assert out.index("INVALID") < out.index("picks with >=1 capped")
 
 
 class TestLoadEvents:

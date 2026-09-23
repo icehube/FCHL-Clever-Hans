@@ -24,6 +24,29 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The replay's unsold-pool check, which the INVALID banner counts on, could
+  be switched off with the suite green — and only looked one way.** Found by
+  the 2026-09-22 grill's re-review. `f3addd1` added the check and its nine
+  killed mutants, but every test of it called `pool_mismatches` or `verdict`
+  directly, and the one end-to-end test only made a SOLD price diverge. So two
+  mutants survived all 48 tests: pricing the unsold pool from the CSV-built
+  state instead of the saved one (which on the real draft with today's data
+  takes 65 of 510 mismatches to 0), and leaving `pool_bad` out of the verdict.
+  `TestAnInvalidReplaySaysSoFirst` now plants the shape the check exists for —
+  the dearest unsold player's saved `team_probability` moved after the draft,
+  with a precondition that the move actually moved his price — and asserts
+  exit 1, the banner above the headline, and a clean sold check beside it.
+  Separately, the check walked only the SAVED pool, so a CSV row the draft
+  never had went unreported: an appended 1-point goalie replayed a 650-player
+  pool against the draft's 649 with no banner and exit 0. A name in the CSV
+  that is neither sold nor in the saved pool is now a mismatch. Four mutants
+  (the two survivors, dropping the reverse walk, and not passing the sold
+  names), four killed. Re-run over the real draft at `bb8850a`'s data with
+  this script: 0/139 capped, 0 sold and 0 of 510 unsold mismatches, exit 0.
+  The rules file and the docstring said "run from a worktree at `bb8850a` it
+  is clean on all four checks"; that commit's own copy has two of them, so
+  they now say to copy this script in.
+
 - **The pool `players.csv` held before the 2026-09-15 refresh was labelled
   2025-26 everywhere, and it is the 2024-25 pool.** Found by the 2026-09-22
   grill while tracing the RFA prior teams. `players-25.csv` is the genuine

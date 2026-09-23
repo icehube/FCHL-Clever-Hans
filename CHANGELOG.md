@@ -711,6 +711,23 @@ rediscover the same non-problem.
 
 ### Investigated
 
+- **The five price-model ideas moved to the pricer repo, where the model is
+  fit.** They were dynamic budget deflation, positional scarcity in the model,
+  price momentum, the auction-position effect, and a points ×
+  `team_probability` interaction. All five had sat under `BACKLOG.md`'s Ideas
+  since July with the rule *build one only if draft-day testing shows the model
+  plus the market layer isn't accurate enough*. The one real draft cannot apply
+  that rule yet. The 2025 replay paid $308.0M against a $242.9M model total,
+  but `players-25.csv` has no prior salary on any biddable, so `has_lag` is 0
+  pool-wide and the model's top price compresses to $6.40M. That gap cannot be
+  read as model error. Owner decision 2026-09-22: track them in
+  `FCHL-auction-pricer/BACKLOG.md`, created that day in its commit `c0a8a4e`.
+  That file carries the caveat above, and notes that the auction-position idea
+  first needs pick order joined into the training data
+  (`fchl_player_salaries.csv` has none; the league workbook's sheets do). It
+  also records that two of the five, deflation and momentum, are live
+  mid-auction corrections that would be built here if ever, not in the fit.
+
 - **Two players cannot share a search key, because the loader never let them;
   the 2026-09-10 `_searchable` entry was deferred on a false premise.** It said
   `_disambiguated_names` renames duplicate names only *within the biddable

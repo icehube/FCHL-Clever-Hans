@@ -47,7 +47,9 @@ a two-row CSV instead of hoping the pool carries one (**four**), then the
 tooltip floor, whose "zero slack" turned out to be twenty-five and which could
 not see the stat tiles it existed to hold (**three**). The owner then approved
 all ten RFA prior-team corrections, closing the last entry waiting on them
-(**two**).
+(**two**). Under **Ideas**, the five price-model ideas moved to
+`FCHL-auction-pricer/BACKLOG.md`, where the model is fit, and two wants closed
+(`CHANGELOG.md`, Investigated).
 
 **The walk before that, 2026-09-11**, also re-checked the mechanism
 rather than the prose. Nothing was closed by the walk — all nineteen findings
@@ -126,16 +128,6 @@ hypothesis unless it says what was measured.
 ---
 
 ## Ideas / future work
-
-### Price model (Layer 1)
-
-Track these; don't implement upfront. The market layer (Layer 2) already compensates for some of them — only build one if draft-day testing shows the base model plus market layer isn't accurate enough.
-
-- **Dynamic budget deflation** — scale model price by (remaining league budget / starting league budget) as a simple auction-phase correction. The model is currently static and does not adjust for budget depletion mid-auction.
-- **Positional scarcity in the model layer** — boost model price when a position's supply/demand ratio is tight. The market layer partially handles this via demand count, but the model price itself doesn't adjust.
-- **Price momentum** — rolling correction based on recent actual-vs-predicted ratios during the draft.
-- **Auction position effect** — early picks tend to sell higher than the model predicts.
-- **Non-linear points × team_probability interaction term.**
 
 ### Architecture
 

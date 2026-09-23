@@ -713,40 +713,51 @@ class TestKeeperProvenanceSurvivesAnOldStateFile:
             assert r.status_code == 200, r.text
             assert drafted in {p.name for p in team.acquired_players}, toast_of(r)
 
-    def test_a_renamed_keeper_is_found_too(self, state_dir):
+    def test_a_renamed_keeper_is_found_too(self, tmp_path):
         """The lookup key is the name the STATE holds, not the CSV's.
 
         `_disambiguated_names` renames every member of a colliding group, so a
-        keeper stored as `Jack Hughes (NJD)` is not in players.csv under that
+        keeper stored as `Sample Twin (EDM)` is not in players.csv under that
         string at all. Matching on `row["PLAYER"]` finds nobody and leaves him
-        mis-coloured with nothing on screen to say why — and the collisions are
-        not hypothetical: the 2026-08-07 file has three, two of them keepers.
+        mis-coloured with nothing on screen to say why.
+
+        SUPPLIED rather than found. This used to boot the app over the live
+        pool and look for a renamed keeper, and skipped on every pool since the
+        2026-09-15 refresh, whose only colliding pair are both free agents — so
+        the `row["PLAYER"]` mutant survived. The function takes the CSV as an
+        argument, so the collision is two rows in a file and the state is one
+        team; the boot path is already covered by the siblings above.
         """
+        import csv
+
         import data_loader
         import main
+        from state import AuctionState, PlayerOnRoster, TeamState
 
-        def build(c):
-            renamed = {n for names in data_loader.loaded_disambiguations.values()
-                       for n in names}
-            if not renamed:
-                pytest.skip("players.csv has no duplicate names to disambiguate")
-            for code, team in main.auction_state.teams.items():
-                for p in team.keeper_players:
-                    if p.name in renamed:
-                        _send_down(c, code, p.name)
-                        return code, p.name
-            pytest.skip("no renamed player is a keeper in this players.csv")
+        path = tmp_path / "players.csv"
+        path.write_text("\n".join([
+            "PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS,PRIOR FCHL TEAM",
+            "Sample Twin,F,C,MINOR,BOT,EDM,21,0.5,0,40,",
+            "Sample Twin,F,3,,UFA,TOR,29,0,0,30,",
+        ]) + "\n")
+        with open(path) as f:
+            names = data_loader._disambiguated_names(list(csv.DictReader(f)))
+        # The precondition, stated: without a rename the raw name would match
+        # and this could not tell the two keys apart.
+        assert names[0] == "Sample Twin (EDM)", names
 
-        code, name = _legacy_state_without_keeper_flags(state_dir, build)
-
-        with TestClient(main.app) as c:
-            assert c.get("/").status_code == 200
-            demoted = next(p for p in main.auction_state.teams[code].minor_players
-                           if p.name == name)
-            assert demoted.is_keeper, (
-                f"{name} kept his provenance only if the backfill matched on "
-                f"the disambiguated name"
-            )
+        demoted = PlayerOnRoster(
+            name=names[0], position="F", group="C", salary=0.5,
+            projected_points=40, is_minor=True, is_keeper=False,
+        )
+        state = AuctionState(teams={
+            "BOT": TeamState(code="BOT", name="Bot", minor_players=[demoted]),
+        })
+        main._backfill_keeper_flags(state, csv_path=str(path))
+        assert demoted.is_keeper, (
+            f"{demoted.name} kept his provenance only if the backfill matched on "
+            f"the disambiguated name"
+        )
 
 
 class TestTheLogsNhlClubSurvivesAnOldStateFile:

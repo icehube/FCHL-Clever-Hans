@@ -24,6 +24,27 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The renamed-keeper backfill test supplies its collision instead of
+  skipping, and the mutant it exists for is dead.** Closes the `BACKLOG.md`
+  entry filed by this morning's grill. The test booted the app over the live
+  pool and looked for a keeper whose name `_disambiguated_names` had renamed.
+  The 2026-27 pool's only colliding pair are both free agents, so it had
+  skipped since the 2026-09-15 refresh, and `_backfill_keeper_flags` matching
+  on `row["PLAYER"]` instead of the disambiguated name survived the suite. The
+  entry deferred it as needing a pool fixture and a redirected boot, because
+  the collision is decided at load. That was the wrong operation to test. The
+  function takes the CSV as an argument (`csv_path`), and the siblings in
+  `TestKeeperProvenanceSurvivesAnOldStateFile` already cover the boot path. So
+  the test is now two rows in a `tmp_path` file (a MINOR keeper on BOT and a
+  UFA sharing a made-up name) plus a one-team state holding the renamed keeper
+  unflagged. It asserts the rename happened, as its precondition, before
+  asserting the flag comes back. Mutation-checked with the anchor asserted to
+  hit exactly one site and a SIGTERM/SIGINT restore handler: matching on
+  `row["PLAYER"].strip()` fails this test and no other, and `main.py` was
+  restored byte-identical (`filecmp`). The suite's skips go from 3 to 2, and
+  both of those are legacy-schema checks that cannot apply to
+  `players-23.csv`.
+
 - **An odds refresh is one deliberate fingerprint failure, like a pool
   refresh.** Closes the 2026-09-14 `BACKLOG.md` entry. The refresh to the
   2026-2027 Cup odds changed all 32 clubs (EDM 11.04% → 6.76%) and re-priced
@@ -476,8 +497,9 @@ rediscover the same non-problem.
   its own test" true again. The full suite went from 10 skips to 3: two
   legacy-schema checks that cannot apply to `players-23.csv`, and
   `test_crash_recovery.py`'s renamed-keeper test, the same shape and filed in
-  `BACKLOG.md` because supplying it needs a pool fixture rather than a state
-  edit.
+  `BACKLOG.md` because supplying it needed a pool fixture rather than a state
+  edit. It did not, as the same day's triage found (the entry above):
+  the function under test takes the CSV path as an argument.
 
 - **A malformed `team_odds.json` stopped a saved draft from booting.** Found
   by the 2026-09-22 grill. `lifespan` calls `_load_nhl_odds` before it reads the

@@ -46,7 +46,8 @@ premise that was false rather than stale; see the last paragraph below. The
 four found small enough to fix then closed one per commit: the optimizer's
 thin-pool entry on a test that asks its question at every refresh (**six**),
 then the fingerprint's odds blind spot, by pinning the season and the top five
-clubs (**five**).
+clubs (**five**), then the renamed-keeper skip, by supplying the collision in
+a two-row CSV instead of hoping the pool carries one (**four**).
 
 **The walk before that, 2026-09-11**, also re-checked the mechanism
 rather than the prose. Nothing was closed by the walk — all nineteen findings
@@ -121,10 +122,6 @@ pool when it renames across the whole file — so three refreshes' worth of "zer
 collisions" were measuring a guarantee, which is why they always agreed. Re-check
 the mechanism before trusting "deferred because X" here; the prose is a
 hypothesis unless it says what was measured.
-
-### test infrastructure
-
-- [2026-09-22] [grill] tests/test_crash_recovery.py:738 (test_a_renamed_keeper_is_found_too) — **the renamed-keeper backfill test skips on the live pool, so `_backfill_keeper_flags` matching on the state's disambiguated name has no running guard.** It needs a keeper whose name `_disambiguated_names` renamed; the 2026-27 pool's only colliding group is the Elias Pettersson pair, and neither is a keeper, so it has skipped since the 2026-09-15 refresh. The six sibling skips fixed the same day were supplied by editing the loaded state; this one cannot be, because the collision is decided at load from the CSV and the test boots the app over it. Deferred because supplying it means a pool fixture with a duplicated keeper row and pointing the boot at it — `data_loader.PLAYERS_CSV` plus `main.STATE_DIR`, both module globals, inside a test that already builds a legacy state — which is a fixture of its own rather than a line. **Cost measured at defer time:** the mutant it guards (`row["PLAYER"]` for the disambiguated name) survives today; that is the whole cost, and it bites only on a pool where a keeper collides, which the 2024-25 file had twice
 
 ---
 

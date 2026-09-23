@@ -314,10 +314,14 @@ run: `is_done`, and bench flags, which have no column and cost nothing —
 12F/6D/2G from every roster player regardless, and none of
 `total_salary`/`roster_count`/`spendable_budget`/`physical_max_bid` reads it. Do
 **not** re-run `convert_fchl_online.py` over a baked file: it derives `STATUS`
-from the contract group and would overwrite every placement, and it restores
-every deleted row. Since 2026-09-22 it lists both and **refuses** unless
+from the contract group and would overwrite every placement, restore every
+deleted row, and put back the export's `SALARY` and `PRIOR FCHL TEAM` over any
+hand correction. Since 2026-09-22 it lists all of them and **refuses** unless
 `--force` (measured on the live pool that day: three recalls and one dropped
-player); a refresh from a new export is `--force` then a re-bake.
+player); a refresh from a new export is `--force`, then a re-bake, then the
+hand edits again. `PTS` and `NHL TEAM` are not guarded, because a new workbook
+or export moves them legitimately — which is also why a hand-edited projection
+does not survive a re-run.
 
 Any *other* failure is a real one. `tests/test_data_loader.py` is split three
 ways so this holds: loader **rules** run against `tests/fixtures/players_sample.csv`

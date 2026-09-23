@@ -24,6 +24,32 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The converter's re-run guard missed two of the three hand edits the docs
+  prescribe.** Found by the 2026-09-22 grill's re-review, the same day the
+  guard landed (`ce697eb`). It compared STATUS on rostered rows and nothing
+  else, so over a clean conversion of the live pool, deleting the top UFA's
+  row came back silently with exit 0, and so did hand-correcting an SRL
+  keeper's `SALARY` from 2.4 to 3.4 — the exact edit the bake's salary report
+  tells the operator to make. `placements_undone` is now `hand_edits_undone`
+  and compares a named set of columns, `HAND_EDITED` = STATUS, SALARY and
+  PRIOR FCHL TEAM, on every row it can match, and reports a deleted row
+  whether or not it was on a team. PTS and NHL TEAM are left out on purpose,
+  because a new workbook or a re-downloaded export moves them and a re-run to
+  pick that up must not be refused; CLAUDE.md now says a hand-edited
+  projection does not survive one. SALARY is compared by amount, so `2.30`
+  against `2.3` is not an edit. A PRIOR correction is safe under the DEFAULT
+  `--prior`, which is the dest itself: `prior_team_index` reads a placeholder
+  row's team out of its own PRIOR column, so the correction reads back, and
+  there is a test saying so. The guard also claimed to compare "as a
+  multiset" with nothing pinning it; a test now plants three same-name rows
+  on one team whose statuses agree as sets and differ as multisets. Six
+  mutants (a set comparison, each column dropped, PTS added, rostered rows
+  only, and raw salary strings), six killed. On a scratch copy of the live
+  pool with the real export and workbook it still refuses with exactly the
+  four known edits (three recalls and Laine) and flags no salary or prior
+  team, and with the reviewer's SRL salary edit it lists
+  `SALARY 3.4 -> 2.4` as a fifth.
+
 - **The bake reported a $0.75M penalty entered in both places as a
   disagreement.** Found by the 2026-09-22 grill's re-review.
   `penalty_disagreements` rounded the state's figure to one decimal and left

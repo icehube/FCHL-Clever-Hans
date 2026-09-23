@@ -252,23 +252,31 @@ class TestARerunRefusesToUndoPlacements:
         ["Sample Keeper    3", "D", "BOT", "EDM", "27", "$2.3", "", "", ""],
         ["Sample Signing    3", "F", "BOT", "EDM", "26", "$1.1", "", "", ""],
         ["Sample Free    3", "G", "UFA", "EDM", "30", "$0.0", "", "", ""],
+        ["Sample Restricted    RFA1", "F", "RFA", "EDM", "24", "$0.9", "", "", ""],
     ]
     POINTS = {
         normalize_name(r[0].rsplit(None, 1)[0]): [(r[1], 20)] for r in EXPORT
     }
 
-    def _run(self, tmp_path, monkeypatch, *extra, export=None):
+    def _run(self, tmp_path, monkeypatch, *extra, export=None, points=None, prior=None):
         import convert_fchl_online as cfo
 
         monkeypatch.setattr(cfo, "read_export", lambda _p: export or self.EXPORT)
-        monkeypatch.setattr(cfo, "read_projections", lambda _p: (self.POINTS, {}))
+        monkeypatch.setattr(cfo, "read_projections", lambda _p: (points or self.POINTS, {}))
         monkeypatch.setattr(cfo, "read_goalie_stats", lambda _p, _s: [])
         return cfo.main([
             "export.csv", "dobber.xlsx", str(tmp_path / "players.csv"),
-            "--prior", str(tmp_path / "no-prior.csv"),
+            "--prior", str(prior or tmp_path / "no-prior.csv"),
             "--goalie-stats", str(self._goalies(tmp_path)),
             *extra,
         ])
+
+    def _edit(self, tmp_path, name, **cells):
+        rows = self._rows(tmp_path)
+        for r in rows:
+            if r["PLAYER"] == name:
+                r.update(cells)
+        self._rewrite(tmp_path, rows)
 
     @staticmethod
     def _goalies(tmp_path):
@@ -336,6 +344,85 @@ class TestARerunRefusesToUndoPlacements:
 
         assert self._run(tmp_path, monkeypatch, "--force") == 0
         assert "Sample Keeper" in {r["PLAYER"] for r in self._rows(tmp_path)}
+
+    def test_a_deleted_free_agent_is_refused_too(self, tmp_path, monkeypatch, capsys):
+        """A player the league drops need not be on a roster; until 2026-09-22
+        only rostered rows were checked and a deleted UFA came back with exit 0."""
+        self._run(tmp_path, monkeypatch)
+        self._rewrite(
+            tmp_path, [r for r in self._rows(tmp_path) if r["PLAYER"] != "Sample Free"]
+        )
+        capsys.readouterr()
+
+        out = self._refused(tmp_path, monkeypatch, capsys)
+        assert "Sample Free" in out and "(no row) -> in the pool" in out
+
+    def test_a_hand_corrected_salary_is_refused(self, tmp_path, monkeypatch, capsys):
+        """The bake's salary report tells the operator to make exactly this
+        edit, and a re-run reverted it with exit 0."""
+        self._run(tmp_path, monkeypatch)
+        self._edit(tmp_path, "Sample Keeper", SALARY="3.4")
+        capsys.readouterr()
+
+        out = self._refused(tmp_path, monkeypatch, capsys)
+        assert "Sample Keeper" in out and "SALARY 3.4 -> 2.3" in out
+
+    def test_a_hand_corrected_prior_team_is_refused(self, tmp_path, monkeypatch, capsys):
+        self._run(tmp_path, monkeypatch)
+        self._edit(tmp_path, "Sample Restricted", **{"PRIOR FCHL TEAM": "SRL"})
+        capsys.readouterr()
+
+        out = self._refused(tmp_path, monkeypatch, capsys)
+        assert "Sample Restricted" in out and "PRIOR FCHL TEAM SRL -> (blank)" in out
+
+    def test_the_default_prior_reads_a_corrected_prior_team_back(self, tmp_path, monkeypatch):
+        """`--prior` defaults to the dest, and a placeholder row's team is read
+        from its own PRIOR column, so the correction survives a re-run rather
+        than being refused — the refusal is for a `--prior` pointed elsewhere."""
+        self._run(tmp_path, monkeypatch)
+        self._edit(tmp_path, "Sample Restricted", **{"PRIOR FCHL TEAM": "SRL"})
+
+        assert self._run(tmp_path, monkeypatch, prior=tmp_path / "players.csv") == 0
+        prior = {r["PLAYER"]: r["PRIOR FCHL TEAM"] for r in self._rows(tmp_path)}
+        assert prior["Sample Restricted"] == "SRL"
+
+    def test_a_salary_typed_differently_is_not_an_edit(self, tmp_path, monkeypatch):
+        self._run(tmp_path, monkeypatch)
+        self._edit(tmp_path, "Sample Keeper", SALARY="2.30")
+        assert self._run(tmp_path, monkeypatch) == 0
+
+    def test_new_projections_are_not_an_edit(self, tmp_path, monkeypatch):
+        """A new workbook moves PTS legitimately, and re-running to pick it up
+        is the one routine same-season re-run there is."""
+        self._run(tmp_path, monkeypatch)
+        moved = {k: [(pos, pts + 5) for pos, pts in v] for k, v in self.POINTS.items()}
+        assert self._run(tmp_path, monkeypatch, points=moved) == 0
+        assert {r["PTS"] for r in self._rows(tmp_path)} == {"25"}
+
+    def test_a_name_twice_on_a_team_is_compared_as_a_multiset(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Three rows sharing (PLAYER, POS, FCHL TEAM): the dest's statuses are
+        the export's with one START demoted. As SETS the two agree — both hold
+        START and MINOR — so a set comparison would call this a clean re-run."""
+        twins = [
+            ["Sample Twin    3", "F", "BOT", "EDM", "25", "$1.0", "", "", ""],
+            ["Sample Twin    3", "F", "BOT", "EDM", "25", "$1.0", "", "", ""],
+            ["Sample Twin    A", "F", "BOT", "EDM", "25", "$1.0", "", "", ""],
+        ]
+        export = self.EXPORT + twins
+        self._run(tmp_path, monkeypatch, export=export)
+        rows = self._rows(tmp_path)
+        next(r for r in rows if r["PLAYER"] == "Sample Twin" and r["STATUS"] == "START")[
+            "STATUS"
+        ] = "MINOR"
+        self._rewrite(tmp_path, rows)
+        capsys.readouterr()
+
+        before = {p: p.read_bytes() for p in tmp_path.iterdir()}
+        assert self._run(tmp_path, monkeypatch, export=export) == 1
+        assert {p: p.read_bytes() for p in tmp_path.iterdir()} == before
+        assert "Sample Twin" in capsys.readouterr().out
 
     def test_a_signing_out_of_the_pool_is_not_a_deleted_row(self, tmp_path, monkeypatch):
         """The dest had him as a free agent; the export has him on a team. That

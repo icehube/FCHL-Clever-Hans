@@ -49,14 +49,15 @@ They are dropped; PTS comes from the workbook.
 `convert_legacy_players.convert` uses, and reported rather than filtered, so the
 size of that decision is visible.
 
-**A re-run REFUSES to overwrite placements it did not make** unless `--force`.
+**A re-run REFUSES to overwrite edits it did not make** unless `--force`.
 The derived STATUS is only the starting point: `bake_roster_state.py` writes
-the operator's recalls and demotions back into this file, and dropping a player
-from the league is a hand edit that deletes his row. Converting over that file
-again restores the group-derived STATUS and every deleted row, and before
-2026-09-22 it did so with nothing said beyond a blank-club line for the one
-deleted row that happened to have no NHL club. `placements_undone` lists what
-would be lost and `main` stops there.
+the operator's recalls and demotions back into this file, a salary or prior
+team the export has wrong is corrected by hand here, and dropping a player from
+the league is a hand edit that deletes his row. Converting over that file again
+restores the export's version of every one, and before 2026-09-22 it did so
+with nothing said beyond a blank-club line for the one deleted row that
+happened to have no NHL club. `hand_edits_undone` lists what would be lost and
+`main` stops there.
 """
 
 import argparse
@@ -566,44 +567,67 @@ def _on_a_team(row: dict) -> bool:
     return bool(row["FCHL TEAM"]) and row["FCHL TEAM"] not in _PLACEHOLDER_TEAMS
 
 
-def placements_undone(
+# The columns a hand edit of the pool file is the documented way to change, and
+# that converting the same export again would put back: STATUS is the bake's;
+# SALARY is what the bake's salary report tells the operator to correct by hand;
+# PRIOR FCHL TEAM is how a wrong prior team gets fixed. PTS and NHL TEAM are
+# deliberately NOT here -- a new workbook or a re-downloaded export moves them
+# legitimately, and a re-run made to pick that up must not be refused.
+HAND_EDITED = ("STATUS", "SALARY", "PRIOR FCHL TEAM")
+
+
+def _cell(field: str, value: str) -> str:
+    """A cell as compared: SALARY by amount, so a hand-typed `3.40` is `3.4`."""
+    value = (value or "").strip()
+    if field == "SALARY":
+        return f"{float(value or 0):.1f}"
+    return value
+
+
+def hand_edits_undone(
     existing: list[dict], converted: list[dict]
-) -> list[tuple[dict, str | None]]:
-    """Rostered rows this conversion would put back the way the export has them.
+) -> list[tuple[dict, str | None, str, str]]:
+    """Edits made to the dest since it was converted, which this run would undo.
 
-    Two ways, each `(new row, STATUS the dest has)`:
+    Each is `(new row, field, dest's value, this run's value)`:
 
-    - **a placement reverted** -- the same player on the same team, with the
-      dest's STATUS differing from the derived one. That is a bake, or a hand
-      edit; the conversion itself only ever writes the derived value.
-    - **a row restored** -- a rostered player the dest does not carry at all,
-      reported with `None`. Deleting the row is how a player is dropped from
-      the league (see `no_nhl_club`), and this is that decision being undone.
-      "At all" is load-bearing: matched on name and position across every team
-      and placeholder, so a player who merely changed teams, or signed out of
-      the free-agent pool, is not mistaken for one somebody deleted.
+    - **a hand-edited cell** -- the same player on the same team (or in the
+      same placeholder pool), with one of `HAND_EDITED` differing. The
+      conversion only ever writes what the export and the `--prior` file say,
+      so a difference is a bake or a hand edit.
+    - **a row restored** -- a player the dest does not carry at all, with
+      `field` None. Deleting the row is how a player is dropped from the league
+      (see `no_nhl_club`), and this is that decision being undone. "At all" is
+      load-bearing: matched on name and position across every team and
+      placeholder, so a player who merely changed teams, or signed out of the
+      free-agent pool, is not mistaken for one somebody deleted.
 
-    Keyed on (PLAYER, POS, FCHL TEAM) and compared as a multiset of statuses,
+    Keyed on (PLAYER, POS, FCHL TEAM) and compared as a multiset per field,
     because the export can carry one name twice on a team and a dict keyed on
-    it would silently keep one of them. Rows on no team carry a blank STATUS by
-    construction and are not compared.
+    it would silently keep one of them. Until 2026-09-22 (the same day it was
+    written) this compared STATUS on rostered rows alone, so a deleted free
+    agent and a hand-corrected keeper salary both came back with exit 0.
     """
-    had: dict[tuple, list[str]] = collections.defaultdict(list)
+    had: dict[tuple, list[dict]] = collections.defaultdict(list)
     for row in existing:
-        had[_roster_key(row)].append(row["STATUS"])
+        had[_roster_key(row)].append(row)
     anywhere = {(row["PLAYER"], row["POS"]) for row in existing}
     new: dict[tuple, list[dict]] = collections.defaultdict(list)
     for row in converted:
-        if _on_a_team(row):
-            new[_roster_key(row)].append(row)
+        new[_roster_key(row)].append(row)
 
-    undone: list[tuple[dict, str | None]] = []
+    undone: list[tuple[dict, str | None, str, str]] = []
     for key, rows in new.items():
-        if key in had:
-            if sorted(had[key]) != sorted(r["STATUS"] for r in rows):
-                undone.extend((r, "/".join(sorted(had[key]))) for r in rows)
-        elif key[:2] not in anywhere:
-            undone.extend((r, None) for r in rows)
+        if key not in had:
+            if key[:2] not in anywhere:
+                undone.extend((r, None, "", "") for r in rows)
+            continue
+        for field in HAND_EDITED:
+            was = sorted(_cell(field, r[field]) for r in had[key])
+            if was != sorted(_cell(field, r[field]) for r in rows):
+                undone.extend(
+                    (r, field, "/".join(was), _cell(field, r[field])) for r in rows
+                )
     return undone
 
 
@@ -727,26 +751,28 @@ def main(argv: list[str] | None = None) -> int:
     # goalie stats below included, since a refused run must leave both files
     # exactly as it found them.
     undone = (
-        placements_undone(read_canonical(args.dest), converted)
+        hand_edits_undone(read_canonical(args.dest), converted)
         if os.path.exists(args.dest)
         else []
     )
     if undone:
-        print(f"\n{args.dest} carries placements this conversion would undo ({len(undone)}):")
-        for row, had in undone:
-            print(
-                f"    {row['PLAYER']:28} {row['FCHL TEAM']:4} "
-                f"{had or '(no row)'} -> {row['STATUS']}"
+        print(f"\n{args.dest} carries edits this conversion would undo ({len(undone)}):")
+        for row, field, had, now in undone:
+            change = (
+                f"(no row) -> {row['STATUS'] or 'in the pool'}"
+                if field is None
+                else f"{field} {had or '(blank)'} -> {now or '(blank)'}"
             )
+            print(f"    {row['PLAYER']:28} {row['FCHL TEAM']:4} {change}")
         print(
             "  They were made after the last conversion: by bake_roster_state.py, "
             "or by hand -- a deleted row is a player dropped from the league."
         )
         if not args.force:
             print(
-                f"refused: {len(undone)} placement(s) in {args.dest} would be "
-                "discarded; nothing was written. Re-bake after converting, or "
-                "pass --force to discard them.",
+                f"refused: {len(undone)} edit(s) in {args.dest} would be "
+                "discarded; nothing was written. Re-bake and re-apply them after "
+                "converting, or pass --force to discard them.",
                 file=sys.stderr,
             )
             return 1

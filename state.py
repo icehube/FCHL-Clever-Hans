@@ -762,14 +762,14 @@ class AuctionState:
     def _searchable(self) -> dict[str, tuple[str, str | None, Searchable]]:
         """Every findable name, resolved to ONE location per name.
 
-        Per NAME, not per player, and that is a real limitation rather than a
-        guarantee: `_disambiguated_names` renames duplicates WITHIN the
-        biddable pool, but a roster row and a biddable row sharing a name go
-        to different dicts and neither is renamed, so two different people
-        can carry one string. `setdefault` then reports the roster one and
-        drops the other. Not reachable on today's data — the zero-point
-        exclusion hides both halves of every such pair — which is exactly why
-        it is written down; see BACKLOG.md.
+        Per NAME, not per player, which is safe because a name IS a player
+        here: `_disambiguated_names` runs over EVERY row of players.csv,
+        rostered and biddable alike, so a keeper and a free agent sharing a
+        string are both renamed at load, and `test_player_identity.py` pins
+        the rule and the live data. This docstring said until 2026-09-22 that
+        only the biddable pool was renamed, so two people could share a key
+        here. That was never true of the loader (CHANGELOG.md, Investigated),
+        and `test_stress.py`'s ownership check holds it through picks and undo.
 
         Resolution order mirrors `TeamState.find_player` and `remove_player`:
         keeper, then acquired, then minors, then the pool, then the log. The

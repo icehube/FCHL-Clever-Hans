@@ -15,6 +15,12 @@ python3 -m venv .venv
 
 Run tests with `.venv/bin/pytest tests/`.
 
+**A what-if against the live draft is a second server on a copy of the state,
+not a feature**: `cp -r data/state data/state-whatif && FCHL_STATE_DIR=data/state-whatif .venv/bin/uvicorn main:app --port 8001`.
+The live draft and its undo chain are untouched, `.gitignore` covers the copy,
+and `rm -rf data/state-whatif` ends it. Prefer it to `/load-scenario`, whose
+round trip hands the live draft back with an **empty** undo chain.
+
 **The pool is selectable, and the saved state follows it.**
 `data_loader.PLAYERS_CSV` defaults to `data/players.csv` and is overridden by
 `FCHL_PLAYERS_CSV`; `main._default_state_dir()` then derives

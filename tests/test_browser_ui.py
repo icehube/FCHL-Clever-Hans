@@ -1026,11 +1026,11 @@ class TestTooltipsStayInsideTheirPanel:
     # that actually caught the team-panel case; 375 and 1280 did not.
     WIDTHS = (375, 640, 700, 800, 1024, 1280, 1920)
 
-    # (width, scenario-or-None). A fresh reset cannot render 8 of the app's 20
-    # `data-tip` tooltips, and the one that mattered most is `#bid-limits`' only
+    # (width, scenario-or-None). A fresh reset cannot render several of the
+    # app's `data-tip` tooltips, and the one that mattered most is `#bid-limits`' only
     # `tooltip-left`: it renders per CAPPED row, and on a fresh state the ceiling
     # IS the salary cap, so nothing is ever capped and this suite had never once
-    # measured it (`BACKLOG.md`, bid_limits.html:64). `endgame-ceiling-binds`
+    # measured it (`CHANGELOG.md`, 2026-09-22). `endgame-ceiling-binds`
     # produces ~83 capped rows.
     #
     # Three widths rather than all seven, because the extra cost is a page load

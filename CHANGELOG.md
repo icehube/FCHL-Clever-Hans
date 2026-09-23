@@ -602,6 +602,134 @@ rediscover the same non-problem.
 
 ### Investigated
 
+- **Two players cannot share a search key, because the loader never let them;
+  the 2026-09-10 `_searchable` entry was deferred on a false premise.** It said
+  `_disambiguated_names` renames duplicate names only *within the biddable
+  pool*. On that reading, a keeper and a free agent sharing a string would
+  reach `_searchable` as one key, `setdefault` would keep the roster copy, and
+  the draftable one would vanish from the header search. The function's own
+  docstring says the opposite ("one name per CSV row, unique across the
+  file"), and `load_players` calls it over every row before any status branch,
+  so the keeper and the UFA are both suffixed. The entry had quoted that
+  docstring for its example pair, and the docstring lists the pair as one of
+  the two failures the function exists to *prevent*. Measured 2026-09-22 on the
+  2024-25 pool, the file that carried the entry's own example: `Jack Hughes`
+  loads as `Jack Hughes (NJD)` on HSM and `Jack Hughes (LAK)` in the pool, with
+  **0** roster/pool name collisions after load. It was already pinned twice:
+  `tests/test_player_identity.py::test_a_keeper_and_a_free_agent_stop_sharing_a_name`
+  for the rule, and `::test_nobody_is_owned_and_draftable_at_once` for the
+  live data on every refresh. So the entry's re-checks (three pools, zero
+  collisions each, recorded as "a second pool agreeing, not evidence the bug
+  is gone") were measuring a guarantee, which is why they always agreed. The
+  `_searchable` docstring carried the same claim; it now says what the loader
+  does and names the test that holds it through picks and undo.
+
+- **A legacy save's undo chain losing `is_keeper` is unreachable, because no
+  legacy save is left.** The 2026-08-08 entry: `_backfill_keeper_flags`
+  repairs the live state of a file written before `is_keeper` existed, but not
+  its `_snapshots`, so undoing past a whole session would restore minors with
+  no provenance. That needs such a file to boot. Checked read-only on
+  2026-09-22: the operator's `data/state/auction_state.json` holds 389
+  rostered players and **0** without the key, and its 50 snapshots hold **0**
+  unflagged minors. Every save since the flag landed writes it, and the chain
+  has rolled over many times since then. The 2026 draft begins with `/reset`,
+  which builds from `players.csv` and sets the flag at load. The backfill
+  stays: it is idempotent and costs nothing on a modern file. Its docstring
+  now says why the gap is closed instead of pointing at `BACKLOG.md`.
+
+- **A stale trade cannot be executed with JavaScript off, because nothing can
+  be evaluated with it off.** The 2026-09-11 entry: `/trade-execute` acts on
+  the server's `last_trade_eval`, so only `markTradeEvalStale` stands between
+  an edited selection and executing the evaluated one. Re-checked end to end
+  on 2026-09-22.
+  - **Without JS:** the evaluate form is `hx-post` with no `action`, so it
+    never reaches `/trade-evaluate`. No verdict renders, and there is no
+    Execute button to press.
+  - **With JS:** every path that changes the proposal marks it stale. A
+    checkbox goes through `updateTradeSummary`, and a partner change through
+    `loadTradeChoices` → `updateTradeSummaryFor`; both call
+    `markTradeEvalStale`.
+  - **On the server:** the two stale cases it can see are already refused. A
+    `trade_id` that is not the last evaluation's is rejected, and so is any
+    evaluation that predates a pick, since `_recompute()` clears
+    `last_trade_eval`.
+
+  The server-side re-check the entry costed would guard a path no browser
+  reaches. The trade form rework on `BACKLOG.md` (Ideas) may remove the window
+  entirely, since auto-evaluating on change leaves nothing to go stale.
+
+- **The keyboard-scroll gap on the four `.table-scroll-x` regions is closed as
+  decided, not fixed.** Filed 2026-08-13 as a WCAG 2.1.1 gap: the wrappers
+  have no `tabindex`, so the League State table, both roster tables and the
+  price chart's table scroll only by pointer. The owner confirmed on 2026-09-12
+  that the draft is run with a mouse. After that, the entry stayed open only on
+  "the next operator may not be this one", which for a tool built around one
+  team's draft is not a reason that expires. If it is ever wanted, the fix is
+  `tabindex="0"` plus `role="region"` and an `aria-label` naming the table on
+  each wrapper, not `tabindex` alone. Mind the price chart's copy: that one
+  mounts inside `#bid-panel`, so it adds a tab stop among the bid controls.
+
+- **The unmeasured-tooltips entry is closed: the one bubble that could clip is
+  measured, and the rest are not worth a page state each.** Filed 2026-08-08
+  as "8 of the 20 `data-tip` tooltips are never placement-checked".
+  - **The capped-price tip:** this is the one with a real exposure,
+    `#bid-limits`' `tooltip-left` on a capped price. It has been
+    placement-checked horizontally, by name, since 2026-08-13 (the
+    `endgame-ceiling-binds` scenario in `TestTooltipsStayInsideTheirPanel`).
+    Its vertical overhang was measured at ~25px on the last visible row, and
+    scrolling one row cures it. The 2026-09-13 replay showed a real 139-pick
+    draft never drew it at all, pool-wide.
+  - **What was left:** the `stop_status` bubbles, only one of which ever
+    renders at a time, and the Penalty tile. The global rule is a
+    `max-width`, which can only narrow a bubble.
+  - **The counts had gone stale:** the templates carry 19 `data-tip`
+    attributes today, not 20.
+
+- **Building the whole context for small fragments is closed as not worth
+  fixing.** Filed 2026-08-06: every endpoint pays ~8.5ms for `_context`,
+  including a pool-sized `bid_limits`, whatever it renders. The 2026-09-13
+  real draft measured it against what it competes with, a 27.2s median gap
+  between picks, so ~0.03% of the operator's own cadence. The owner reported
+  no stall ("It's not slow at all", 2026-09-12). The entry itself said a
+  smaller fix than a per-panel context builder was not worth making, and that
+  builder is a cross-endpoint refactor on the bidding path. So it could only
+  ever close by that refactor or by this decision. The one endpoint where the
+  cost dominated, the per-keystroke `/find-player`, already skips `_context`.
+
+- **The `Resulting promise was garbage collected` browser flake has not
+  recurred, and is closed.** Seen once, in a 777-test run on 2026-08-17, on
+  `test_an_over_cap_adjust_salary_toast_renders_and_dismisses`. It passed 3/3
+  alone, and the browser file passed 35/35 on its own. The entry said "worth a
+  fix only if it recurs". It has not, in five weeks of full runs with the
+  browser suite included; the latest, on 2026-09-22, was 1380 passed. If it
+  comes back, the shape the entry recorded still applies: wait for the
+  specific toast element before evaluating against it. Never use a blanket
+  rerun decorator, which would hide a real regression in the one suite that
+  checks what `TestClient` cannot.
+
+- **A what-if against the live draft needs no Save State button, because a
+  second server on a copy of the state already is one.** The 2026-08-05 idea
+  asked for a way to test a what-if without costing the real draft state.
+  `FCHL_STATE_DIR` (since `3eb6ed9`) does that with no code: copy `data/state`
+  to `data/state-whatif` and start a second server on it on another port.
+  `.gitignore` already covers `data/state*/`. Verified 2026-09-22 against the
+  operator's real save. The copy booted with all 147 transactions, a `/undo`
+  there took its chain from 50 to 49, and every file in `data/state/` kept
+  its size and modification time throughout. The in-app route loses more
+  than it looks: `/load-scenario` pushes only the prior state onto the new
+  state's chain, so a scenario round trip returns the live draft with an
+  **empty** undo chain where it had fifty. The recipe is in CLAUDE.md's quick
+  start.
+
+- **The buyout picker will not show scan verdicts.** Parked since 2026-08-15 on
+  "follow-up only if the picker ever reads as thin". The owner's notes from the
+  2026-09-13 draft named the trade form and not this. The reason it was not
+  built still holds. `/buyout-indicators` answers with out-of-band dots and
+  `hx-swap="none"`, so labels in the picker would be right on page load and
+  stale after the first scan. Making them live would re-render the `<select>`
+  mid-scan and drop the operator's selection. The roster table's dots answer
+  "who"; the Analyzer answers "what would it cost".
+
 - **The eight biddables whose names carry a backtick all price with no
   reputation, and that is correct.** Raised by the 2026-09-22 grill as a
   possible upstream join failure: every backtick-named biddable in

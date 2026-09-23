@@ -184,10 +184,10 @@ def _backfill_keeper_flags(
 
     The undo chain is NOT repaired: `AuctionState._snapshots` is a list of whole
     JSON documents, so fixing them here would mean this module reaching
-    into serialization keys that belong to state.py. Consequence, filed in
-    BACKLOG.md: after booting a legacy file, undoing back past everything done
-    this session restores minors without the flag. Narrow, cosmetic, and cheaper
-    to record than to hard-code a second copy of the state's JSON shape.
+    into serialization keys that belong to state.py. After booting a legacy
+    file, undoing past everything done this session restores unflagged minors,
+    and no such file is left to boot: closed 2026-09-22 as unreachable
+    (CHANGELOG.md, Investigated), since the live save and its 50 snapshots carry it.
 
     Matched on the DISAMBIGUATED name, not `row["PLAYER"]`, because that is the
     name the state file holds: `_disambiguated_names` renames every member of a
@@ -1963,8 +1963,8 @@ async def find_player(request: Request, q: str = ""):
     keystroke, and `_context` costs ~8.5ms and assembles a pool-sized
     `bid_limits` list (678 rows on the 2026-27 pool) regardless of what is rendered, against 0.33ms of
     actual work. Passing a dict already carrying `"request"` takes `_render`'s
-    existing short-circuit. That narrows ONE endpoint; the BACKLOG entry
-    asking for a per-panel context builder across all of them is untouched.
+    existing short-circuit. That narrows ONE endpoint; a per-panel context
+    builder for all of them was closed as not worth it (CHANGELOG, 2026-09-22).
 
     `teams` is passed because the row template names the holding club, and it
     is a dict reference rather than a computation.

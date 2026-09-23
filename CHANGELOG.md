@@ -24,6 +24,33 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The FCHL Online converter's untested half is tested, and the three
+  mutants that survived it are dead.** Closes the 2026-09-17 `BACKLOG.md`
+  entry, which argued from two live defects found by looking rather than by
+  the suite that the rest should be done before the next run. Its list was
+  the name split, the group parse, the unique-name exact join and the
+  first-initial fallback's club guard, plus three mutants the grill measured
+  surviving every data-pipeline test: removing that club gate,
+  `ACTIVE_GROUPS = {"2"}`, and dropping the `'RFA'` quote strip, which holds
+  back 21 of the 22 RFAs as a team the league does not have. By the
+  re-review, the club gate and the unique-name join were already pinned (by
+  `395baaf`'s fallback tests and the Pettersson fix's
+  `test_a_name_carried_once_ignores_position`), and `ACTIVE_GROUPS` died
+  only by accident, in a re-run test about something else — re-run over the
+  full suite, the quote strip still survived all 1296 tests.
+  `TestTheRowParse` now states each rule directly: the group is the last
+  token and anything else there is an error rather than a name, a quoted
+  `'RFA'` is the placeholder and is not held back, all eight groups map to
+  their STATUS on a team, a free agent has none whatever his group, and the
+  salary loses its dollar sign. Looking for what the entry did not list
+  turned up three more survivors in code nothing had tested:
+  `prior_team_index`'s surname-only pass (the Chinakhov case its docstring
+  describes), its refusal to break a tie, and `merge_goalie_stats` replacing
+  its own season rather than appending a second block.
+  `TestThePriorTeamJoin` and `TestGoalieStatsReplaceTheirSeason` pin those,
+  along with a placeholder row reading its team from its own PRIOR column.
+  Twelve mutants in all, twelve killed.
+
 - **The bake's likeliest first run printed a traceback, and an interrupted
   write left a file `git add -A` would commit.** Found by the 2026-09-22
   grill's re-review. `main` turned every `ValueError` into a `refused:` line

@@ -27,9 +27,14 @@ from convert_fchl_online import (
     GOALIE_SHEET,
     PASTE_SHEET,
     SKATER_SHEET,
+    convert,
+    lookup_prior_team,
     match_points,
+    merge_goalie_stats,
     no_nhl_club,
+    prior_team_index,
     read_projections,
+    split_name_and_group,
 )
 from convert_legacy_players import normalize_name
 
@@ -209,6 +214,105 @@ class TestTheFallbackSpeaksTheLeaguesClubCodes:
         skaters = [[1, "Jonathan Sample", "C", "WAS", 10, 20, 30]]
         exact, loose = read_projections(_workbook(tmp_path / "d.xlsx", skaters, []))
         assert match_points("Jon Sample", "BOS", "F", exact, loose) == (None, None)
+
+
+class TestTheRowParse:
+    """The export's cells onto the canonical row, one rule at a time.
+
+    Filed 2026-09-17 as the untested half of the converter, and measured
+    2026-09-22: dropping the `'RFA'` quote strip survived the whole suite —
+    it holds back 21 of the 22 RFAs as a team the league does not have — and
+    `ACTIVE_GROUPS = {"2"}` died only by accident, in a re-run test about
+    something else. Synthetic rows throughout; the shape is the export's.
+    """
+
+    @staticmethod
+    def _one(name_and_group, team="BOT", cap="$1.1"):
+        converted, skipped = convert(
+            [[name_and_group, "F", team, "EDM", "25", cap, "", "", ""]],
+            known_teams={"BOT"},
+            allowed_nhl={"EDM"},
+        )
+        assert not skipped, f"held back: {skipped}"
+        (row,) = converted
+        return row
+
+    def test_the_group_is_the_last_token_and_the_rest_is_the_name(self):
+        assert split_name_and_group("Sample Three Words    B") == ("Sample Three Words", "B")
+
+    def test_a_last_token_that_is_not_a_group_is_an_error_not_a_name(self):
+        with pytest.raises(ValueError, match="contract group"):
+            split_name_and_group("Sample Suffix Jr")
+
+    def test_a_quoted_rfa_is_the_placeholder_and_is_not_held_back(self):
+        """21 of the 22 RFA rows spell their team `'RFA'`, apostrophes and all."""
+        row = self._one("Sample Restricted    RFA1", team="'RFA'")
+        assert (row["FCHL TEAM"], row["STATUS"]) == ("RFA", "")
+
+    @pytest.mark.parametrize("group, status", [
+        ("2", "START"), ("3", "START"),
+        ("A", "MINOR"), ("B", "MINOR"), ("C", "MINOR"),
+        ("D", "MINOR"), ("E", "MINOR"), ("F", "MINOR"),
+    ])
+    def test_the_group_decides_the_status_on_a_team(self, group, status):
+        assert self._one(f"Sample Player    {group}")["STATUS"] == status
+
+    def test_a_free_agent_has_no_status_whatever_his_group(self):
+        assert self._one("Sample Free    3", team="UFA")["STATUS"] == ""
+
+    def test_the_salary_loses_its_dollar_sign(self):
+        assert self._one("Sample Player    3", cap="$2.3")["SALARY"] == "2.3"
+
+
+class TestThePriorTeamJoin:
+    """`prior_team_index` is a looser join than `match_points`, on purpose, and
+    what keeps it honest is that ambiguity resolves to nothing. Measured
+    2026-09-22: dropping the surname pass, and breaking a tie instead of
+    refusing it, both survived every data-pipeline test."""
+
+    HEADER = "PLAYER,POS,GROUP,STATUS,FCHL TEAM,NHL TEAM,AGE,SALARY,BID,PTS,PRIOR FCHL TEAM\n"
+
+    def _index(self, tmp_path, *rows):
+        path = tmp_path / "prior.csv"
+        path.write_text(self.HEADER + "".join(r + "\n" for r in rows))
+        return prior_team_index(str(path))
+
+    def test_a_respelled_first_name_is_found_by_surname(self, tmp_path):
+        """The live case is a Yegor who became an Egor: the full name and the
+        first initial both disagree, and only the surname pass finds him."""
+        index = self._index(tmp_path, "Yegor Samplov,F,RFA1,,SRL,PIT,24,0.9,0,40,")
+        assert lookup_prior_team("Egor Samplov", index) == "SRL"
+
+    def test_a_surname_on_two_teams_resolves_to_nothing(self, tmp_path):
+        index = self._index(
+            tmp_path,
+            "Adam Samplewin,F,3,START,BOT,EDM,26,1.0,0,40,",
+            "Aaron Samplewin,D,3,START,SRL,TOR,27,1.0,0,30,",
+        )
+        assert lookup_prior_team("Alex Samplewin", index) == ""
+
+    def test_an_rfa_already_carries_his_prior_team(self, tmp_path):
+        index = self._index(tmp_path, "Sample Restricted,F,RFA1,,RFA,EDM,24,0.9,0,40,LGN")
+        assert lookup_prior_team("Sample Restricted", index) == "LGN"
+
+
+class TestGoalieStatsReplaceTheirSeason:
+    def test_a_rerun_replaces_this_season_and_keeps_the_others(self, tmp_path):
+        """Appending blindly gave one season two blocks, and `load_goalie_wins`
+        keeps whichever its dict comprehension sees last."""
+        path = tmp_path / "goalies.csv"
+        path.write_text(
+            "league_year,player_name,proj_wins,proj_so,proj_gp\n"
+            "2025-2026,Sample Keeper,30,3,55\n"
+            "2026-2027,Sample Keeper,28,2,50\n"
+        )
+        new = [{"league_year": "2026-2027", "player_name": "Sample Keeper",
+                "proj_wins": 31, "proj_so": 4, "proj_gp": 58}]
+        merged = merge_goalie_stats(str(path), new, "2026-2027")
+        seasons = collections.Counter(r["league_year"] for r in merged)
+        assert seasons == {"2025-2026": 1, "2026-2027": 1}
+        (this,) = [r for r in merged if r["league_year"] == "2026-2027"]
+        assert this["proj_wins"] == 31
 
 
 class TestTheLivePoolHasNoCopiedProjection:

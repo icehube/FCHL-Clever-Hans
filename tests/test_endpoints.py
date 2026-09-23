@@ -3449,8 +3449,15 @@ class TestTheNhlOddsView:
         here is a draft that cannot boot — over a reference table the saved
         state never needed. It caught three exception types until 2026-09-22,
         and four of these six raised straight through it (AttributeError,
-        TypeError) — measured by restoring the tuple. The season goes too: a file that named
-        one before failing would label an empty table with it.
+        TypeError) — measured by restoring the tuple. The season goes too, so
+        the two globals always describe one read; that is defensive rather than
+        visible, since `nhl_odds.html` prints a season only above a table.
+
+        Both globals start from a GOOD read, planted: this test takes no
+        `client`, so run alone the app never booted and both were still at
+        their empty module defaults — which made "blanked" true of a loader
+        that blanked nothing (measured 2026-09-22: the mutant survived
+        `-k malformed_odds` and died only beside the rest of the class).
         """
         import data_loader
         import main
@@ -3459,10 +3466,9 @@ class TestTheNhlOddsView:
         bad.write_text(content)
         real = data_loader.load_team_odds
         monkeypatch.setattr(data_loader, "load_team_odds", lambda: real(str(bad)))
-        monkeypatch.setattr(main, "nhl_odds", main.nhl_odds)
         monkeypatch.setattr(data_loader, "last_odds_season", data_loader.last_odds_season)
-
-        monkeypatch.setattr(main, "nhl_odds_season", main.nhl_odds_season)
+        monkeypatch.setattr(main, "nhl_odds", {"EDM": 11.0})
+        monkeypatch.setattr(main, "nhl_odds_season", "the last good file's season")
 
         main._load_nhl_odds()
         assert main.nhl_odds == {}

@@ -392,10 +392,15 @@ rediscover the same non-problem.
   of a saved draft); before b02c4d4 a saved-state boot never opened the file
   at all, so this was a regression against the rule that degrading beats
   failing to boot. Now broad `Exception`, like `_load_saved_state`, and the
-  season label is blanked with the table, because the loader records it before
-  it reads the odds and an empty view would otherwise be labelled with a
-  season. Parametrized over six shapes; restoring the narrow tuple fails four,
-  dropping the season reset fails four.
+  season label is blanked with the table so the two globals describe one read.
+  Parametrized over six shapes; restoring the narrow tuple fails four. (This
+  entry first said the blanking kept an empty view from being labelled with a
+  season, and that dropping it failed four. Neither was true: `nhl_odds.html`
+  prints a season only above a table, so the blanking is defensive; and the
+  test takes no `client`, so run alone both globals were still at their empty
+  module defaults and the mutant survived `-k malformed_odds`, dying only
+  beside the rest of the class. Found by the re-review; the test now plants a
+  good read first, and dropping either reset fails all six in isolation.)
 
 - **The counterfactual card's "at your bid" went stale the moment the bid
   changed, and Recompute on an empty box answered with a 422.** Found by the

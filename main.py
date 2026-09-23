@@ -1796,8 +1796,8 @@ def _load_nhl_odds() -> None:
     narrow tuple it replaced was a list of the ways a file can be MISSING, not
     malformed: `{"odds": []}` raised AttributeError and a string probability
     TypeError, both straight out of `lifespan` (measured 2026-09-22 against a
-    copy of a saved draft). The season is blanked with the table, since the
-    loader records it before it reads the odds.
+    copy of a saved draft). The season is blanked with the table so the two
+    always describe one read — defensive, since no season renders without rows.
     """
     global nhl_odds, nhl_odds_season
     try:

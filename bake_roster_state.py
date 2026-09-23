@@ -232,6 +232,12 @@ def penalty_disagreements(
 
     Reported, never written — see the module docstring for why a disagreement
     here means a stale state far more often than a new fact.
+
+    Compared at two decimals, not the salary check's one: a penalty is HALF a
+    salary, so it lives on a $0.05M grid. Rounding one side to one decimal put
+    17 of the 245 legal penalties up to $12.25M a full 0.05 off themselves — a
+    $0.75M buyout entered in both places reported "file $0.8M state $0.8M" as
+    a disagreement, blaming a stale state.
     """
     with open(teams_path) as f:
         meta = json.load(f)
@@ -239,9 +245,9 @@ def penalty_disagreements(
     for code, team in state["teams"].items():
         if code not in meta:
             continue
-        was = float(meta[code].get("penalty", 0.0))
-        now = round(float(team.get("penalties", 0.0)), 1)
-        if abs(was - now) >= 0.05:
+        was = round(float(meta[code].get("penalty", 0.0)), 2)
+        now = round(float(team.get("penalties", 0.0)), 2)
+        if abs(was - now) >= 0.005:
             out.append((code, was, now))
     return sorted(out)
 
@@ -348,7 +354,7 @@ def report_dropped(
             "one, so the likelier reading is that the STATE is older than the file:"
         )
         for code, was, now in penalties:
-            print(f"    {code}  file ${was:.1f}M   state ${now:.1f}M")
+            print(f"    {code}  file ${was:.2f}M   state ${now:.2f}M")
     if salaries:
         print(
             f"\nnot carried: {len(salaries)} salary disagreement(s) with "

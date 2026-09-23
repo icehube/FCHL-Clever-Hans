@@ -24,6 +24,23 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The bake reported a $0.75M penalty entered in both places as a
+  disagreement.** Found by the 2026-09-22 grill's re-review.
+  `penalty_disagreements` rounded the state's figure to one decimal and left
+  the file's alone, then tested for a 0.05 gap — but a penalty is half a
+  salary, so it sits on a $0.05M grid, and 17 of the 245 legal values up to
+  $12.25M are a full 0.05 off their own one-decimal rounding. Reproduced on a
+  copy of `data/`: BOT at $0.75M and SRL at $1.25M in the teams file, a state
+  built from those same files, and the bake printed `2 penalty
+  disagreement(s)` — `file $0.8M state $0.8M` — under a sentence telling the
+  operator the state was stale. `TestAgainstTheLiveData` runs that command on
+  the live files, so it would have failed the day a real $0.75M buyout was
+  entered. Both sides now round to two decimals against a 0.005 tolerance and
+  print `.2f`. Two mutants: rounding the state to one decimal again (four
+  tests fail) and a 0.05 tolerance, which survived until a test planted the
+  one legal pair where it bites — `0.15 - 0.1` is `0.0499…` in floating
+  point, so a nickel disagreement there went unreported.
+
 - **The replay's unsold-pool check, which the INVALID banner counts on, could
   be switched off with the suite green — and only looked one way.** Found by
   the 2026-09-22 grill's re-review. `f3addd1` added the check and its nine

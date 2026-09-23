@@ -300,7 +300,7 @@ class TestPenaltiesAreReportedNeverWritten:
         assert _status_of(players)["Sample Prospect Forward"] == "START"
         out = capsys.readouterr().out
         assert "penalty disagreement" in out
-        assert "SRL  file $2.8M   state $0.0M" in out
+        assert "SRL  file $2.80M   state $0.00M" in out
 
     def test_a_penalty_only_in_the_state_is_reported_not_baked(
         self, tmp_path, files, capsys
@@ -311,7 +311,40 @@ class TestPenaltiesAreReportedNeverWritten:
         state["teams"]["SRL"]["penalties"] = 2.8
         assert _run(_write_state(tmp_path, state), players, teams, "--write") == 0
         assert (players.read_bytes(), teams.read_bytes()) == before
-        assert "SRL  file $0.0M   state $2.8M" in capsys.readouterr().out
+        assert "SRL  file $0.00M   state $2.80M" in capsys.readouterr().out
+
+
+    @pytest.mark.parametrize("penalty", [0.75, 1.25, 12.25])
+    def test_a_penalty_on_the_half_salary_grid_agrees_with_itself(
+        self, tmp_path, files, capsys, penalty
+    ):
+        """Half a salary lands on $0.05M steps; rounding one side to one decimal
+        reported the same figure in both places as a disagreement."""
+        players, teams = files
+        teams.write_text(teams.read_text().replace(
+            '"name": "Searle Supremes",\n    "penalty": 0.0',
+            f'"name": "Searle Supremes",\n    "penalty": {penalty}',
+        ))
+        state = _prep_state()
+        state["teams"]["SRL"]["penalties"] = penalty
+        assert _run(_write_state(tmp_path, state), players, teams) == 0
+        assert "penalty disagreement" not in capsys.readouterr().out
+
+    @pytest.mark.parametrize("file, state", [(0.0, 0.05), (0.1, 0.15)])
+    def test_a_penalty_off_by_a_nickel_is_still_reported(
+        self, tmp_path, files, capsys, file, state
+    ):
+        """The smallest real disagreement. 0.15 - 0.1 is 0.0499... in floating
+        point, so a tolerance of 0.05 would miss the second pair."""
+        players, teams = files
+        teams.write_text(teams.read_text().replace(
+            '"name": "Searle Supremes",\n    "penalty": 0.0',
+            f'"name": "Searle Supremes",\n    "penalty": {file}',
+        ))
+        saved = _prep_state()
+        saved["teams"]["SRL"]["penalties"] = state
+        assert _run(_write_state(tmp_path, saved), players, teams) == 0
+        assert f"SRL  file ${file:.2f}M   state ${state:.2f}M" in capsys.readouterr().out
 
 
 class TestSalaryCorrectionsAreReported:

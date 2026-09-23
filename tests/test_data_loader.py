@@ -375,6 +375,37 @@ class TestLiveDataInvariants:
             "Infeasible for everyone"
         )
 
+    def test_the_pool_can_field_every_lineup(self, state):
+        """Per POSITION, which the aggregate check above cannot see.
+
+        A pool of 678 forwards and no goalies passes that one. `roster_needs`
+        is the MILP's own position minimums (12F/6D/2G, what a team must hold
+        to field its lineup), so a pool short of the league's summed need at
+        one position means some team cannot field a lineup once the others
+        have drafted — and its `solve_optimal_roster` goes Infeasible, the
+        degraded case the bid panel badges rather than plans around. Measured
+        2026-09-22 on the 2026-27 pool: slack F +312 / D +186 / G +41, so this
+        is a tripwire for a thinner refresh, not a live risk. It replaced a
+        BACKLOG.md entry parked since 2026-07-05 on "a future pool could be
+        thinner", which is a check a refresh should make rather than a person.
+        """
+        needed: dict[str, int] = {}
+        for team in state.teams.values():
+            for pos, n in team.roster_needs.items():
+                needed[pos] = needed.get(pos, 0) + n
+        have: dict[str, int] = {}
+        for p in state.available_players.values():
+            have[p.position] = have.get(p.position, 0) + 1
+        short = {
+            pos: f"{have.get(pos, 0)} in the pool for {n} open"
+            for pos, n in sorted(needed.items())
+            if have.get(pos, 0) < n
+        }
+        assert not short, (
+            f"the pool cannot fill every team's starting lineup: {short} — "
+            "the last teams to need one go Infeasible"
+        )
+
     # Every pool CSV in data/, not just the one the app is pointed at. The bug
     # this catches was invisible for exactly that reason: data/players.csv
     # spells Utah with the ALIAS (`UTH`), which happened to match the filename

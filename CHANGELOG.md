@@ -24,6 +24,27 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **A pool too thin to field every lineup now fails at the refresh, not in
+  the draft.** Closes the 2026-07-05 `BACKLOG.md` entry on
+  `solve_optimal_roster` going Infeasible when the pool cannot supply a
+  roster. Two of the three routes it named were already handled. The budget
+  one is unreachable through bidding (the commissioner refuses the bid) and
+  is badged when play reaches it; the badge is pinned by
+  `TestRenderingWhenTheOptimizerFails`. The entry had also concluded that
+  short-roster planning was not worth building. It stayed open only on "a
+  future pool could be thinner", and that is a check for the refresh to make,
+  not a person. The existing `test_the_pool_can_fill_the_rosters` could not
+  make it, because it compares the pool's size to the open spots in
+  aggregate, and a pool of 678 forwards and no goalies passes it.
+  `test_the_pool_can_field_every_lineup` sums every team's `roster_needs`
+  (the MILP's own 12F/6D/2G minimums) per position against the pool.
+  Measured 2026-09-22 on the 2026-27 pool: slack F +312 / D +186 / G +41,
+  against F +333 / D +197 / G +53 on the pool the entry measured in August.
+  Shown to fail by running it alone against a scratch copy of `players.csv`
+  with the free-agent goalies cut to five. It reported
+  `{'G': '5 in the pool for 9 open'}` while the aggregate test beside it
+  passed.
+
 - **The FCHL Online converter's untested half is tested, and the three
   mutants that survived it are dead.** Closes the 2026-09-17 `BACKLOG.md`
   entry, which argued from two live defects found by looking rather than by

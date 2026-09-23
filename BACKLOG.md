@@ -41,8 +41,10 @@ Investigated) — the stale trade without JavaScript, the `_searchable` name
 collision, the keyboard-scroll gap, a legacy save's undo chain, the unmeasured
 tooltips, the full-context build and the one-off browser flake — and moved the
 player-id refactor to **Ideas**, since no defect stands behind it, taking the
-list from fifteen to **seven**. Two of the seven had been deferred on a premise
-that was false rather than stale; see the last paragraph below.
+list from fifteen to **seven**. Two of those seven had been deferred on a
+premise that was false rather than stale; see the last paragraph below. The
+four found small enough to fix then closed one per commit: the optimizer's
+thin-pool entry on a test that asks its question at every refresh (**six**).
 
 **The walk before that, 2026-09-11**, also re-checked the mechanism
 rather than the prose. Nothing was closed by the walk — all nineteen findings
@@ -118,11 +120,6 @@ pool when it renames across the whole file — so three refreshes' worth of "zer
 collisions" were measuring a guarantee, which is why they always agreed. Re-check
 the mechanism before trusting "deferred because X" here; the prose is a
 hypothesis unless it says what was measured.
-
-### engine/market
-
-- [2026-07-05] [review] optimizer.py:282 (solve_optimal_roster) — positive-point pool smaller than remaining spots (or cheapest legal roster > budget) → MILP Infeasible → bid advice degrades to floor values. UI warning badge added in `templates/partials/bid_panel.html:15 (milp.status != "Optimal")` so it's no longer silent, and pinned in both directions 2026-08-13 by `tests/test_endpoints.py::TestRenderingWhenTheOptimizerFails`; actual short-roster planning (optimize the N players you CAN buy) still unbuilt — deferred, and **probably not worth building**: measured 2026-08-06, position slack on the live pool is F +333 / D +197 / G +53 against league-wide open needs, so the pool-too-small trigger is unreachable, and the budget-too-tight trigger is unreachable through **bidding** (the commissioner-prevented case, closed 2026-08-06 — see `CHANGELOG.md`) though NOT through play: buyout penalties, `/trade-between` and `/adjust-salary` all raise cap load and warn rather than refuse, and $20.5M of penalties on a fresh BOT reaches it (measured 2026-08-13). Left open only because a future pool could be thinner; re-measure before building anything — and note 2026-08-20 measured the **adjacent** idea, shrinking the pool handed to a solve that is otherwise fine, and found it silently wrong once BOT's budget per open spot drops toward the reserve floor (see the cold-`/bid-check` write-up in `CHANGELOG.md` under 2026-09-12, and `tests/measure_marginal.py --sweep`). That is the same regime this entry is about, so a short-roster path has to be exact rather than a heuristic over "the N players you CAN buy"
-
 
 ### test infrastructure
 

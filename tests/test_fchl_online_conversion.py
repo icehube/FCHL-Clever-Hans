@@ -193,6 +193,24 @@ class TestAnUnprojectedDisplayRowReadsTheRawTable:
         assert self._entries(tmp_path, [self.FORWARD, self.DEFENCE], paste) == [("F", 60)]
 
 
+class TestTheFallbackSpeaksTheLeaguesClubCodes:
+    """Dobber spells Washington `WAS`, the export and odds file `WSH`, and the
+    first-initial fallback gates on the two AGREEING — so until 2026-09-22 no
+    Washington player could pass it. Synthetic names, per the pool rule."""
+
+    def test_a_washington_nickname_still_matches(self, tmp_path):
+        skaters = [[1, "Jonathan Sample", "C", "WAS", 10, 20, 30]]
+        exact, loose = read_projections(_workbook(tmp_path / "d.xlsx", skaters, []))
+        assert match_points("Jon Sample", "WSH", "F", exact, loose) == (
+            30, ("Jon Sample", "WSH", "Jonathan Sample")
+        )
+
+    def test_the_gate_still_refuses_another_club(self, tmp_path):
+        skaters = [[1, "Jonathan Sample", "C", "WAS", 10, 20, 30]]
+        exact, loose = read_projections(_workbook(tmp_path / "d.xlsx", skaters, []))
+        assert match_points("Jon Sample", "BOS", "F", exact, loose) == (None, None)
+
+
 class TestTheLivePoolHasNoCopiedProjection:
     """The live-data tripwire for the same bug, in case the next workbook finds
     a new way to collapse two players onto one key."""

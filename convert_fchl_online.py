@@ -98,6 +98,12 @@ PASTE_SHEET = "Paste"
 
 # DobberHockey writes skater positions as lines; the pool writes F/D/G.
 _DOBBER_POSITION = {"C": "F", "LW": "F", "RW": "F", "LD": "D", "RD": "D"}
+# ...and one club under its own spelling. `match_points`' fallback gates on the
+# club AGREEING with the export's, which says `WSH` like the odds file; Dobber
+# says `WAS` (29 rows of the 2026-27 workbook), so until 2026-09-22 no
+# Washington player could ever pass that gate. Measured then, it cost nobody —
+# every Washington row matched on the exact name — which is luck, not a rule.
+_DOBBER_CLUB = {"WAS": "WSH"}
 GOALIE_STATS_COLUMNS = ["league_year", "player_name", "proj_wins", "proj_so", "proj_gp"]
 
 
@@ -237,7 +243,10 @@ def read_projections(
         exact[normalize_name(name)].append((position, points))
         parts = normalize_name(name).split()
         if len(parts) >= 2:
-            loose[(parts[0][:1], parts[-1])].append((name, _text(club), points))
+            code = _text(club)
+            loose[(parts[0][:1], parts[-1])].append(
+                (name, _DOBBER_CLUB.get(code, code), points)
+            )
 
     sheet = book[SKATER_SHEET]
     rows = list(sheet.iter_rows(values_only=True))
@@ -342,7 +351,9 @@ def match_points(
 
     With the club gate it accepts exactly the four real nickname cases
     (`Dan`/`Daniel Vladar`, `Jack`/`John St. Ivany`, `Sam`/`Samuel Poulin`,
-    `Alex`/`Alexander Wennberg`) and rejects all five impostors.
+    `Alex`/`Alexander Wennberg`) and one transliteration (`Maxim`/`Maksim
+    Shabanov`, re-measured 2026-09-22), and rejects all five impostors. The
+    gate compares CODES, so Dobber's must be the league's — see `_DOBBER_CLUB`.
 
     Note this gate is right HERE and wrong for `prior_team_index`, which joins
     across seasons — see that function.

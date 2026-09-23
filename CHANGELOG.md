@@ -24,6 +24,18 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The converter's first-initial fallback could never match a Washington
+  player.** Found by the 2026-09-22 grill. `match_points` accepts a
+  first-initial + surname match only when the NHL clubs agree, and compared
+  codes as strings: the export and `team_odds.json` say `WSH`, and the
+  DobberHockey workbook says `WAS` on 29 rows. `read_projections` now maps
+  Dobber's codes onto the league's through `_DOBBER_CLUB`. Measured before and
+  after on the real inputs, this changes **nothing** in today's conversion:
+  every Washington row matched on the exact name, which was luck rather than a
+  rule. The same run found five accepted fallbacks against the four the
+  docstring named; the fifth is a transliteration (Maxim/Maksim Shabanov), now
+  listed. Pinned with a synthetic workbook; emptying the map fails it.
+
 - **The bench slot label rendered at 30% opacity.** Found by the 2026-09-22
   grill. A bench row is `opacity-50` and the slot cell was `opacity-60`, and
   opacity multiplies down the tree, so `BF1` came out at 0.30: by estimate

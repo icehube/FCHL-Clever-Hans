@@ -31,12 +31,15 @@ those 21 are held back as an unknown team and the pool loses all but one RFA.
 **There is no STATUS column**, and `data_loader` needs one to tell an active
 keeper from a minor-leaguer. It is derived from the contract group
 (`ACTIVE_GROUPS` -> START, everything else -> MINOR) by owner decision
-2026-09-15. Measured against the file this replaces that rule is wrong on 22 of
-248 rostered rows (8.9%) and understates league cap used by $20.7M, always in
-the same direction — a group A/B/C player who is actually on the active roster
-reads as a minor, and his salary comes off cap. The GROUP=3 errors cost nothing,
-since group 3 counts against the cap in the minors too; only the A/B/C ones move
-money. Quote that error rate when the file is refreshed, rather than rediscovering it.
+2026-09-15. Applied to the file this replaces (the 2024-25 pool) that rule is
+wrong on 22 of 248 rostered rows (8.9%) and understates league cap used by
+$20.7M; applied to `players-25.csv`, the 2025-26 snapshot, it is wrong on 36 of
+255 (14.1%) and $35.4M. Always in the same direction — a group A-F player who is
+actually on the active roster reads as a minor, and his salary comes off cap.
+The GROUP=3 errors cost nothing, since group 3 counts against the cap in the
+minors too; only the A-F ones move money. Quote both rates when the file is
+refreshed, rather than rediscovering them — they are one season apart and not
+close, so neither is "the" error rate.
 
 **Its own GP/Pts/PPG columns are NOT the projections** — they are a blend, and
 they disagree with DobberHockey by enough to matter (McDavid 138 against 131).

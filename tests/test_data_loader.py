@@ -418,10 +418,10 @@ class TestLiveDataInvariants:
 
         Resolved through NHL_TEAM_ALIASES, like the logo sweep above and for the
         same reason: `team_odds.json` is canonical (`UTA`) and the pools have not
-        always been (the 2025-26 data/players.csv spelled it `UTH` on 78 rows).
+        always been (the 2024-25 data/players.csv spelled it `UTH` on 78 rows).
 
         `UFA` is allowed and is the ONE exception — it is the FCHL's own
-        placeholder for an unsigned player (9 rows of the 2025-26
+        placeholder for an unsigned player (9 rows of the 2024-25
         data/players.csv; the converters blank it now), not a club that could
         ever have odds. Named explicitly rather than skipped by
         a rule, so a second placeholder appearing in a refresh fails here

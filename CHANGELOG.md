@@ -24,6 +24,45 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The pool `players.csv` held before the 2026-09-15 refresh was labelled
+  2025-26 everywhere, and it is the 2024-25 pool.** Found by the 2026-09-22
+  grill while tracing the RFA prior teams. `players-25.csv` is the genuine
+  2025-26 pre-draft state (the old tool's auto-save, written 2025-09-05), and
+  against it the old file's ages run exactly one lower on 823 of 824 shared
+  players; it also lists Luukkonen and Vilardi as RFAs, both of whom the 2024
+  auction signed and `players-25.csv` has on LGN and ZSK. So the docs had two
+  different files for one season and none for the one before. 33 mentions
+  across CLAUDE.md, `BACKLOG.md`, the rules, the runbook, `main.py`,
+  `scenarios.py`, `convert_legacy_players.py`, four test files and a template
+  comment are relabelled, plus two in today's entries below — a same-length
+  replacement that moves no line. Entries in this file older than today keep
+  the label they were written with. `data-formats.md` gains a short "Which season each
+  pool is" note so the next reader does not have to re-derive it. Three
+  claims built on the label were also wrong:
+  - **"166 of 170 MINOR rows are A–E" was misattributed by this grill's own
+    docs commit** (`c9a412b`). It had said "the current file", stale only
+    because the bake moved three rows; the correction pinned it on the
+    hand-maintained file, where it reproduces nowhere. It is the 2026-27 file
+    as converted at `4a08a6f`. The hand-maintained 2024-25 file has 145 of 149,
+    and its other four are group `3` — on-cap minors, the shape the legacy
+    converter's `MINOR -> A` gets wrong — where the export's are `F`.
+  - **The STATUS rule's quoted error rate was for the wrong season, and the
+    right one is worse.** "Wrong on 22 of 248 rostered rows, understates cap
+    by $20.7M" reproduces exactly on the 2024-25 file against its own `GROUP`
+    and `STATUS`, so the method was sound. Run the same way on `players-25.csv`
+    it is **36 of 255 (14.1%), $35.4M**. The converter's docstring had said to
+    "quote that error rate when the file is refreshed", and the two rates are
+    a season apart and not close, so it now quotes both. The grill's own
+    finding had claimed the 8.9% was a cross-season comparison and so "not an
+    error rate"; measured, it is one, just not 2025-26's.
+  - CLAUDE.md's quick-start still said in the present tense that `players.csv`
+    puts `UFA` in the NHL club column on 9 rows, and `convert_legacy_players.py`'s
+    `valid_nhl_teams` docstring said the same, plus that it spells Utah `UTH`.
+    Both describe the 2024-25 file; neither pool carries either today.
+
+  `BACKLOG.md`'s header also still said a template reference carries "a line
+  only", a month after template references started carrying an anchor.
+
 - **`test_a_higher_price_can_only_be_worse` tested the solver, not the path
   to it.** Found by the 2026-09-22 grill. It is the test that says the
   Recompute price reaches the solve, and it called `main._counterfactual`
@@ -79,14 +118,17 @@ rediscover the same non-problem.
     is rewritten, and its proposed guard is marked as one that would not have
     caught the incident: that script loaded the default pool over the default
     state, so the CSVs agreed.
-  - `data-formats.md`'s "166 of 170 MINOR rows are A–E" (the 2025-26 file;
-    today 163 of 167, the rest `F`) and "no A–F player is a starter" (true as
+  - `data-formats.md`'s "166 of 170 MINOR rows are A–E" (the 2026-27 file as
+    converted; 163 of 167 since the bake, the rest `F` — this item first said
+    the hand-maintained file, which was wrong — see the season-label entry
+    above) and "no
+    A–F player is a starter" (true as
     converted, false since the `c27ed02` bake made three BOT prospects
     starters). This also falsified "every buyout-ineligible contract is in the
     minors by construction".
   - Present-tense `UTH on 78 rows` / `UFA on 9 rows` / `705-row` in `main.py`,
     two test docstrings, the pre-auction runbook and the `_context` BACKLOG
-    entry. These describe the 2025-26 pool; on the 2026-27 pool it is 0, 0 and
+    entry. These describe the 2024-25 pool; on the 2026-27 pool it is 0, 0 and
     678.
   - "The penalty sits on BOT's cap", in CLAUDE.md and `search_results.html`.
     It sits on whichever team bought him out, since 2026-09-12.
@@ -122,7 +164,7 @@ rediscover the same non-problem.
   priced: counting rostered ones would put the live pool's 3 blank-club minors
   in the footer for good. The template comment and `_odds_unlisted`'s
   docstring still said `players.csv` carries `UFA` on 9 rows, true of the
-  2025-26 file only; both now say so. Planted, since the live pool has no
+  2024-25 file only; both now say so. Planted, since the live pool has no
   subject; three mutants, all killed.
 
 - **The NHL odds modal could describe a different file from the prices, and
@@ -431,6 +473,26 @@ rediscover the same non-problem.
 
 
 ### Investigated
+
+- **The eight biddables whose names carry a backtick all price with no
+  reputation, and that is correct.** Raised by the 2026-09-22 grill as a
+  possible upstream join failure: every backtick-named biddable in
+  `players.csv` — K`Andre Miller, Ryan O`Reilly, Drew and Logan O`Connor,
+  Zachary L`Heureux, Liam O`Brien, Cole O`Hara, Charle-Edouard D`Astous — has
+  `SALARY` 0.0, so `has_lag` is 0 and the model treats each as new to the
+  league. The shape looked like a name-match miss, since the backtick is
+  exactly what `normalize_name` exists to fold. It is not one:
+  `convert_row` takes salary straight from the export's own Cap column, with
+  no join at all, and that column reads $0.0 for all eight. And they were
+  unrostered: the 2025-26 auto-save lists six of them as `UFA` with `STATUS`
+  `NO` and salary 0.0, the other two are in no 2025-26 pool, and none of the
+  eight appears on the league workbook's 2025 sheet. 322 of the export's 1018
+  biddables carry a nonzero salary, so 0.0 means what the data format says it
+  means, "not rostered last season". The "$1.0" the grill first quoted beside
+  one of them was the `BID` field, not a salary. Several were bought in earlier
+  years (the 2024 sheet has K'Andre Miller to SRL at $0.8M and Ryan O'Reilly to
+  VPP at $1.7M), which is reputation the model does not see by design:
+  `log_lag` is last season's salary, not the last salary anyone paid.
 
 - **The 2026-09-07 "15 corrupted player names" entry no longer describes any
   pool in the repo, and was closed with no code change.** It recorded two
@@ -3119,7 +3181,7 @@ than defects, and the answers are the deliverable; two were real.
   `load_players` gates the biddable branch on `status == ""` and `UFA`/`RFA` sit
   in `_PLACEHOLDER_TEAMS` — so all 674 free agents match *neither* branch and are
   dropped without a word. An empty pool is indistinguishable from a finished
-  draft on screen. `convert_legacy_players.py:325 (_require_biddables)` refuses
+  draft on screen. `convert_legacy_players.py:326 (_require_biddables)` refuses
   to write that file at all, and `tests/test_legacy_conversion.py` asserts both
   halves: the converted file loads 668 biddables, and the same rows with `"0"`
   restored load none.

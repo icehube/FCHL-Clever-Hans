@@ -32,7 +32,7 @@ Dylan Holloway,F,C,MINOR,BOT,STL,25,1.6,0,67,
 | `SALARY` | Current salary in millions. For biddable players (UFA/RFA) this is **last season's salary** (0/blank = new to league) -- it feeds the price model's reputation feature (`log_lag`/`has_lag`), not the cap |
 | `BID` | Always 0 in source (populated during auction) |
 | `PTS` | Projected fantasy points |
-| `PRIOR FCHL TEAM` | For RFAs only: which FCHL team previously held this player (for ROFR) |
+| `PRIOR FCHL TEAM` | For RFAs only: which FCHL team previously held this player (for ROFR). **Stale in the 2026-27 file**, which took it from the 2024-25 pool; a proposed correction changes 10 of its 22 RFAs — see "Which season each pool is" below |
 
 ### Duplicate PLAYER names
 
@@ -48,7 +48,7 @@ never just the later ones — `X` beside `X (VAN D)` reads as one player listed
 twice. The renames are logged and shown in an `#data-warning` banner (separate
 from `#startup-warning`, which `/reset` clears).
 
-Two ways a collision breaks things. Both were live in the 2025-26 file; the
+Two ways a collision breaks things. Both were live in the 2024-25 file; the
 2026-27 refresh left **one** colliding group and it is the first kind:
 
 - **two biddable rows** — `biddable[name] = ...` overwrote one, so `Matt Murray`
@@ -69,7 +69,7 @@ Two ways a collision breaks things. Both were live in the 2025-26 file; the
   players share a projection.
 - **a roster row and a biddable row** — different dicts, nothing overwrites, so
   the same name is owned *and* draftable. `Jack Hughes` and `Elias Pettersson`
-  were both this shape in the 2025-26 file, hidden only by the zero-point
+  were both this shape in the 2024-25 file, hidden only by the zero-point
   exclusion dropping the biddable half, and `BACKLOG.md` recorded that the next
   projection refresh would remove the cover. Re-checked on the 2026-27 pool
   (2026-09-15): **this shape no longer occurs at all** — the one remaining group
@@ -154,10 +154,14 @@ players**, which on screen is indistinguishable from a finished draft.
 `convert_legacy_players.py` does the translation and refuses to write a file with
 no biddables. It synthesizes `GROUP` from team + status — `UFA -> 3`,
 `RFA -> RFA2`, `MINOR -> A`, otherwise `3`. `MINOR -> A` is the consequential
-one: it keeps those salaries **off cap** and out of buyout eligibility, matching
-the hand-maintained 2025-26 file it was measured against, where **166 of 170**
-MINOR rows were `A`-`E` (the other 4 were `F`, which behaves identically — it
-is in none of `RFA_GROUPS`, `MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`). On
+one: it keeps those salaries **off cap** and out of buyout eligibility, which is
+what a minor almost always is in the canonical files. The 2026-27 file as
+converted (`4a08a6f`) had **166 of 170** MINOR rows in `A`-`E` and the other 4
+in `F`, which behaves identically — it is in none of `RFA_GROUPS`,
+`MINOR_CAP_GROUPS` or `BUYOUT_ELIGIBLE_GROUPS`. The hand-maintained 2024-25
+file had 145 of 149, and its other 4 were group `3`: on-cap minors, the one
+shape `MINOR -> A` gets wrong. (Until 2026-09-22 this attributed the 166 of 170
+to the hand-maintained file, which reproduces on no file but the export.) On
 the 2026-27 file STATUS is **derived** from the contract group instead (owner
 decision 2026-09-15: `2`/`3` -> `START`, `A`-`F` -> `MINOR`), so **as
 converted** no group-2/3 player is a minor and no `A`-`F` player is a starter.
@@ -165,8 +169,11 @@ converted** no group-2/3 player is a minor and no `A`-`F` player is a starter.
 holds on the live file.** Re-measured 2026-09-22: 167 MINOR rows, 163 `A`-`E`
 and 4 `F`, none in group 2/3 — and **three** `A`-`F` starters, the BOT
 prospects recalled in the `c27ed02` bake. Two consequences worth knowing: the
-league's cap-used figure is understated, measured at $20.7M against the
-hand-maintained 2025-26 file (8.9% of rows wrong); and a buyout-INELIGIBLE
+league's cap-used figure is understated — by $20.7M on the hand-maintained
+2024-25 file (22 of 248 rostered rows wrong, 8.9%) and by **$35.4M** on
+`players-25.csv`, the 2025-26 snapshot (36 of 255, 14.1%), each measured
+against that file's own `GROUP` and `STATUS`, so neither figure is season
+drift; and a buyout-INELIGIBLE
 contract can sit on either list — in the minors by construction, on the active
 roster once baked there — which is why `test_trade_buyout_undo.py::_ineligible`
 searches `all_players` rather than `roster_players`. Rows on a team code
@@ -184,7 +191,7 @@ again — a 2023 player who has left the league since is in no pool this repo
 carries — and chaining is deliberately not merging, because a player listed on
 two clubs by two pools would be refused by the tie guard below.
 
-Three normalizations matter, and two of them undo damage in the *2025-26* pool
+Three normalizations matter, and two of them undo damage in the *2024-25* pool
 file rather than era drift: the legacy file writes a **backtick** for an
 apostrophe; that `players.csv` rendered `-` as `0` (`Oliver Ekman0Larsson`) and
 `ari` as `UTH` (`Eetu LuostUTHnen`), from two find-and-replaces. **Neither
@@ -201,7 +208,7 @@ Two guards make the join safe to trust:
 - **A name two players share resolves to nothing.** The set of candidate clubs
   is kept, not collapsed, so a tie is refused rather than broken — a coin flip
   would put a wrong club on a real player silently.
-- **Only real NHL clubs are written.** The 2025-26 `players.csv` carried the
+- **Only real NHL clubs are written.** The 2024-25 `players.csv` carried the
   FCHL placeholder `UFA` in its NHL TEAM column on 9 rows, which is invisible to
   pricing but would render as a club and, once in a pool file, look like data.
   `convert_fchl_online.py` now blanks the same placeholder at the source (3 rows
@@ -311,6 +318,19 @@ FCHL_PLAYERS_CSV=data/players-25.csv .venv/bin/uvicorn main:app --port 8001
 
 Do **not** export `FCHL_PLAYERS_CSV` while running pytest: `TestDataFingerprint`
 reads the global and will fail, correctly.
+
+**Which season each pool is.** `players-23.csv` is the 2023 snapshot,
+`players-25.csv` the 2025-26 pre-draft state (written 2025-09-05), and
+`players.csv` the 2026-27 pool. The file `players.csv` held until the
+2026-09-15 refresh — `git show 4a08a6f^:data/players.csv`, the source of every
+"UTH on 78 rows" and "705-player pool" figure in these docs — is the
+**2024-25** pool, and this repo called it 2025-26 until 2026-09-22. Measured
+that day: its ages run exactly one below `players-25.csv` on 823 of 824 shared
+players, and it lists Luukkonen and Vilardi as RFAs, both signed at the 2024
+auction. It was also the converter's `--prior` default when the 2026-27 file was
+built, which is why that file's `PRIOR FCHL TEAM` column names who held each
+RFA two seasons back rather than in the season just ended (`BACKLOG.md`,
+`prior_team_index`).
 
 ## fchl_teams.json
 

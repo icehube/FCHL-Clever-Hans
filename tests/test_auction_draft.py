@@ -148,7 +148,7 @@ class TestAuctionDraftSimulation:
         # a starting lineup that is nowhere near full, and nothing in that window
         # bound it. Straddling pick 1 as well moves it. So test_19's premise is
         # real but it needs a wider window than a two-pick head start; the old
-        # placement passed on the 2025-26 pool and had no margin to spare.
+        # placement passed on the 2024-25 pool and had no margin to spare.
         _state["early_bid_check"] = client.post("/bid-check", data={
             "player": _state["spare"],
             "price": str(BID_CHECK_PRICE),

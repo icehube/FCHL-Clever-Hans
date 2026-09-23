@@ -173,7 +173,7 @@ def _drain(
 
     `up_to` is the OTHER stopping condition and it is not cosmetic. Whether a
     team runs out of roster before it runs out of money is a property of the
-    POOL: on the 2025-26 pool a drain to $12.0M left every team at 13-16 players
+    POOL: on the 2024-25 pool a drain to $12.0M left every team at 13-16 players
     with room for the staggered `_fill` above it, and on the 2026-27 pool the
     same call ran five of them to 24 — which no-ops the fill, zeroes
     `roster_needs`, and silently converts "everyone has holes" into "half the
@@ -442,7 +442,7 @@ def _scenario_endgame_sole_bidder(state: AuctionState) -> None:
     **The squeeze is not belt-and-braces; the drain cannot finish the job on its
     own.** `_drain` stops at `ROSTER_SIZE`, so a team whose roster runs out
     before its money does keeps whatever is left — and which teams those are is a
-    property of the POOL, not of the code. On the 2025-26 pool all ten landed at
+    property of the POOL, not of the code. On the 2024-25 pool all ten landed at
     $0.0-0.1M and this scenario shipped without a squeeze for a month; on the
     2026-27 pool, where the eleven rosters arrive 250 players deep, **VPP stopped
     at 24 with $5.3M and HSM with $12.5M** — two live bidders in a scenario whose
@@ -584,7 +584,7 @@ def _late_draft_shape(
     of the penalty band: a team whose roster fills before its budget empties
     keeps the rest as dead cap, so the 2026-27 pool (whose unreserved tier tops
     out at **$4.0M**, with only 11 players over $3.0M and 500 of 653 at the
-    floor) cannot absorb $25M a side in 17-21 players the way the 2025-26 one
+    floor) cannot absorb $25M a side in 17-21 players the way the 2024-25 one
     could, and $9.0-11.0M became $9.7-19.9M. Two ways to narrow it again if it
     ever matters: fill larger, or reserve fewer than `_reserved_top`'s 25 so the
     $4-10M tier is drainable. Both trade against something this file already
@@ -634,7 +634,7 @@ def _leave_bot_planning(
     * $18.0M / $20.0M — 18 players and 6 spots, but $11.0M and $13.0M of dead cap,
       which reads as absurd on your own roster.
 
-    **Those four are the 2025-26 sweep and the target it chose survives; the
+    **Those four are the 2024-25 sweep and the target it chose survives; the
     figures it chose between do not.** Re-measured 2026-09-15, the $16.0M target
     lands BOT at **18 players, 6 spots, $10.0M remaining, $7.5M physical max,
     needs {D: 2}, penalty $21.3M** — the drain now stops on `up_to=18` rather
@@ -687,7 +687,7 @@ def _scenario_drained_late_draft(state: AuctionState) -> None:
     inside the floor/cap range and the second of ten distinct maxes ($3.5M /
     $3.3M / $3.1M / ...); `demand_count` 10 with `floor_demand` False; rosters
     17-21 with 3-7 spots each and nobody done; **25 of 554** pool prices capped;
-    every team's MILP Optimal. Build 14ms. (The 2025-26 figures were the same
+    every team's MILP Optimal. Build 14ms. (The 2024-25 figures were the same
     ceiling and the same capped count over 597 players — the ceiling is set by
     `_late_draft_shape`'s spread, which is a constant, so it is the pool size and
     the penalty band that moved, not the state this scenario is about.)
@@ -731,7 +731,7 @@ def _scenario_full_roster_still_bidding(state: AuctionState) -> None:
     $3.0M down to $1.5M at 17-21 players, nobody is done, every team's MILP is
     Optimal. Build 13ms. **Which CODE plays which part is not fixed** — the two
     rich teams are `by_wealth[0]` and `by_wealth[1]`, so a pool refresh that
-    changes who starts richest reassigns them; it was MAC and GVR on the 2025-26
+    changes who starts richest reassigns them; it was MAC and GVR on the 2024-25
     pool. Assert the ROLE, never the code.
 
     **The counterfactual is the point, and it is a number**: the second-highest

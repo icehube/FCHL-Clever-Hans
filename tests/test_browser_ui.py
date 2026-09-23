@@ -1890,7 +1890,7 @@ class TestTheBuyoutPickerIsOneRow:
         **Loads a scenario, because a fresh league no longer has the candidates
         the claim is about.** The list grows with every group 2/3 pick, so the
         number to measure is a DRAFTED BOT's, and how many it starts with is a
-        property of the pool: the 2025-26 file seated 15 eligible contracts on
+        property of the pool: the 2024-25 file seated 15 eligible contracts on
         BOT at reset, the 2026-27 file seats **6** — its actives are all group
         2/3 and its 21 minors are all `A`-`F`, which is what deriving STATUS
         from the contract group produces (owner decision 2026-09-15). Six rows

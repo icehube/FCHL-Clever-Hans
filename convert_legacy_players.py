@@ -112,15 +112,16 @@ def normalize_name(name: str) -> str:
 def valid_nhl_teams(odds_path: str = "data/team_odds.json") -> set[str]:
     """The NHL club codes a team name is allowed to be.
 
-    `players.csv` puts the FCHL placeholder `UFA` in the NHL TEAM column on 9
-    rows (`Tony DeAngelo (NCM)` among them), so an unfiltered join copies a
+    The 2024-25 `players.csv` put the FCHL placeholder `UFA` in the NHL TEAM
+    column on 9 rows (`Tony DeAngelo (NCM)` among them); no pool carries it
+    today, but the donor is replaced every season and an unfiltered join copies a
     league placeholder into a field that means an NHL club. It is invisible in
     the live app — `_get_team_probability` falls through to the default for an
     unknown code — but it would render as the player's NHL team and, once
     written into a pool file, look like real data.
 
-    Aliases are included as keys: `players.csv` spells Utah `UTH` while
-    `team_odds.json` uses `UTA`.
+    Aliases are included as keys: the 2024-25 `players.csv` spelled Utah `UTH`
+    while `team_odds.json` uses `UTA`.
     """
     with open(odds_path) as f:
         codes = set(json.load(f)["odds"])

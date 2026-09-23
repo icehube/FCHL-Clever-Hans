@@ -499,7 +499,7 @@ templates.env.filters["dom_id"] = _dom_id
 def _nhl_canonical(code: str) -> str:
     """The one spelling of an NHL club this app shows anywhere.
 
-    The pool CSVs have disagreed with each other: the 2025-26 data/players.csv
+    The pool CSVs have disagreed with each other: the 2024-25 data/players.csv
     spelled Utah `UTH` on 78 rows while data/players-25.csv spells it `UTA` on
     30 (so does the 2026-27 players.csv, so no pool in the repo carries the
     alias today — the next export may). `UTH` is not a
@@ -527,7 +527,7 @@ def _nhl_logo_src(code: str) -> str:
 
     The assets are named by the CANONICAL tricode -- the value side of
     NHL_TEAM_ALIASES, which is also what team_odds.json and the NHL itself use.
-    The pool CSVs have not been consistent about it: the 2025-26
+    The pool CSVs have not been consistent about it: the 2024-25
     data/players.csv spelled Utah `UTH` on 78 rows while data/players-25.csv
     spells it `UTA` on 30, and before
     this existed every template pasted the raw column value into the path, so
@@ -1815,7 +1815,7 @@ def _club_counts() -> tuple[Counter, Counter]:
     """Players per NHL club — still in the pool, and already rostered.
 
     **Folded through `_nhl_canonical`, which is the whole subtlety.**
-    The 2025-26 `players.csv` spelled Utah `UTH` on 78 rows and `team_odds.json`
+    The 2024-25 `players.csv` spelled Utah `UTH` on 78 rows and `team_odds.json`
     spells it `UTA`; a raw `Counter` on `p.nhl_team` splits one club across two rows, one
     of which then finds no odds. Same fold the badge and the label already go
     through — see `_nhl_logo_src`.
@@ -1891,7 +1891,7 @@ def _odds_rows() -> list[dict]:
 def _odds_unlisted() -> list[dict]:
     """Clubs the pool uses that the odds file does not name.
 
-    The 2025-26 `players.csv` put the FCHL placeholder `UFA` in the NHL TEAM
+    The 2024-25 `players.csv` put the FCHL placeholder `UFA` in the NHL TEAM
     column on 9 rows (the converters blank it now — see `_odds_no_club`), and
     `_get_team_probability` answers for such a code with
     `DEFAULT_TEAM_PROBABILITY` — silently. Showing them is the point: a club

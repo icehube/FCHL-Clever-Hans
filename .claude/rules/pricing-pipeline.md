@@ -106,7 +106,7 @@ argument, and this card is embedded in `/bid-check`, so the failure would be a
 `model_params.json` comes from another repo.
 
 **Every per-row count in the four paragraphs that follow was measured over the
-705-player 2025-26 pool (2026-09-09 to 2026-09-11) and has NOT been re-measured
+705-player 2024-25 pool (2026-09-09 to 2026-09-11) and has NOT been re-measured
 against the 678-player 2026-27 one.** They are the evidence for how the card is
 shaped, not live figures — each says which way a rendering rule fails and by
 roughly how much, and none of those conclusions turns on the pool. Re-measure

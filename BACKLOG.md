@@ -44,7 +44,9 @@ player-id refactor to **Ideas**, since no defect stands behind it, taking the
 list from fifteen to **seven**. Two of those seven had been deferred on a
 premise that was false rather than stale; see the last paragraph below. The
 four found small enough to fix then closed one per commit: the optimizer's
-thin-pool entry on a test that asks its question at every refresh (**six**).
+thin-pool entry on a test that asks its question at every refresh (**six**),
+then the fingerprint's odds blind spot, by pinning the season and the top five
+clubs (**five**).
 
 **The walk before that, 2026-09-11**, also re-checked the mechanism
 rather than the prose. Nothing was closed by the walk — all nineteen findings
@@ -93,8 +95,7 @@ rather than waiting for the draft to produce an opinion; the fourth — the
 planning ceiling — expired on 2026-09-13 when the draft was actually run and
 `tests/measure_replay.py` answered it at **0 of 139 picks**. What is left is
 parked on the owner (the RFA prior teams), a real event (a no-contract drop
-mid-auction), the next `team_odds.json` refresh (one), and work small enough to
-simply be next. The `players.csv`-refresh class is **empty**: its last entry,
+mid-auction), and work small enough to simply be next. The `players.csv`-refresh class is **empty**: its last entry,
 `_searchable`, turned out to be guarded at load all along. **Asking is a way to
 expire one and so is doing it**, and the ratio is worth knowing — four of seven draft-day items
 needed a sentence from the operator, one needed the auction, and the auction
@@ -124,7 +125,6 @@ hypothesis unless it says what was measured.
 ### test infrastructure
 
 - [2026-09-22] [grill] tests/test_crash_recovery.py:738 (test_a_renamed_keeper_is_found_too) — **the renamed-keeper backfill test skips on the live pool, so `_backfill_keeper_flags` matching on the state's disambiguated name has no running guard.** It needs a keeper whose name `_disambiguated_names` renamed; the 2026-27 pool's only colliding group is the Elias Pettersson pair, and neither is a keeper, so it has skipped since the 2026-09-15 refresh. The six sibling skips fixed the same day were supplied by editing the loaded state; this one cannot be, because the collision is decided at load from the CSV and the test boots the app over it. Deferred because supplying it means a pool fixture with a duplicated keeper row and pointing the boot at it — `data_loader.PLAYERS_CSV` plus `main.STATE_DIR`, both module globals, inside a test that already builds a legacy state — which is a fixture of its own rather than a line. **Cost measured at defer time:** the mutant it guards (`row["PLAYER"]` for the disambiguated name) survives today; that is the whole cost, and it bites only on a pool where a keeper collides, which the 2024-25 file had twice
-- [2026-09-14] [refresh-drill] tests/test_data_loader.py:477 (_fingerprint) — **a complete `team_odds.json` refresh moves no number in the fingerprint, so the documented "expect exactly one failure" step does not fire.** The only odds field is `odds_sum_percent`, and a correctly de-vigged odds file sums to ~100 *by construction* — so the one quantity pinned is the one that cannot change. Measured on the 2025-2026 → 2026-2027 refresh: all 32 clubs took new values (EDM 11.04% → 6.76%, SJS 0.17% → 4.96%), the season string changed, the pool re-priced $637.5M → $631.2M, and the suite went 1213-green with no diff to read. The invariants beside it are genuinely blind here too: `test_every_nhl_club_in_every_pool_has_cup_odds` checks that every club has *an* entry, never which. So the failure mode the fingerprint exists to catch — a refresh that silently drops or respells half the file — is caught for `players.csv` and not for this one, and a file that swapped two clubs' odds would ship silently. Deferred because the obvious fix is the mistake the three-way split removed: pinning 32 per-club values recreates the 19 exact live numbers that drowned two real bugs in a refresh diff. The shape worth considering is one line that is *derived* and still scannable — the sorted top-5 codes, or a digest of the canonical dict — which needs a decision about what a useful odds diff actually reads like, not just more numbers
 
 ---
 

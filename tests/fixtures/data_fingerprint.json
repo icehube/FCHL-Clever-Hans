@@ -24,5 +24,13 @@
   "roster_players": 249,
   "bot_total_salary": 13.3,
   "total_picks_needed": 182,
-  "odds_sum_percent": 99.99
+  "odds_sum_percent": 99.99,
+  "odds_season": "2026-2027",
+  "odds_top5": [
+    "FLA 10.3",
+    "COL 9.5",
+    "CAR 8.1",
+    "EDM 6.8",
+    "MIN 5.9"
+  ]
 }

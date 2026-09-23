@@ -24,6 +24,24 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **An odds refresh is one deliberate fingerprint failure, like a pool
+  refresh.** Closes the 2026-09-14 `BACKLOG.md` entry. The refresh to the
+  2026-2027 Cup odds changed all 32 clubs (EDM 11.04% → 6.76%) and re-priced
+  the pool, and the suite went green with no diff to read. The fingerprint's
+  only odds field was `odds_sum_percent`, and a de-vigged file sums to ~100 by
+  construction. It now also carries `odds_season`, which changes on every real
+  refresh by definition, and `odds_top5`, the five highest canonical clubs at
+  one decimal. The top five is there so the diff says what moved without
+  pinning 32 per-club figures, which would recreate the nineteen live numbers
+  whose refresh diff once buried two real bugs. A digest was rejected: it
+  would fire just as reliably and say nothing, and `git diff
+  data/team_odds.json` already has the detail. Mutation-checked by changing
+  the file's season in place. The guard failed with
+  `odds_season: '2026-2027' -> '2027-2028'`, and the file was restored
+  byte-identical (`cmp`). What the top five cannot see is a swap between two
+  mid-table clubs under an unchanged season label. That is a corrupted
+  export, not a refresh, and it is outside what this guard is for.
+
 - **A pool too thin to field every lineup now fails at the refresh, not in
   the draft.** Closes the 2026-07-05 `BACKLOG.md` entry on
   `solve_optimal_roster` going Infeasible when the pool cannot supply a

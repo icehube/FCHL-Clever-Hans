@@ -484,7 +484,8 @@ def _fingerprint() -> dict:
     state = build_initial_state()
     odds = load_team_odds()
     with open("data/team_odds.json") as f:
-        canonical = json.load(f)["odds"]
+        raw_odds = json.load(f)
+    canonical = raw_odds["odds"]
     pool = list(state.available_players.values())
 
     by_position: dict[str, int] = {}
@@ -506,6 +507,16 @@ def _fingerprint() -> dict:
             t.total_spots_remaining for t in state.teams.values()
         ),
         "odds_sum_percent": round(sum(odds[t] for t in canonical), 2),
+        # The sum alone could not fire: a de-vigged file sums to ~100 by
+        # construction, so the 2026-09-14 refresh moved all 32 clubs and the
+        # suite stayed green. The season changes on every real refresh by
+        # definition, and the top five make the diff say WHAT moved without
+        # pinning 32 numbers, which is the trap the fingerprint exists to avoid.
+        "odds_season": raw_odds.get("season", ""),
+        "odds_top5": [
+            f"{code} {odds[code]:.1f}"
+            for code in sorted(canonical, key=lambda c: (-odds[c], c))[:5]
+        ],
     }
 
 
@@ -566,6 +577,8 @@ class TestDataFingerprint:
             "bot_total_salary",
             "total_picks_needed",
             "odds_sum_percent",
+            "odds_season",
+            "odds_top5",
         }
 
     def test_the_recorded_counts_add_up(self):

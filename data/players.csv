@@ -61,7 +61,7 @@ Cutter Gauthier,F,A,MINOR,LPT,ANA,23,0.8,0,74,
 Morgan Geekie,F,3,,UFA,BOS,29,0.7,0,69,
 Jeremy Swayman,G,3,START,VPP,BOS,28,1.4,0,66,
 Brandon Bussi,G,3,START,SHF,CAR,29,3.0,0,74,
-Filip Gustavsson,G,RFA2,,RFA,MIN,29,3.2,0,47,LPT
+Filip Gustavsson,G,RFA2,,RFA,MIN,29,3.2,0,47,BOT
 Travis Konecny,F,3,,UFA,PHI,30,3.4,0,70,
 Gabriel Vilardi,F,RFA2,,RFA,WPG,28,0.9,0,72,ZSK
 Leo Carlsson,F,A,MINOR,LGN,ANA,22,0.9,0,74,
@@ -93,13 +93,13 @@ Evgeni Malkin,F,3,,UFA,PIT,41,0.8,0,56,
 Ivan Barbashev,F,3,,UFA,VGK,31,1.1,0,56,
 Beckett Sennecke,F,A,MINOR,JHN,ANA,21,0.6,0,70,
 Lukas Dostal,G,2,START,ZSK,ANA,27,0.9,0,61,
-Moritz Seider,D,RFA1,,RFA,DET,26,1.2,0,54,HSM
+Moritz Seider,D,RFA1,,RFA,DET,26,1.2,0,54,GVR
 John Carlson,D,3,,UFA,TBL,37,3.0,0,68,
 Jakob Chychrun,D,3,,UFA,WSH,29,2.5,0,56,
 Adam Fantilli,F,A,MINOR,GVR,CBJ,22,0.9,0,79,
 Brady Tkachuk,F,2,START,VPP,FLA,27,3.0,0,73,
 Matthew Schaefer,D,A,MINOR,LGN,NYI,20,0.9,0,62,
-Dylan Cozens,F,RFA1,,RFA,OTT,26,0.6,0,61,JHN
+Dylan Cozens,F,RFA1,,RFA,OTT,26,0.6,0,61,BOT
 Will Smith,F,B,MINOR,VPP,SJS,22,1.8,0,69,
 Mikhail Sergachev,D,3,,UFA,UTA,29,3.0,0,60,
 Jackson LaCombe,D,3,,UFA,ANA,26,1.4,0,58,
@@ -110,7 +110,7 @@ Sam Bennett,F,3,,UFA,FLA,31,1.3,0,56,
 Jakub Dobes,G,3,START,LGN,MTL,26,0.6,0,74,
 Dan Vladar,G,3,,UFA,PHI,30,0.5,0,61,
 Tomas Hertl,F,3,,UFA,VGK,33,2.0,0,55,
-Dylan Strome,F,RFA2,,RFA,WSH,30,0.9,0,71,JHN
+Dylan Strome,F,RFA2,,RFA,WSH,30,0.9,0,71,BOT
 Troy Terry,F,3,,UFA,ANA,30,1.6,0,36,
 Patrick Kane,F,3,,UFA,CHI,38,0.9,0,54,
 Bo Horvat,F,3,,UFA,NYI,32,1.5,0,62,
@@ -136,7 +136,7 @@ William Eklund,F,B,MINOR,LGN,OTT,24,1.5,0,57,
 Auston Matthews,F,3,START,HSM,TOR,29,6.6,0,82,
 Vincent Trocheck,F,3,,UFA,UTA,34,2.2,0,58,
 Josh Doan,F,3,,UFA,BUF,25,1.1,0,59,
-Dustin Wolf,G,RFA1,,RFA,CGY,26,1.2,0,54,BOT
+Dustin Wolf,G,RFA1,,RFA,CGY,26,1.2,0,54,LPT
 Zach Hyman,F,3,,UFA,EDM,35,2.0,0,59,
 Anthony Cirelli,F,3,,UFA,TBL,30,0.9,0,50,
 Aliaksei Protas,F,3,START,HSM,WSH,26,1.0,0,59,
@@ -171,7 +171,7 @@ Rickard Rakell,F,3,,UFA,PIT,34,0.7,0,56,
 Pavel Buchnevich,F,3,START,JHN,STL,32,2.4,0,50,
 Brock Boeser,F,3,,UFA,VAN,30,3.2,0,57,
 JJ Peterka,F,C,MINOR,VPP,BOS,25,1.4,0,63,
-Ukko-Pekka Luukkonen,G,RFA2,,RFA,BUF,28,2.4,0,55,GVR
+Ukko-Pekka Luukkonen,G,RFA2,,RFA,BUF,28,2.4,0,55,LGN
 Spencer Knight,G,RFA1,,RFA,CHI,26,0.5,0,55,GVR
 Darcy Kuemper,G,3,,UFA,LAK,37,3.7,0,59,
 Noah Dobson,D,2,START,BOT,MTL,27,2.0,0,47,
@@ -181,7 +181,7 @@ Shane Pinto,F,3,START,LGN,OTT,26,0.6,0,46,
 Collin Graf,F,3,START,JHN,SJS,24,0.6,0,38,
 Bobby McMann,F,3,,UFA,SEA,31,0.5,0,49,
 Joey Daccord,G,3,,UFA,SEA,31,0.9,0,44,
-Connor McMichael,F,RFA1,,RFA,STL,26,1.2,0,58,SHF
+Connor McMichael,F,RFA1,,RFA,STL,26,1.2,0,58,BOT
 Jordan Kyrou,F,2,START,HSM,WSH,29,4.0,0,62,
 Connor Hellebuyck,G,3,,UFA,WPG,34,8.4,0,91,
 Jason Zucker,F,3,START,GVR,BUF,35,0.5,0,44,
@@ -207,7 +207,7 @@ Logan Cooley,F,C,MINOR,LGN,UTA,23,2.5,0,68,
 Casey Mittelstadt,F,2,START,VPP,BOS,28,1.9,0,42,
 Bowen Byram,D,2,START,GVR,CHI,26,0.9,0,53,
 Tristan Jarry,G,3,,UFA,EDM,32,0.5,0,22,
-Dawson Mercer,F,RFA1,,RFA,NJD,25,0.5,0,41,SRL
+Dawson Mercer,F,RFA1,,RFA,NJD,25,0.5,0,41,GVR
 Egor Chinakhov,F,RFA1,,RFA,PIT,26,0.5,0,51,SRL
 Tommy Novak,F,3,,UFA,PIT,30,0.7,0,37,
 Yaroslav Askarov,G,C,MINOR,GVR,SJS,25,0.8,0,54,
@@ -225,7 +225,7 @@ Sam Malinski,D,3,,UFA,COL,29,0.7,0,37,
 Justin Faulk,D,3,,UFA,DET,35,0.7,0,31,
 Kevin Fiala,F,3,,UFA,LAK,31,3.1,0,59,
 Brandt Clarke,D,B,MINOR,LGN,LAK,24,0.8,0,48,
-Kaapo Kakko,F,RFA1,,RFA,SEA,26,0.9,0,53,GVR
+Kaapo Kakko,F,RFA1,,RFA,SEA,26,0.9,0,53,SHF
 Jared McCann,F,3,,UFA,SEA,31,1.3,0,61,
 Peyton Krebs,F,3,,UFA,BUF,26,0.5,0,44,
 Matias Maccelli,F,3,,UFA,NYI,26,0.5,0,42,
@@ -305,7 +305,7 @@ Frederik Andersen,G,3,,UFA,EDM,37,0.6,0,32,
 Seth Jones,D,3,,UFA,FLA,32,2.5,0,35,
 Trevor Moore,F,3,,UFA,LAK,32,0.7,0,36,
 Oliver Bjorkstrand,F,3,START,MAC,NYR,32,0.5,0,40,
-Jamie Drysdale,D,RFA2,,RFA,PHI,25,0.6,0,36,VPP
+Jamie Drysdale,D,RFA2,,RFA,PHI,25,0.6,0,36,HSM
 Nicholas Robertson,F,3,,UFA,PIT,26,0.5,0,41,
 Mackie Samoskevich,F,B,MINOR,ZSK,SEA,24,0.5,0,41,
 Brandon Montour,D,3,,UFA,SEA,33,1.7,0,34,

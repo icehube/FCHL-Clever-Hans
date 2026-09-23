@@ -24,6 +24,34 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The 2026-27 pool's RFA prior teams name who held each player last
+  season, not two seasons back.** Closes the `BACKLOG.md` entry filed by this
+  morning's grill. The owner approved all ten corrections. `PRIOR FCHL TEAM`
+  in `data/players.csv` came from the 2024-25 pool: the converter's `--prior`
+  defaulted to `players.csv`, and that file had never been rolled forward past
+  2024-25. The corrections come from the saved 2025 draft state, which matched
+  the league workbook on 131 of 139 picks:
+  - Gustavsson LPT→BOT, Seider HSM→GVR, Cozens JHN→BOT, Strome JHN→BOT.
+  - Wolf BOT→LPT, Luukkonen GVR→LGN, McMichael SHF→BOT, Mercer SRL→GVR.
+  - Kakko GVR→SHF, Drysdale VPP→HSM.
+
+  The other twelve were already right. McMichael and Mercer rest on weaker
+  evidence than the rest. `players-25.csv` has them on GVR and BOT
+  respectively before that draft, and the draft record, which the correction
+  follows, has BOT buying McMichael at $1.2M and GVR buying Mercer at $0.5M.
+  That is also where the entry slipped: it counted Mercer among "BOT's own"
+  players labelled as another team's, reading `players-25.csv`, while the
+  correction it proposed sent him to GVR.
+
+  Written line by line: each target row was checked to round-trip to its
+  original bytes before re-serialising, so exactly 10 lines changed, each only
+  in its last field. CRLF is intact and the file is the same size.
+  `Player.prior_fchl_team` is frozen into a saved state, so the operator sees
+  this only after `/reset`, which the 2026 draft starts from anyway. No engine
+  module reads the column (ROFR is not modelled, owner decision 2026-07-05).
+  It is what the RFA badge and the nomination card's "Prior: X" show, which is
+  who can match in a sealed bid.
+
 - **The tooltip floor now holds the team panel's stat tiles, which it never
   had.** Closes the 2026-09-11 `BACKLOG.md` entry, which had the premise
   backwards. It said `test_no_tooltip_renders_outside_the_scrollable_content`'s

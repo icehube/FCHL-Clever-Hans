@@ -32,7 +32,7 @@ Dylan Holloway,F,C,MINOR,BOT,STL,25,1.6,0,67,
 | `SALARY` | Current salary in millions. For biddable players (UFA/RFA) this is **last season's salary** (0/blank = new to league) -- it feeds the price model's reputation feature (`log_lag`/`has_lag`), not the cap |
 | `BID` | Always 0 in source (populated during auction) |
 | `PTS` | Projected fantasy points |
-| `PRIOR FCHL TEAM` | For RFAs only: which FCHL team previously held this player (for ROFR). **Stale in the 2026-27 file**, which took it from the 2024-25 pool; a proposed correction changes 10 of its 22 RFAs — see "Which season each pool is" below |
+| `PRIOR FCHL TEAM` | For RFAs only: which FCHL team held this player in the season just ended (for ROFR). The 2026-27 file first took it from the 2024-25 pool, and 10 of its 22 RFAs were **hand-corrected on 2026-09-22** from the 2025 draft record — see "Which season each pool is" below |
 
 ### Duplicate PLAYER names
 
@@ -329,8 +329,12 @@ that day: its ages run exactly one below `players-25.csv` on 823 of 824 shared
 players, and it lists Luukkonen and Vilardi as RFAs, both signed at the 2024
 auction. It was also the converter's `--prior` default when the 2026-27 file was
 built, which is why that file's `PRIOR FCHL TEAM` column names who held each
-RFA two seasons back rather than in the season just ended (`BACKLOG.md`,
-`prior_team_index`).
+RFA two seasons back rather than in the season just ended. Ten of its 22 RFAs
+were hand-corrected on 2026-09-22 from the saved 2025 draft (`CHANGELOG.md`).
+The correction is a hand edit, so a refresh keeps it only through the
+converter's guard: `PRIOR FCHL TEAM` is one of its `HAND_EDITED` fields, and a
+re-run with the default `--prior` reads the corrected column back out of the
+file it is about to replace.
 
 ## fchl_teams.json
 

@@ -24,6 +24,26 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The tooltip floor now holds the team panel's stat tiles, which it never
+  had.** Closes the 2026-09-11 `BACKLOG.md` entry, which had the premise
+  backwards. It said `test_no_tooltip_renders_outside_the_scrollable_content`'s
+  `counted >= 10` floor "sits at exactly 10, with zero slack", so the next
+  tooltip removed anywhere would trip it with a misleading message. Fixing the
+  message first showed the floor was never close. It was a **max over
+  STATES**, and the `endgame-ceiling-binds` page draws one capped-price bubble
+  per capped row. Measured 2026-09-22: 10 tooltips on every fresh page (six
+  stat tiles, three in `.bid-details`, Sigma), 12 on the over-committed page,
+  and **35** on each endgame page. So the floor had 25 of slack, held up by
+  capped rows alone, and the comment saying "the tiles are held by the floor
+  below" was false. Mutation-checked: stripping the Roster Spots tile's
+  `data-tip` passed the old test and fails the new one. It now takes the
+  **fewest** tooltips on any page, not counting the capped family, which
+  renders per row. That family is named once in `CAPPED_TIP`, shared with the
+  `required` inventory so the two cannot disagree. The floor genuinely has
+  zero slack now. That makes the entry's worry true for the first time, so the
+  failure message says which page came up short and lists its tooltips. A
+  deliberate removal then reads as a removal rather than as a broken state.
+
 - **The renamed-keeper backfill test supplies its collision instead of
   skipping, and the mutant it exists for is dead.** Closes the `BACKLOG.md`
   entry filed by this morning's grill. The test booted the app over the live

@@ -980,6 +980,12 @@ class TestATypoDoesNotVanish:
         assert not errors, f"the console threw: {errors[:3]}"
 
 
+# The capped-price bubble's text, which `bid_limits.html` renders once per
+# capped row. Shared so the per-page floor and the `required` inventory cannot
+# disagree about which bubble that is.
+CAPPED_TIP = "no opponent can push bidding that high"
+
+
 class TestTooltipsStayInsideTheirPanel:
     """An explanation you cannot read is worse than none — it looks answered.
 
@@ -1115,7 +1121,9 @@ class TestTooltipsStayInsideTheirPanel:
         self, browser, live_server
     ):
         offenders: list[str] = []
-        counted = 0
+        # (count, where, tips) for the page that rendered the FEWEST tooltips,
+        # leaving out the capped price, which renders once PER capped row.
+        fewest: tuple[int, str, list[str]] | None = None
         seen: set[str] = set()
         for width, state in self.STATES:
             context = browser.new_context(viewport={"width": width, "height": 900})
@@ -1151,7 +1159,9 @@ class TestTooltipsStayInsideTheirPanel:
             where = f"{width}px/{state or 'fresh'}"
             data = pg.evaluate(self.PROBE)
             assert data["rows"], f"no tooltips found at {where}"
-            counted = max(counted, len(data["rows"]))
+            own = [r["tip"] for r in data["rows"] if CAPPED_TIP not in r["tip"]]
+            if fewest is None or len(own) < fewest[0]:
+                fewest = (len(own), where, own)
             seen.update(r["tip"] for r in data["rows"])
             for row in data["rows"]:
                 # `auto` on both sides means the bubble was never laid out,
@@ -1187,7 +1197,7 @@ class TestTooltipsStayInsideTheirPanel:
         # capped price is the app's only `tooltip-left`. The `.team-stats` grid
         # is deliberately NOT named here — its rules are per-breakpoint
         # `nth-child` bands, so no single tile stands for them; the tiles are
-        # held by the `counted >= 10` floor below instead. This comment claimed
+        # held by the per-page floor below instead. This comment claimed
         # "one per distinct container" over a list of four CSS rules while the
         # dict held five entries, and then survived the removal by going wrong
         # in the other direction; a comment that inventories a dict has to be
@@ -1234,7 +1244,7 @@ class TestTooltipsStayInsideTheirPanel:
             # 2026-08-13. Requiring it by name means a scenario that stops
             # producing capped rows fails HERE rather than quietly reverting this
             # to a fresh-state-only check that still passes.
-            "Capped model price (available players)": "no opponent can push bidding that high",
+            "Capped model price (available players)": CAPPED_TIP,
         }
         missing = [k for k, frag in required.items() if not any(frag in t for t in seen)]
         assert not missing, (
@@ -1243,10 +1253,21 @@ class TestTooltipsStayInsideTheirPanel:
             f"and this test silently stops covering it either way. "
             f"Measured tips: {sorted(t[:40] for t in seen)}"
         )
-        assert counted >= 10, (
-            f"only {counted} tooltips were ever measured — the page must render "
-            f"the bid panel's four and the team panel's stat tiles, or this "
-            f"passes while checking almost nothing"
+        # The FEWEST on any page, not the most. Until 2026-09-22 this was a max
+        # over STATES, and the endgame page draws one capped bubble per capped
+        # row — 35 tooltips against 10 on a fresh page — so the floor was held
+        # up by those alone and any fresh-page tooltip, a stat tile included,
+        # could vanish with this green. Every page renders the same 10 (six
+        # stat tiles, three in `.bid-details`, Sigma), so the floor has no
+        # slack and is what a deliberate removal trips first; the message lists
+        # the page's tips so that reads as a removal, not a broken state.
+        count, where, tips = fewest
+        assert count >= 10, (
+            f"only {count} tooltips (not counting the per-row capped price) at "
+            f"{where}, against a floor of 10 — either that page stopped "
+            f"rendering the bid panel's and the team panel's stat tiles, or a "
+            f"template dropped one on purpose and this floor has to move with "
+            f"it. Measured there: {sorted(t[:40] for t in tips)}"
         )
         assert not offenders, (
             f"{len(offenders)} tooltip bubbles render outside the panel area:\n  "

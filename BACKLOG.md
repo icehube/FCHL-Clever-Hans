@@ -31,8 +31,6 @@ Name the enclosing function or property in `(symbol)`. Line numbers drift every 
 
 - [2026-09-22] [refresh-drill] `tests/conftest.py:21 (isolated_state_dir)` — **the write-through guard on the operator's live draft is a pytest fixture, so anything that is not pytest walks straight past it.** `main.STATE_DIR` defaults to `data/state`, and `isolated_state_dir` redirects it for the suite only. An ad-hoc diagnostic script doing `with TestClient(main.app)` — the obvious way to reproduce an endpoint failure outside the suite — therefore writes to `data/state/`, and `_save_state` rotates the previous file into `.backup`, so **two** such saves destroy both copies of a real draft. Hit on 2026-09-15 while diagnosing `test_19_bid_check_changed`: nine picks from a replayed `_script()` landed in `data/state/auction_state.json` and its backup, over a state that happened to be empty. Nothing warned; the file is `.gitignore`d, so `git status` said nothing either, and it was found only by opening the file before clearing it. **Corrected 2026-09-22 by the grill, on two counts.** This entry said `main.py` hardcodes the directory "with no env override", and so did CLAUDE.md and the three `tests/measure_*.py` docstrings: false since `3eb6ed9` on 2026-09-07, eight days before the incident — `FCHL_STATE_DIR` has always been the escape hatch, and the incident is a script that did not use it. And the guard it proposed, refusing at `lifespan` to save over a state whose pool came from a different CSV, would **not** have caught that incident: the script loaded the default pool over the default state, so the CSVs agreed. The real hazard is "a process that is not the operator's server writing the operator's state", which no property of the state can see. Still deferred, because every cheap guard found so far is wrong for draft day — changing the default moves the path the live server writes, and refusing to save under `pytest` in `sys.modules` misses a bare script and fires in the suite. The mitigation in force is procedural: a script that imports `main` sets `FCHL_STATE_DIR` or redirects `main.STATE_DIR` first, as `tests/measure_ceiling.py` and `tests/measure_layout.py` do
 
-- [2026-09-11] [grill] `tests/test_browser_ui.py:1246 (test_no_tooltip_renders_outside_the_scrollable_content)` — **the `counted >= 10` floor now sits at exactly 10**, with zero slack: the 2026-09-11 removal of the league-table `data-tip` took the measured count from 11 to 10, so the next tooltip deleted anywhere in the app fails this rather than the named `required` inventory, and the failure message ("the page must render the bid panel's four and the team panel's stat tiles") will not describe what actually happened — deferred because that is the tripwire working as designed and the STATES are deterministic, so it is not flaky; revisit only if a legitimate removal trips it, at which point the fix is to re-derive the floor from the `required` inventory rather than to lower a magic number
-
 
 **Last triaged 2026-09-22**, at the owner's request, walking every entry
 against the code and the data rather than the prose. Most of the list was no
@@ -47,7 +45,9 @@ four found small enough to fix then closed one per commit: the optimizer's
 thin-pool entry on a test that asks its question at every refresh (**six**),
 then the fingerprint's odds blind spot, by pinning the season and the top five
 clubs (**five**), then the renamed-keeper skip, by supplying the collision in
-a two-row CSV instead of hoping the pool carries one (**four**).
+a two-row CSV instead of hoping the pool carries one (**four**), then the
+tooltip floor, whose "zero slack" turned out to be twenty-five and which could
+not see the stat tiles it existed to hold (**three**).
 
 **The walk before that, 2026-09-11**, also re-checked the mechanism
 rather than the prose. Nothing was closed by the walk — all nineteen findings

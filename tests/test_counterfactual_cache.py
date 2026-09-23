@@ -470,7 +470,7 @@ class TestRecomputingAtTheLiveBid:
         sharpened = client.get(f"/explain/{name}?inline=1&price={asked}").text
         assert _quoted_price(sharpened) == asked
 
-    def test_a_higher_price_can_only_be_worse(self, client):
+    def test_a_higher_price_can_only_be_worse(self, client, monkeypatch):
         """The property that proves the price reaches the SOLVER.
 
         A card that quoted the asked price while solving at the market one
@@ -478,14 +478,25 @@ class TestRecomputingAtTheLiveBid:
         read back out of the solution. Points gained over the best roster
         without him is non-increasing in what he costs, so cheap-vs-dear is a
         real answer changing rather than a string.
+
+        Driven through `/explain`, and the solve read off a spy. It called
+        `main._counterfactual` directly until 2026-09-22, so the two layers
+        between the query string and the solver — the endpoint's parse and
+        `_counterfactual_context` — could drop the price without failing it.
         """
         name = _a_player().name
-        cheap = main._counterfactual(
-            main.auction_state.available_players[name], MIN_SALARY
-        ).points_difference
-        dear = main._counterfactual(
-            main.auction_state.available_players[name], MAX_SALARY
-        ).points_difference
+        solved = []
+        real = main._counterfactual
+
+        def spy(player, price):
+            result = real(player, price)
+            solved.append(result.points_difference)
+            return result
+
+        monkeypatch.setattr(main, "_counterfactual", spy)
+        for price in (MIN_SALARY, MAX_SALARY):
+            assert client.get(f"/explain/{name}?inline=1&price={price}").status_code == 200
+        cheap, dear = solved
         assert cheap > dear, (
             f"{name} is worth the same at ${MIN_SALARY}M and ${MAX_SALARY}M "
             f"({cheap} vs {dear}) — the price is not reaching the solve"

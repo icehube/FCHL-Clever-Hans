@@ -24,6 +24,18 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **`test_a_higher_price_can_only_be_worse` tested the solver, not the path
+  to it.** Found by the 2026-09-22 grill. It is the test that says the
+  Recompute price reaches the solve, and it called `main._counterfactual`
+  directly, skipping the two layers that carry the price there: `/explain`'s
+  parse and `_counterfactual_context`. It now goes through
+  `/explain/{name}?price=` and reads each solve off a spy. The grill's
+  framing was too strong, and this entry says so: the obvious mutant,
+  `_counterfactual_context` solving at the market price while quoting the
+  bid, was **already** failing `test_the_cache_is_keyed_by_price`. It now
+  also fails the test that asserts the property, which is where a reader
+  would look.
+
 - **The converter's first-initial fallback could never match a Washington
   player.** Found by the 2026-09-22 grill. `match_points` accepts a
   first-initial + surname match only when the NHL clubs agree, and compared

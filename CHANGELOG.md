@@ -24,6 +24,22 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Two test docstrings named coverage that does not exist.** Found by the
+  2026-09-22 grill's re-review. `test_scenarios.py`'s
+  `test_the_plan_wants_a_player_the_ceiling_cut`, rewritten earlier the same
+  day, said the capped branch's rendering was pinned by
+  `test_nomination.py::TestBothPricesReachThePanel` — which renders no
+  template, and whose "ceiling-bound" state has no capped pick: measured, its
+  two picks are $2.54M and $2.51M model against $2.50M market, identical at
+  the one decimal `capped` compares, so its `capped ==` equivalence compares
+  False with False. That class's own docstring made the older half of the
+  same claim ("the ceiling-bound state is what gives both halves content").
+  Both now point at the real pin,
+  `test_endpoints.py::TestNominationPanelPrices::test_the_marker_tracks_the_ceiling`,
+  which renders `/nominate` on `endgame-ceiling-binds` and fails loudly if no
+  card is struck; and the nomination class says what its ceiling-bound state
+  does give — teeth for the two-dict assertion, since the figures differ.
+
 - **The converter's re-run guard missed two of the three hand edits the docs
   prescribe.** Found by the 2026-09-22 grill's re-review, the same day the
   guard landed (`ce697eb`). It compared STATUS on rostered rows and nothing

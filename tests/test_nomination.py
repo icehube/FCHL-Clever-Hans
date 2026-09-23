@@ -367,8 +367,15 @@ class TestBothPricesReachThePanel:
     price is ~$9.5M, so nothing in the pool is capped, every `capped` assertion is
     vacuously satisfied, and — measured — reading the model figure out of the
     MARKET dict passes too, because on a fresh state the two dicts agree on every
-    pick. The ceiling-bound state is what gives both halves content. Same trap
-    `test_endpoints.py::TestPriceColumn` records for the bid_limits flag.
+    pick. The ceiling-bound state is what gives the two-dict assertion content —
+    measured 2026-09-22, its picks are $2.54M and $2.51M model against $2.50M
+    market. It does NOT give `capped` content: both picks print the same figure
+    at one decimal, which is the drain half's least-surplus tie-break doing its
+    job (`.claude/rules/pricing-pipeline.md`), so `capped` is False on both
+    sides and that assertion is vacuous here too. The capped branch is pinned
+    by `test_endpoints.py::TestNominationPanelPrices::test_the_marker_tracks_the_ceiling`.
+    Same trap `test_endpoints.py::TestPriceColumn` records for the bid_limits
+    flag.
     """
 
     @staticmethod

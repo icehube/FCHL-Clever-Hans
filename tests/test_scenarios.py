@@ -927,9 +927,13 @@ class TestDrainedLateDraft:
         uncontested; correcting one unrelated projection re-sorted the drain,
         left a $1.8M goalie in the pool, and he out-valued the star at 36 points
         per dollar against 26. Nothing in the code changed. The capped branch's
-        rendering is pinned against a SUPPLIED state in
-        `test_nomination.py::TestBothPricesReachThePanel`; what this scenario
-        owes is that the branch has a subject.
+        rendering is pinned by
+        `test_endpoints.py::TestNominationPanelPrices::test_the_marker_tracks_the_ceiling`,
+        which renders `/nominate` on `endgame-ceiling-binds` and fails loudly if
+        no card there is struck; what this scenario owes is that the branch has
+        a subject. (This said `test_nomination.py::TestBothPricesReachThePanel`
+        until the 2026-09-22 re-review, which renders nothing and whose
+        ceiling-bound state has no capped pick.)
         """
         state = scenarios.load(LATE_DRAFT)
         model, live, info = _priced(state)

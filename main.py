@@ -18,6 +18,11 @@ from copy import deepcopy
 from functools import lru_cache, partial
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # Windows: `_hold_state_lock` degrades to a warning
+    fcntl = None
+
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -93,6 +98,90 @@ def _default_state_dir() -> str:
 
 
 STATE_DIR = os.environ.get("FCHL_STATE_DIR") or _default_state_dir()
+
+STATE_LOCK_NAME = ".lock"
+# realpath of a state folder -> the fd holding its lock, or None where the
+# filesystem could not lock at all. Keyed per folder because tests move
+# STATE_DIR mid-run, and a registry at all because Linux `flock` belongs to
+# the OPEN FILE, not the process: a second `os.open` + `flock` from this same
+# process conflicts with the first, and pytest runs lifespan several times over
+# one folder (`_app_client`, `live_server`, per-test `TestClient`s).
+_state_locks: dict[str, int | None] = {}
+
+
+def _hold_state_lock(state_dir: str) -> None:
+    """Make this process the only one that may write `state_dir`, or refuse.
+
+    The hazard is a process that is not the operator's server writing the
+    operator's draft: on 2026-09-15 an ad-hoc `with TestClient(main.app)` script
+    saved nine picks into `data/state/`, and since `_save_state` rotates the old
+    file into `.backup`, two such saves destroy both copies. No property of the
+    STATE can see that — the script loaded the same pool as the server — so the
+    guard is on the FOLDER: an advisory `flock`, taken at boot and held until
+    the process exits. The kernel drops it when its holder dies, so unlike a
+    pidfile it cannot go stale and strand the operator on draft day.
+
+    The one startup path that REFUSES rather than degrades, and deliberately:
+    everything else in `lifespan` protects the draft by booting anyway, but
+    here booting IS the damage — the recovery ladder renames files before any
+    request arrives. A filesystem that cannot lock at all (no `fcntl` on
+    Windows, ENOLCK on a network mount) warns and carries on, because then the
+    guard is merely absent rather than tripped.
+
+    It does not cover a script run while no server is up; nothing holds the
+    lock then. `BACKLOG.md` carries that residual.
+
+    The fd is never closed. Only the release at process exit matters, and
+    closing on lifespan shutdown would need a refcount across the nested
+    in-process lifespans the registry exists for.
+    """
+    key = os.path.realpath(state_dir)
+    if key in _state_locks:
+        return
+    lock_path = os.path.join(state_dir, STATE_LOCK_NAME)
+    if fcntl is None:
+        logging.warning("No fcntl on this platform, so nothing stops a second "
+                        "process writing %s", state_dir)
+        _state_locks[key] = None
+        return
+    fd = None
+    try:
+        # No O_TRUNC: the holder's pid is what the refusal below prints, so
+        # nothing may erase it until the lock is ours.
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        try:
+            with open(lock_path) as f:
+                holder = f.read().strip() or "unknown"
+        except OSError:
+            holder = "unknown"
+        raise RuntimeError(
+            f"Another process (pid {holder}) is using the saved-draft folder "
+            f"{state_dir}, and it is probably the live draft. Refusing to start, "
+            f"because this process would write over it. Either stop pid {holder}, "
+            f"or point this process at a copy (FCHL_STATE_DIR, or main.STATE_DIR "
+            f"in a script): cp -r {state_dir} {state_dir}-whatif && "
+            f"FCHL_STATE_DIR={state_dir}-whatif .venv/bin/uvicorn main:app --port 8001"
+        ) from None
+    except OSError as e:
+        if fd is not None:
+            os.close(fd)
+        logging.warning("Could not lock %s (%s: %s), so nothing stops a second "
+                        "process writing it", lock_path, type(e).__name__, e)
+        _state_locks[key] = None
+        return
+    # Registered before the pid is written: the lock is ours from `flock` on,
+    # and a failed write must not leave it held by an fd nothing remembers.
+    _state_locks[key] = fd
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+    except OSError as e:
+        logging.warning("Locked %s but could not record the pid in it: %s",
+                        lock_path, e)
+
 
 # -- Global state --
 auction_state: AuctionState | None = None
@@ -377,6 +466,10 @@ async def lifespan(app: FastAPI):
         "player pool: %s | state dir: %s", data_loader.PLAYERS_CSV, STATE_DIR
     )
     os.makedirs(STATE_DIR, exist_ok=True)
+    # First, before anything reads or renames a file in the folder: the
+    # recovery ladder below moves an unreadable state aside, which is already a
+    # write into somebody else's draft if this is the second process on it.
+    _hold_state_lock(STATE_DIR)
     model_params = load_model_params()
     _load_nhl_odds()
     _startup_warnings.clear()  # this boot's story, not the previous one's
@@ -1132,6 +1225,9 @@ def _publish_if_current[V](
 def _save_state():
     """Save auction state to disk atomically with backup rotation."""
     global _untrusted_current_file
+    # A registry hit for the server, so free. It is here for the process that
+    # never ran lifespan — a script assigning `main.auction_state` and saving.
+    _hold_state_lock(STATE_DIR)
     path = os.path.join(STATE_DIR, "auction_state.json")
     backup_path = path + ".backup"
     tmp_path = path + ".tmp"

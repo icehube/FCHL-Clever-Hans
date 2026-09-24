@@ -20,6 +20,88 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-23]
+
+### Fixed
+
+- **A second process can no longer open the live draft's folder while the
+  server has it.** This closes the draft-day half of the `BACKLOG.md` entry
+  filed against `tests/conftest.py (isolated_state_dir)` on 2026-09-22. The
+  only thing that kept a stray process off `data/state/` was that pytest
+  fixture. An ad-hoc `with TestClient(main.app)` script walked straight past
+  it, and so would a second `uvicorn` started by mistake. `_save_state` rotates
+  the old file into `.backup`, so two saves from the wrong process destroy both
+  copies of a real draft. That happened on 2026-09-15 with nine picks.
+
+  `main._hold_state_lock` now takes an advisory `fcntl.flock` on
+  `STATE_DIR/.lock` and writes the holder's pid into it. `lifespan` calls it
+  straight after `os.makedirs`. That is before anything reads a file, and it
+  has to be: the recovery ladder renames an unreadable state to `.corrupt`,
+  which is already a write into someone else's draft before any request
+  arrives. A second process refuses with a `RuntimeError` naming the folder,
+  the holder's pid, and the what-if recipe as the way out. uvicorn then exits
+  with status 3 after "Application startup failed. Exiting." That was checked
+  by running two servers on one scratch folder, not assumed.
+
+  `_save_state` calls it too. For the server that is a registry hit with no
+  syscall, and it catches a script that assigns `main.auction_state` and saves
+  without running lifespan at all.
+
+  **Why a lock and not the guards the entry considered.** The kernel drops a
+  `flock` when its holder dies, so a crash mid-auction cannot leave a stale
+  lock that blocks the restart, which a pidfile would. It is also the one
+  startup path that refuses rather than degrades, because here booting *is*
+  the damage. A filesystem that cannot lock at all degrades with one warning
+  and continues: no `fcntl` on Windows, or ENOLCK on a network mount. In that
+  case the guard is absent, not tripped. Every other failure `lifespan` can
+  hit still boots.
+
+  **Facts it rests on, each checked against the installed code:**
+  - The lock has to be **re-entrant within one process**. Linux `flock`
+    belongs to the open file, not the process, and pytest boots lifespan
+    several times over one folder (`_app_client`, `live_server`, per-test
+    `TestClient`s). So a registry keyed by realpath holds one fd per folder
+    and never closes it; only the release at process exit matters.
+  - `uvicorn --reload` restarts with `terminate()` → `join()` → spawn
+    (`uvicorn/supervisors/basereload.py`), so the old child has released the
+    lock before the new one boots.
+  - CBC children cannot inherit it, because fds are non-inheritable (PEP 446).
+  - As a side effect, `--workers 2` now fails at the second worker. Before, it
+    would have split the draft across two processes with nothing on screen to
+    say so.
+
+  **What it does not cover:** a process started while no server is running,
+  because nothing holds the lock then. The 2026-09-15 incident may have been
+  exactly that, since nothing records whether a server was up. That half stays
+  open in `BACKLOG.md` against `_hold_state_lock`, with a candidate guard and
+  why it was not built. The procedural rule (redirect `FCHL_STATE_DIR` or
+  `main.STATE_DIR` first) stays in force.
+
+  **Tests.** `tests/test_state_lock.py` has eight. The holders are child
+  processes calling raw `flock`, because an in-process holder would exercise
+  the re-entrant path, the opposite of the case under test. One test runs two
+  real `uvicorn` servers, because only that shows what the operator sees.
+
+  **Mutation.** Every mutant was killed, with each anchor asserted to hit
+  exactly one site, and `main.py` was byte-identical afterwards:
+
+  | Mutant | Killed by |
+  |---|---|
+  | lock taken after the recovery ladder | the refusal touches nothing, second uvicorn |
+  | registry removed | boots twice, cannot-lock |
+  | fd closed on return | server keeps holding it, second uvicorn |
+  | refuse on any `OSError` | cannot-lock still boots |
+  | `BlockingIOError` degraded to a warning | four tests |
+  | `_save_state` check removed | save refuses without lifespan |
+  | file truncated before the lock | three pid assertions |
+
+  **What the 2026-09-22 entry got wrong.** It said "every cheap guard found so
+  far is wrong for draft day". That was true of the two it had considered,
+  which were changing the default path and checking for pytest. It was not
+  true of guarding the folder rather than the process or the state, which
+  costs one syscall at boot.
+
+
 ## [2026-09-22]
 
 ### Fixed
@@ -3605,11 +3687,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:79 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:84 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
   to remember; `FCHL_STATE_DIR` overrides it explicitly.
-  `main.py:140 (_backfill_nhl_teams)` and
-  `main.py:164 (_backfill_keeper_flags)` follow the
+  `main.py:229 (_backfill_nhl_teams)` and
+  `main.py:253 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -3803,7 +3885,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:317 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:406 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup
@@ -4351,7 +4433,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1559 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1655 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -4456,7 +4538,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1559 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1655 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.

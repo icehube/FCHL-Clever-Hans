@@ -17,7 +17,7 @@ from config import (
     OVERPAY_STRESS,
 )
 from market import compute_market_ceiling, compute_market_price
-from optimizer import MILPSolution, solve_optimal_roster
+from optimizer import MILPSolution, buyout_relief, solve_optimal_roster
 from price_model import load_model_params, predict_all_prices
 from state import AuctionState, Player, PlayerOnRoster, TeamState
 
@@ -127,31 +127,22 @@ class TradeEvaluation:
         return "level"
 
 
-# One MILP to run: (description, team to solve, pool it may buy from, buyouts).
-_Job = tuple[str, TeamState, dict[str, Player], list[str]]
+# One MILP to run: (label, team to solve, pool it may buy from, the names it
+# may buy out -- None for a plan with no buyouts at all).
+_Job = tuple[str, TeamState, dict[str, Player], "set[str] | None"]
 
 
-def _buyout_jobs(team: TeamState, pool: dict[str, Player], label: str) -> list[_Job]:
-    """One job per legal single buyout on `team`, in roster order.
+def _buyout_menu(team: TeamState) -> set[str]:
+    """Every contract on `team` the league would let it buy out.
 
-    Only `can_be_bought_out` players: a scenario can be the recommended one, so
-    an ineligible prospect here would be the tool advising an illegal move.
-
-    The clones are made HERE, on the caller's thread, before anything fans out:
-    `roster_players` lazily writes `_roster_cache`, so deep-copying one team
-    from several workers at once is a write race on the source (the same
-    reason `main._solve_buyout_indicators` materialises its candidates first).
+    Handed to the solver as `buyout_candidates`, which then chooses ANY SET of
+    them in one solve. Until 2026-09-25 this built one clone and one solve per
+    single buyout, so two dead contracts received in one trade could never be
+    bought out together -- see `solve_optimal_roster`. Materialised on the
+    caller's thread: `all_players` reads `roster_players`, which lazily writes
+    `_roster_cache`, and the same team is solved by two jobs at once.
     """
-    jobs: list[_Job] = []
-    for p in team.all_players:
-        if not p.can_be_bought_out:
-            continue
-        clone = deepcopy(team)
-        clone.remove_player(p.name)
-        penalty = p.salary * BUYOUT_PENALTY_RATE
-        clone.penalties += penalty
-        jobs.append((f"{label} {p.name} (penalty ${penalty:.1f}M)", clone, pool, [p.name]))
-    return jobs
+    return {p.name for p in team.all_players if p.can_be_bought_out}
 
 
 def _solve_jobs(
@@ -159,21 +150,28 @@ def _solve_jobs(
 ) -> list[TradeScenario]:
     """Solve every job, `workers` at a time, returning scenarios in job order.
 
-    ONE batch for the whole evaluation rather than one per side: each solve is
-    ~300ms of CBC on a full pool, and measured 2026-09-25 on the live draft (14
-    solves, 8 workers) three batches took 2.0s against 1.4s for one. `map` yields in input order, which is what keeps the scenario
-    list deterministic; concurrent CBC solves are safe because PuLP gives each
-    one its own scratch files (see TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow).
+    ONE batch for the whole evaluation rather than one per side. `map` yields
+    in input order, which is what keeps the scenario list deterministic;
+    concurrent CBC solves are safe because PuLP gives each one its own scratch
+    files (see TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow). Two jobs share a
+    team (the current roster, with and without buyouts), which is read-only
+    here because `_buyout_menu` has already built its roster cache.
     """
     def solve(job: _Job) -> TradeScenario:
-        description, team, pool, buyouts = job
-        sol = solve_optimal_roster(team, pool, market_prices)
+        label, team, pool, menu = job
+        sol = solve_optimal_roster(team, pool, market_prices, buyout_candidates=menu)
+        cut = [team.find_player(n) for n in sol.buyouts]
+        description = label
+        if cut:
+            penalty = sum(p.salary * BUYOUT_PENALTY_RATE for p in cut)
+            description = (f"{label} buy out {', '.join(p.name for p in cut)} "
+                           f"(penalty ${penalty:.1f}M)")
         return TradeScenario(
             description=description,
             total_points=sol.total_points,
-            cap_remaining=team.remaining_budget,
+            cap_remaining=team.remaining_budget + sum(buyout_relief(p.salary) for p in cut),
             roster=sol,
-            buyouts=buyouts,
+            buyouts=list(sol.buyouts),
         )
 
     if workers <= 1 or len(jobs) <= 1:
@@ -202,8 +200,9 @@ def evaluate_trade(
 
     1. Solve current state → baseline
     2. Clone state, apply trade, solve → "keep all" scenario
-    3. If auto_check_buyouts: test every legal single buyout on BOTH sides --
-       the post-trade roster, and the current roster with no trade at all
+    3. If auto_check_buyouts: let the solver buy out ANY SET of legal
+       contracts on BOTH sides -- the post-trade roster, and the current
+       roster with no trade at all
     4. Recommend accept iff the best trade outcome beats the best no-trade one
 
     Step 3 has to be symmetric. Until 2026-09-25 only the trade side got
@@ -214,10 +213,16 @@ def evaluate_trade(
     buying Kyrou out, read ACCEPT at +7 (1348); buying Gustavsson out with no
     trade scores 1351. The trade was worth -3, and the tool said take it.
 
-    `workers` fans the solves out (main passes SCAN_WORKERS). ~2 per eligible
-    contract, so this costs ~1.4s where the one-sided version cost ~0.9s. It
-    still runs on the event loop: trades happen in auction breaks, with no bid
-    in flight to stall.
+    Step 3 also has to allow more than one buyout. Until the same day it
+    tried them one at a time, so Kyrou for Thrun + Perunovich (1 point and 0,
+    both cheap and dead) read DECLINE: the best SINGLE buyout scored 1444
+    against 1450 for buying Kyrou out yourself, while buying out both scored
+    1461 -- and the solver, choosing freely, finds 1462 by adding Coyle.
+
+    Four solves plus two stress solves, however many contracts are eligible
+    (it was ~2 per eligible contract under the one-at-a-time menu). `workers`
+    fans them out (main passes SCAN_WORKERS). It still runs on the event loop:
+    trades happen in auction breaks, with no bid in flight to stall.
 
     The two winners are then re-solved with every auction price marked up by
     `overpay`. Every plan here assumes BOT buys its open spots at the model's
@@ -315,18 +320,19 @@ def evaluate_trade(
         for n, pred in preds.items():
             prices[n] = compute_market_price(pred.expected_price, ceiling)
 
-    # Every legal single buyout, on both sides of the comparison -- see the
-    # docstring for why the no-trade side is not optional.
+    # Buyouts on BOTH sides of the comparison -- see the docstring for why
+    # the no-trade side is not optional -- and any number of them per side,
+    # chosen by the solver. The plain plans stay alongside for the table.
     trade_jobs: list[_Job] = [
-        ("Keep all received players", trade_team, trade_available, []),
+        ("Keep all received players", trade_team, trade_available, None),
     ]
     baseline_jobs: list[_Job] = []
     if auto_check_buyouts:
-        trade_jobs += _buyout_jobs(trade_team, trade_available, "Trade + buy out")
-        baseline_jobs = _buyout_jobs(team, state.available_players, "No trade, buy out")
+        trade_jobs.append(("Trade +", trade_team, trade_available, _buyout_menu(trade_team)))
+        baseline_jobs.append(("No trade,", team, state.available_players, _buyout_menu(team)))
 
     all_jobs = (
-        [("Current roster (no trade)", team, state.available_players, [])]
+        [("Current roster (no trade)", team, state.available_players, None)]
         + trade_jobs + baseline_jobs
     )
     solved = _solve_jobs(all_jobs, prices, workers)
@@ -405,7 +411,7 @@ def evaluate_trade(
     # caught "1446" in the trade table beside "1445" on the team panel.
     best_pts, bar_pts = int(best.total_points), int(bar.total_points)
     bar_label = (
-        f"buying out {bar.buyouts[0]} yourself ({bar_pts})"
+        f"buying out {', '.join(bar.buyouts)} yourself ({bar_pts})"
         if bar.buyouts else f"standing pat ({bar_pts})"
     )
     # Buying out everything you receive means the trade is a salary dump: the

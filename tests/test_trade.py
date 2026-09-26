@@ -141,14 +141,14 @@ class TestEvaluateTrade:
         ]
 
         result = evaluate_trade(state, give, receive, mp, auto_check_buyouts=True)
-        # keep_all + one per eligible contract on the POST-trade roster: both
-        # received players (fresh draftees are group 3) and BOT's own.
-        eligible_after = (
-            sum(1 for q in bot.all_players if q.can_be_bought_out and q.name != worst.name)
-            + len(receive)
-        )
-        assert len(result.scenarios) == 1 + eligible_after
-        assert {p1.name, p2.name} <= {b for s in result.scenarios for b in s.buyouts}
+        # keep_all, then ONE plan in which the solver buys out whatever set it
+        # likes -- one scenario per side since 2026-09-25, not one per contract.
+        eligible_after = {q.name for q in bot.all_players
+                          if q.can_be_bought_out and q.name != worst.name}
+        eligible_after |= {p1.name, p2.name}  # fresh draftees are group 3
+        assert [s.description for s in result.scenarios][0] == "Keep all received players"
+        assert len(result.scenarios) == 2
+        assert set(result.scenarios[1].buyouts) <= eligible_after
 
     def test_two_team_trade_does_not_reuse_give_in_milp(self):
         """Free-agent flow can re-acquire give-player; two-team flow cannot."""
@@ -252,28 +252,46 @@ class TestTheNoTradeSideGetsBuyoutsToo:
             "the highlighted row must be the side that WON, not the trade's best"
         )
 
-    def test_the_trade_side_may_buy_out_a_player_bot_already_had(self):
+    def _menus(self, monkeypatch, state, give, receive, mp):
+        """What each solve was OFFERED to buy out, keyed by the team solved.
+
+        The solver chooses from the menu, so what it picks depends on the pool;
+        what it is allowed to pick is the evaluator's contract, and is what
+        these pin."""
+        import trade
+        offered = []
+        real = trade.solve_optimal_roster
+
+        def spy(team, pool, prices, **kw):
+            offered.append(kw.get("buyout_candidates"))
+            return real(team, pool, prices, **kw)
+
+        monkeypatch.setattr(trade, "solve_optimal_roster", spy)
+        evaluate_trade(state, give, receive, mp)
+        return [m for m in offered if m is not None]
+
+    def test_the_trade_side_may_buy_out_a_player_bot_already_had(self, monkeypatch):
         state, mp = _setup()
         bot = state.teams[MY_TEAM]
         mine = next(q for q in bot.roster_players if q.can_be_bought_out)
         avail = max((p for p in state.available_players.values() if p.position == "F"),
                     key=lambda p: p.projected_points)
-        result = evaluate_trade(
-            state, [], [PlayerTrade(avail.name, avail.position, 1.0, avail.projected_points)], mp)
-        assert any(s.buyouts == [mine.name] for s in result.scenarios)
+        menus = self._menus(monkeypatch, state, [],
+                            [PlayerTrade(avail.name, avail.position, 1.0, avail.projected_points)], mp)
+        trade_menu = next(m for m in menus if avail.name in m)
+        assert mine.name in trade_menu, "BOT's own contracts must be on the trade side's menu"
 
-    def test_the_no_trade_menu_is_exactly_the_eligible_contracts(self):
+    def test_the_no_trade_menu_is_exactly_the_eligible_contracts(self, monkeypatch):
         state, mp = _setup()
         bot = state.teams[MY_TEAM]
         worst = min(bot.keeper_players, key=lambda p: p.projected_points)
         avail = next(p for p in state.available_players.values() if p.projected_points > 0)
-        result = evaluate_trade(
-            state,
+        eligible = {q.name for q in bot.all_players if q.can_be_bought_out}
+        menus = self._menus(
+            monkeypatch, state,
             [PlayerTrade(worst.name, worst.position, worst.salary, worst.projected_points)],
             [PlayerTrade(avail.name, avail.position, 1.0, avail.projected_points)], mp)
-        assert [s.buyouts[0] for s in result.baseline_scenarios] == [
-            q.name for q in bot.all_players if q.can_be_bought_out
-        ]
+        assert eligible in menus, "the no-trade side must be offered every legal buyout"
 
     def test_disabling_buyouts_disables_both_sides(self):
         state, mp = _setup()
@@ -315,9 +333,11 @@ class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
     """
 
     def _evaluate(self, monkeypatch, outcomes):
-        """`outcomes(mine, incoming)` maps a description prefix to
-        (points, cap_remaining, plan_cost). A callable, because the players are
-        derived from the pool here and the caller cannot name them in advance.
+        """`outcomes(mine, incoming)` maps a job LABEL prefix -- "Current
+        roster", "Keep all", "Trade +", "No trade," -- to (points,
+        cap_remaining, plan_cost, bought_out). A callable, because the players
+        are derived from the pool here and the caller cannot name them in
+        advance.
 
         Anything unlisted scores 0 so it can never win.
         """
@@ -326,14 +346,15 @@ class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
 
         def fake(jobs, market_prices, workers):
             out = []
-            for description, _team, _pool, buyouts in jobs:
-                pts, cap, cost = next(
-                    (v for k, v in table.items() if description.startswith(k)),
-                    (0, 1.0, 0.0),
+            for label, _team, _pool, _menu in jobs:
+                pts, cap, cost, cut = next(
+                    (v for k, v in table.items() if label.startswith(k)),
+                    (0, 1.0, 0.0, []),
                 )
                 sol = MILPSolution(total_points=pts, roster=[], total_cost=cost,
                                    by_position={}, status="Optimal")
-                out.append(trade.TradeScenario(description, pts, cap, sol, buyouts))
+                desc = f"{label} buy out {', '.join(cut)}" if cut else label
+                out.append(trade.TradeScenario(desc, pts, cap, sol, list(cut)))
             return out
 
         state, mp = _setup()
@@ -353,9 +374,9 @@ class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
     def test_more_cap_that_the_plan_spends_is_not_a_win(self, monkeypatch):
         """The Dobson case: $1.6M more cap, all of it spent on the extra spot."""
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
-            "Current roster": (1341, 40.3, 40.3),
-            f"No trade, buy out {mine.name}": (1351, 41.9, 41.9),
-            f"Trade + buy out {incoming.name}": (1351, 43.5, 43.5),
+            "Current roster": (1341, 40.3, 40.3, []),
+            "No trade,": (1351, 41.9, 41.9, [mine.name]),
+            "Trade +": (1351, 43.5, 43.5, [incoming.name]),
         })
         assert result.recommendation == "even", result.reasoning
         assert "spends the same" in result.reasoning
@@ -363,33 +384,33 @@ class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
 
     def test_a_tie_that_genuinely_leaves_money_over_is_even_and_says_so(self, monkeypatch):
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
-            "Current roster": (1341, 40.3, 40.3),
-            f"No trade, buy out {mine.name}": (1351, 41.9, 41.9),
-            f"Trade + buy out {incoming.name}": (1351, 43.5, 42.5),
+            "Current roster": (1341, 40.3, 40.3, []),
+            "No trade,": (1351, 41.9, 41.9, [mine.name]),
+            "Trade +": (1351, 43.5, 42.5, [incoming.name]),
         })
         assert result.recommendation == "even"
         assert "$1.0M more unspent" in result.reasoning
 
     def test_a_tie_that_costs_money_is_declined(self, monkeypatch):
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
-            "Current roster": (1341, 40.3, 40.3),
-            f"No trade, buy out {mine.name}": (1351, 41.9, 40.9),
-            f"Trade + buy out {incoming.name}": (1351, 43.5, 43.5),
+            "Current roster": (1341, 40.3, 40.3, []),
+            "No trade,": (1351, 41.9, 40.9, [mine.name]),
+            "Trade +": (1351, 43.5, 43.5, [incoming.name]),
         })
         assert result.recommendation == "decline", result.reasoning
 
     def test_buying_out_everything_received_is_called_a_salary_dump(self, monkeypatch):
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
-            "Current roster": (1341, 40.3, 40.3),
-            f"Trade + buy out {incoming.name}": (1360, 43.5, 43.5),
+            "Current roster": (1341, 40.3, 40.3, []),
+            "Trade +": (1360, 43.5, 43.5, [incoming.name]),
         })
         assert result.recommendation == "accept"
         assert result.reasoning.startswith("Salary dump")
 
     def test_keeping_what_you_receive_is_not_a_salary_dump(self, monkeypatch):
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
-            "Current roster": (1341, 40.3, 40.3),
-            "Keep all received": (1360, 40.0, 40.0),
+            "Current roster": (1341, 40.3, 40.3, []),
+            "Keep all": (1360, 40.0, 40.0, []),
         })
         assert result.recommendation == "accept"
         assert "Salary dump" not in result.reasoning
@@ -397,9 +418,9 @@ class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
     def test_an_even_verdict_renders_amber_with_both_sides_highlighted(self, monkeypatch):
         from main import templates
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
-            "Current roster": (1341, 40.3, 40.3),
-            f"No trade, buy out {mine.name}": (1351, 41.9, 41.9),
-            f"Trade + buy out {incoming.name}": (1351, 43.5, 43.5),
+            "Current roster": (1341, 40.3, 40.3, []),
+            "No trade,": (1351, 41.9, 41.9, [mine.name]),
+            "Trade +": (1351, 43.5, 43.5, [incoming.name]),
         })
         html = templates.env.get_template("partials/trade_verdict.html").render(
             trade_result=result)
@@ -529,6 +550,136 @@ class TestTheOverpayStress:
         r = evaluate_trade(state, give, receive, mp, auto_check_buyouts=False)
         assert len(calls) == 2
         assert r.overpay_outcome is None
+
+
+class TestTheSolverChoosesAnyNumberOfBuyouts:
+    """Regression (2026-09-25): buyouts were scored one at a time.
+
+    Kyrou for Thrun + Perunovich -- two cheap contracts worth 1 point and 0 --
+    read DECLINE, because the best SINGLE buyout (1444) lost to buying Kyrou
+    out yourself (1450). Buying out both scored 1461. The solver now takes a
+    buy-out decision per eligible contract (`buyout_candidates`) and picks the
+    best SET in one solve.
+    """
+
+    def _team(self, rng):
+        """A roster where each buyout mechanism can DECIDE the answer.
+
+        The first draft of this generator was too kind and three mutants
+        survived it: its budget never bound (so crediting no cap relief changed
+        nothing), its dead contracts were all surplus (so no buyout ever took a
+        position below its minimum), and none of them started (so a bought-out
+        player who kept starting cost nothing). So: 11 forward keepers plus a
+        dead-contract FORWARD who starts, a goalie pair where one is a dead
+        contract, and a budget a little above the floor.
+        """
+        from tests.test_bench_value import _keeper
+        from state import TeamState
+        from config import MIN_SALARY
+        keepers = ([_keeper(f"sF{i}", "F", rng.randint(40, 90), 1.0) for i in range(11)]
+                   + [_keeper(f"sD{i}", "D", rng.randint(30, 70), 1.0) for i in range(6)]
+                   + [_keeper("sG0", "G", rng.randint(40, 80), 1.0)])
+        # Whole-dollar salaries so half of each is on the $0.1M grid and the
+        # relief is not floored.
+        dead = [_keeper("deadF", "F", rng.randint(35, 70), float(rng.choice([3, 4, 5]))),
+                _keeper("deadG", "G", rng.randint(5, 40), float(rng.choice([2, 3]))),
+                _keeper("deadX", rng.choice("FD"), rng.randint(0, 30), float(rng.choice([1, 2])))]
+        team = TeamState(code="BOT", name="T", keeper_players=keepers + dead)
+        slack = rng.choice([0.2, 0.6, 1.0, 2.0])
+        team.penalties = team.remaining_budget - team.total_spots_remaining * MIN_SALARY - slack
+        return team, dead
+
+    def test_it_finds_the_best_set_of_buyouts_by_brute_force(self):
+        import itertools
+        import random
+        from copy import deepcopy
+        from tests.test_bench_value import _player
+        from optimizer import solve_optimal_roster
+        rng = random.Random(4861)
+        for trial in range(12):
+            team, dead = self._team(rng)
+            pool = {f"c{i}": _player(f"c{i}", rng.choice("FFDG"), rng.randint(5, 80))
+                    for i in range(14)}
+            prices = {n: rng.choice([0.5, 0.5, 1.0, 2.0, 3.0]) for n in pool}
+            best = -1.0
+            for k in range(len(dead) + 1):
+                for cut in itertools.combinations(dead, k):
+                    t = deepcopy(team)
+                    for q in cut:
+                        t.remove_player(q.name)
+                        t.penalties += q.salary * BUYOUT_PENALTY_RATE
+                    sol = solve_optimal_roster(t, pool, prices)
+                    if sol.status == "Optimal":
+                        best = max(best, sol.total_points)
+            chosen = solve_optimal_roster(team, pool, prices,
+                                          buyout_candidates={q.name for q in dead})
+            assert chosen.total_points == pytest.approx(best), (
+                f"trial {trial}: bought out {chosen.buyouts} for "
+                f"{chosen.total_points:.2f}; the best subset scores {best:.2f}"
+            )
+
+    def test_a_prospect_on_the_menu_is_never_bought_out(self):
+        """Eligibility is re-checked inside the solver: naming a group A-E
+        player in the menu must not make his buyout legal."""
+        import random
+        from tests.test_bench_value import _player
+        from optimizer import solve_optimal_roster
+        from state import PlayerOnRoster
+        team, dead = self._team(random.Random(3))
+        team.keeper_players.append(PlayerOnRoster("prospect", "F", "A", 4.0, 0))
+        pool = {f"c{i}": _player(f"c{i}", "F", 60) for i in range(6)}
+        sol = solve_optimal_roster(team, pool, {n: 0.5 for n in pool},
+                                   buyout_candidates={"prospect"})
+        assert "prospect" not in sol.buyouts
+
+    def test_a_buyout_never_leaves_a_position_short(self):
+        """Buying out the second of two goalies with no goalie to replace him
+        would leave a roster that cannot field 2G. Random pools almost always
+        offer a replacement, which is why a mutant that stopped raising the
+        need survived the brute force; here the pool has none, and his $4M
+        of relief would otherwise buy two good skaters."""
+        from tests.test_bench_value import _keeper, _player
+        from optimizer import solve_optimal_roster
+        from state import TeamState
+        from config import MIN_SALARY
+        keepers = ([_keeper(f"sF{i}", "F", 60, 1.0) for i in range(12)]
+                   + [_keeper(f"sD{i}", "D", 50, 1.0) for i in range(6)]
+                   + [_keeper("sG", "G", 60, 1.0), _keeper("deadG", "G", 5, 4.0)]
+                   + [_keeper("bF", "F", 20, 0.5)])
+        team = TeamState(code="BOT", name="T", keeper_players=keepers)
+        team.penalties = team.remaining_budget - team.total_spots_remaining * MIN_SALARY - 0.5
+        # Cheap skaters fill the roster legally; good ones are what his relief
+        # would buy. No goalie at any price.
+        pool = {f"cheap{i}": _player(f"cheap{i}", "FD"[i % 2], 30) for i in range(4)}
+        pool |= {f"good{i}": _player(f"good{i}", "FD"[i % 2], 70) for i in range(4)}
+        prices = {n: (0.5 if n.startswith("cheap") else 1.5) for n in pool}
+        sol = solve_optimal_roster(team, pool, prices, buyout_candidates={"deadG"})
+        assert sol.status == "Optimal"
+        assert "deadG" not in sol.buyouts, "bought out a goalie nobody could replace"
+
+    def test_two_dead_contracts_received_are_both_bought_out(self):
+        """The owner's case, supplied rather than found: two cheap rival
+        contracts made worthless, received for BOT's worst keeper."""
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        rival_code, rival = next(
+            (c, t) for c, t in state.teams.items()
+            if c != MY_TEAM and sum(q.can_be_bought_out for q in t.roster_players) >= 2
+        )
+        a, b = [q for q in rival.roster_players if q.can_be_bought_out][:2]
+        for q, salary in ((a, 0.5), (b, 0.6)):
+            q.salary, q.projected_points = salary, 0
+        give_p = min(bot.roster_players, key=lambda q: q.projected_points)
+        result = evaluate_trade(
+            state,
+            [PlayerTrade(give_p.name, give_p.position, give_p.salary, give_p.projected_points)],
+            [PlayerTrade(q.name, q.position, q.salary, q.projected_points) for q in (a, b)],
+            mp, source_team_code=rival_code,
+        )
+        assert {a.name, b.name} <= set(result.best_scenario.buyouts), (
+            f"received two 0-point contracts and bought out "
+            f"{result.best_scenario.buyouts}"
+        )
 
 
 class TestEvaluateBuyout:

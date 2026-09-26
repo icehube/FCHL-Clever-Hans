@@ -24,6 +24,39 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **The trade evaluator buys out any number of contracts, not one at a
+  time.** The owner's case: Kyrou (F, $4.0M) for Henry Thrun (D, $0.5M, 1pt)
+  and Scott Perunovich (D, $0.6M, 0pts). The obvious move is to take both dead
+  contracts and buy them both out, $0.55M of penalty, and the tool read
+  **DECLINE**: it scored buyouts one per solve, the best single one gave 1444,
+  and buying Kyrou out yourself gave 1450. Measured by hand, buying out both
+  gave **1461**, against a best no-trade pair of 1452.
+
+  `solve_optimal_roster` takes an opt-in `buyout_candidates`: a binary
+  buy-out decision per eligible contract, which frees the player's spot if he
+  is active, keeps him out of the lineup and off the bench, credits
+  `buyout_relief` to the budget, and raises that position's need so a buyout
+  can never leave the roster unable to field 12F/6D/2G. The relief is floored
+  per player, so a plan can never spend cap the real post-buyout budget lacks
+  (applying the solver's chosen buyouts for real and re-solving gave 1463.2
+  against its 1462.3). Eligibility is re-checked inside, whatever is named.
+  The evaluator now runs four solves plus two stress solves however many
+  contracts are eligible, down from about two per eligible contract. On the
+  live draft the trade reads **ACCEPT +11**: the solver buys out Thrun,
+  Perunovich **and Charlie Coyle** (1462), which beat the pair found by hand,
+  against Coyle + Kyrou without trading (1451); it survives the overpay stress
+  (1406 vs 1396), in 1.7s.
+
+  `tests/test_trade.py::TestTheSolverChoosesAnyNumberOfBuyouts` checks the
+  solver against every subset of buyouts applied for real. Its first generator
+  let three mutants survive (no cap relief, needs not raised, bought-out player
+  still starting), because its budget never bound, its dead contracts were all
+  surplus and none of them started; the harder generator catches the first, a
+  deterministic no-goalie case catches the second, and the third is an
+  equivalent mutant (the bench constraint already implies it), now said so in
+  the code. The tests that pinned one scenario per contract were rewritten to
+  pin what the solver is OFFERED, via a spy on `solve_optimal_roster`.
+
 - **Every MILP solve is time-boxed at 10s, and a corner timer shows how long
   the server has been working.** The solver-checker's `/go` pass flagged that
   the one `prob.solve` had no time limit (true since the first commit; the
@@ -4978,7 +5011,7 @@ about the change being *undefended* rather than wrong.
 
   **The determinism tests do not pin the name tie-breaks.** Removing `_fill`'s tie-break leaves all 58 tests green — dict iteration is insertion-ordered, so two loads in one process give the same answer either way. The tie-breaks matter *across* processes, where hash and set order vary, and nothing in this file can see that. What the test does catch is state leaking between loads (a cached price dict, a mutated `POSITION_MINIMUMS`), which is worth its 20ms; the docstring now says so instead of the opposite, and the two new copies point at it.
 
-  **`test_every_team_still_solves` has no teeth on a full team.** `solve_optimal_roster` answers `spots == 0` from its own branch (`optimizer.py:201 (solve_optimal_roster)`) and returns Optimal without running the MILP, so filling that team with skaters only left everything green. Its position legality is pinned by the `roster_needs` assertion in the exactly-one-full test instead.
+  **`test_every_team_still_solves` has no teeth on a full team.** `solve_optimal_roster` answers `spots == 0` from its own branch (`optimizer.py:234 (solve_optimal_roster)`) and returns Optimal without running the MILP, so filling that team with skaters only left everything green. Its position legality is pinned by the `roster_needs` assertion in the exactly-one-full test instead.
 
   The first attempt at the done-team mutation matched **two** sites and was not applied — the fifth anchor miss in this repo, caught by asserting exactly one replacement rather than by noticing a suspiciously green run.
 

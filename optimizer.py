@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import heapq
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pulp
 
 from config import (
     BENCH_DEPTH_WEIGHTS,
     BENCH_SIZE,
+    BUYOUT_PENALTY_RATE,
     CAUTION_BAND,
     MAX_SALARY,
     MIN_DRAIN_PRICE,
@@ -21,7 +22,14 @@ from config import (
     STARTING_LINEUP,
 )
 from market import MarketInfo, is_capped
-from state import AuctionState, Player, TeamState, expected_points, lineup_points
+from state import (
+    AuctionState,
+    Player,
+    TeamState,
+    _floor_to_increment,
+    expected_points,
+    lineup_points,
+)
 
 
 @dataclass
@@ -45,6 +53,10 @@ class MILPSolution:
     # proved optimal. The roster is used anyway (it is the best one found), but
     # it is not the optimum, and a caller comparing two solves should know.
     timed_out: bool = False
+    # Players the solver chose to buy out, when it was allowed to
+    # (`buyout_candidates`). Their salaries are off the roster in this plan and
+    # half of each is a penalty; `buyout_relief` is the cap each frees.
+    buyouts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -165,12 +177,24 @@ def _bench_candidates(
     return keep
 
 
+def buyout_relief(salary: float) -> float:
+    """Cap a buyout frees: the salary comes off, BUYOUT_PENALTY_RATE of it stays.
+
+    Floored to the $0.1M increment PER PLAYER, which is conservative on
+    purpose: `remaining_budget` is floored as a whole, and floor(a) + floor(b)
+    <= floor(a + b), so a plan built on these figures can never spend cap the
+    real post-buyout budget does not have.
+    """
+    return _floor_to_increment(salary * (1 - BUYOUT_PENALTY_RATE))
+
+
 def solve_optimal_roster(
     team: TeamState,
     available_players: dict[str, Player],
     market_prices: dict[str, float],
     excluded_players: set[str] | None = None,
     forced_players: dict[str, float] | None = None,
+    buyout_candidates: set[str] | None = None,
 ) -> MILPSolution:
     """
     MILP: maximize projected points subject to budget and position constraints.
@@ -181,6 +205,15 @@ def solve_optimal_roster(
         market_prices: player_name -> market-adjusted price
         excluded_players: names to exclude from candidate pool
         forced_players: name -> salary to force-include (for bid calculation)
+        buyout_candidates: names on `team` the solver MAY buy out, any number
+            of them. Opt-in, and used only by the trade evaluator: until
+            2026-09-25 it listed single buyouts one solve at a time, so
+            "trade for two dead contracts and buy out both" was never scored
+            (Kyrou for Thrun + Perunovich: 1461 with both bought out, reported
+            as DECLINE because the best SINGLE buyout was 1444). A buyout takes
+            the player off the roster and out of the lineup, frees his spot if
+            he is active, and credits `buyout_relief` to the budget. Only
+            `can_be_bought_out` players are ever eligible, whatever is passed.
     """
     if excluded_players is None:
         excluded_players = set()
@@ -216,7 +249,25 @@ def solve_optimal_roster(
         available_players[n] for n in forced_players if n in available_players
     ]
 
-    if spots == 0 and budget >= 0:
+    # Who may be bought out. Active players free a spot and leave the lineup;
+    # cap-counted minors free money only (they neither start nor sit on the
+    # bench). Eligibility is re-checked here so no caller can buy out a
+    # prospect by naming him.
+    allowed = buyout_candidates or set()
+    buyable_active = {
+        j for j, p in enumerate(team.roster_players)
+        if p.name in allowed and p.can_be_bought_out
+    }
+    buyable_minors = [
+        p for p in team.minor_players
+        if p.name in allowed and p.can_be_bought_out and p.counts_on_cap
+    ]
+    may_buy_out = bool(buyable_active or buyable_minors)
+
+    # The two shortcuts below read a roster that buyouts could change -- a full
+    # roster can open a spot, a broke team can free money -- so they only apply
+    # when nobody may be bought out.
+    if not may_buy_out and spots == 0 and budget >= 0:
         # Forced players exactly fill the roster — a complete roster is a
         # valid outcome, not an infeasibility. (Returning Infeasible here
         # made compute_marginal_value price ANY player at the floor when
@@ -230,7 +281,7 @@ def solve_optimal_roster(
             status="Optimal",
         )
 
-    if spots < 0 or budget < 0 or budget < spots * MIN_SALARY:
+    if not may_buy_out and (spots < 0 or budget < 0 or budget < spots * MIN_SALARY):
         return MILPSolution(
             total_points=expected_points(team.roster_players),
             lineup_points=lineup_points(team.roster_players),
@@ -243,6 +294,7 @@ def solve_optimal_roster(
     # Cap position needs so their sum doesn't exceed spots
     # (e.g., team with all-F keepers may need 6D+2G=8 but only have 6 spots)
     total_needs = sum(needs.values())
+    needs_capped = total_needs > spots
     if total_needs > spots:
         excess = total_needs - spots
         # Reduce largest needs first (they have the most flexibility)
@@ -276,6 +328,16 @@ def solve_optimal_roster(
     for i, name in enumerate(candidates):
         s_cand[name] = pulp.LpVariable(f"sc_{i}", cat="Binary")
         prob += s_cand[name] <= x[name]
+
+    # Buyout decisions. A bought-out active player can neither start nor sit
+    # on the bench (below); a minor's decision touches the budget alone.
+    out = {j: pulp.LpVariable(f"o_{j}", cat="Binary") for j in buyable_active}
+    out_minor = [pulp.LpVariable(f"om_{i}", cat="Binary") for i in range(len(buyable_minors))]
+    for j, var in out.items():
+        # Also implied by the bench constraint below, for anyone who has bench
+        # slots (1 - s - o >= sum(y) >= 0). Stated for the 0-point player, who
+        # has none -- so removing it is an equivalent mutant, not a gap.
+        prob += s_fixed[j] <= 1 - var
 
     # Starter slots per position (12F/6D/2G)
     for pos, slots in STARTING_LINEUP.items():
@@ -316,7 +378,8 @@ def solve_optimal_roster(
         prob.addConstraint(pulp.lpSum(mine) <= available)
 
     for j, p in enumerate(fixed_members):
-        _bench_slots(f"f{j}", p.position, p.projected_points, 1 - s_fixed[j])
+        _bench_slots(f"f{j}", p.position, p.projected_points,
+                     1 - s_fixed[j] - out[j] if j in out else 1 - s_fixed[j])
     for i, (n, p) in enumerate(candidates.items()):
         if n in bench_eligible:
             _bench_slots(f"c{i}", p.position, p.projected_points, x[n] - s_cand[n])
@@ -336,19 +399,35 @@ def solve_optimal_roster(
     )
     prob += starter_pts + pulp.lpSum(bench_value)
 
-    # Budget constraint
+    # Budget constraint -- plus whatever the chosen buyouts free
+    relief = (
+        pulp.lpSum(buyout_relief(team.roster_players[j].salary) * v for j, v in out.items())
+        + pulp.lpSum(buyout_relief(p.salary) * v for p, v in zip(buyable_minors, out_minor))
+    )
     prob += pulp.lpSum(
         market_prices.get(name, MIN_SALARY) * x[name] for name in candidates
-    ) <= budget
+    ) <= budget + relief
 
-    # Total players constraint (must fill all remaining spots)
-    prob += pulp.lpSum(x[name] for name in candidates) == spots
+    # Total players constraint (must fill all remaining spots, and every spot
+    # an active buyout opens)
+    prob += pulp.lpSum(x[name] for name in candidates) == spots + pulp.lpSum(out.values())
 
-    # Position minimum constraints (must be able to field the lineup)
+    # Position minimum constraints (must be able to field the lineup). With no
+    # buyout possible this is the long-standing `>= need`. A buyout at a
+    # position raises what must be bought there: exactly back to the minimum
+    # when needs were not capped, and like-for-like when they were (a roster
+    # already unable to meet its minimums has no surplus to spend).
     for pos, need in needs.items():
-        if need > 0:
-            pos_players = [n for n in candidates if candidates[n].position == pos]
-            prob += pulp.lpSum(x[n] for n in pos_players) >= need
+        pos_players = [n for n in candidates if candidates[n].position == pos]
+        leaving = [v for j, v in out.items() if team.roster_players[j].position == pos]
+        if not leaving:
+            if need > 0:
+                prob += pulp.lpSum(x[n] for n in pos_players) >= need
+            continue
+        floor_ = need if needs_capped else (
+            POSITION_MINIMUMS[pos] - sum(1 for p in fixed_members if p.position == pos)
+        )
+        prob += pulp.lpSum(x[n] for n in pos_players) >= floor_ + pulp.lpSum(leaving)
 
     # Solve
     prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=SOLVE_TIME_LIMIT))
@@ -377,6 +456,11 @@ def solve_optimal_roster(
     # Extract solution
     selected = [candidates[n] for n in candidates if x[n].varValue and x[n].varValue > 0.5]
     total_cost = sum(market_prices.get(p.name, MIN_SALARY) for p in selected) + forced_cost
+    gone = {j for j, v in out.items() if v.varValue and v.varValue > 0.5}
+    bought_out = [team.roster_players[j].name for j in sorted(gone)] + [
+        p.name for p, v in zip(buyable_minors, out_minor) if v.varValue and v.varValue > 0.5
+    ]
+    fixed_members = [p for j, p in enumerate(fixed_members) if j not in gone]
     # Recomputed from the roster rather than read off the objective, so the
     # figure is exact even where the LP left a tie between two backups.
     total_points = expected_points(fixed_members + selected)
@@ -398,6 +482,7 @@ def solve_optimal_roster(
         by_position=by_position,
         status="Optimal",
         timed_out=timed_out,
+        buyouts=bought_out,
     )
 
 

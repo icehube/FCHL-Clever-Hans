@@ -407,6 +407,18 @@ class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
         assert result.recommendation == "accept"
         assert result.reasoning.startswith("Salary dump")
 
+    def test_a_buyout_plan_that_buys_nobody_out_is_not_a_scenario(self, monkeypatch):
+        """Equal points, a little more money left: the no-buyout "Trade +" plan
+        would win the tie-break over keep-all and print its bare label."""
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3, []),
+            "Keep all": (1360, 40.0, 40.0, []),
+            "Trade +": (1360, 40.0, 39.0, []),
+        })
+        assert result.best_scenario.description == "Keep all received players"
+        assert "Trade +" not in result.reasoning
+        assert all(s.buyouts for s in result.scenarios[1:] + result.baseline_scenarios)
+
     def test_keeping_what_you_receive_is_not_a_salary_dump(self, monkeypatch):
         result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
             "Current roster": (1341, 40.3, 40.3, []),

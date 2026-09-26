@@ -337,8 +337,14 @@ def evaluate_trade(
     )
     solved = _solve_jobs(all_jobs, prices, workers)
     current_scenario = solved[0]
-    scenarios = solved[1:1 + len(trade_jobs)]
-    baseline_scenarios = solved[1 + len(trade_jobs):]
+    # A buyout job that bought nobody out solved the plain plan's problem over
+    # again, and is dropped rather than kept as a duplicate. Kept, it could WIN:
+    # the solver may return a different roster of equal value that costs less,
+    # ties break on money left over, and the verdict then read "Best line:
+    # Trade +" -- the bare job label -- with a highlighted winner the table
+    # never shows (found in the /grill of b1dbffe).
+    scenarios = [solved[1]] + [s for s in solved[2:1 + len(trade_jobs)] if s.buyouts]
+    baseline_scenarios = [s for s in solved[1 + len(trade_jobs):] if s.buyouts]
 
     # A scenario is only acceptable if it leaves a legal team: cap space
     # non-negative and a solvable roster. Comparing raw total_points let

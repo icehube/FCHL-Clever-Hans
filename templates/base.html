@@ -295,6 +295,17 @@
         <form method="dialog" class="modal-backdrop"><button>close</button></form>
     </dialog>
     <div id="toast-container" class="toast toast-top toast-end z-50"></div>
+    {# How long the server has been working on your request (owner request
+       2026-09-25, alongside the 10s solver time limit): a cold /bid-check is
+       ~4-6s early in a draft and a trade evaluation ~2.5s, and a panel that
+       simply goes quiet for that long reads as a hang. Outside #app for the
+       banners' reason -- a panel swap replaces #app and would delete it mid-
+       count -- and a fixed corner badge rather than a navbar control, because
+       the navbar is full at 1024px. shortcuts.js drives it; it stays hidden for
+       anything under 0.3s so ordinary requests do not flicker it. #}
+    <div id="request-timer" role="status" aria-live="off"
+         class="fixed bottom-3 right-3 z-50 badge badge-neutral gap-1 font-mono text-xs shadow"
+         style="display: none">working… <span id="request-timer-seconds">0.0</span>s</div>
     <main id="app">
         {% block content %}{% endblock %}
     </main>

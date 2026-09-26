@@ -2381,3 +2381,77 @@ class TestTheHeaderSearchLandsWhereItPoints:
             assert r["lastRight"] <= r["vw"] + 1, (
                 f"@{width}: the last navbar control is off-screen: {r}"
             )
+
+
+class TestTheRequestTimer:
+    """The corner badge that counts how long the server has been working.
+
+    Owner request 2026-09-25, beside the 10s solver time limit: a cold
+    /bid-check is several seconds early in a draft, and a panel that goes quiet
+    that long reads as a hang. Driven with the htmx events a request fires
+    (`htmx:beforeRequest` / `htmx:afterRequest`, keyed by `detail.xhr`) rather
+    than a delayed route: with the sync API a `page.route` handler that sleeps
+    blocks the test thread itself, so the "slow" request had finished before the
+    test looked -- the first draft of these tests failed on exactly that.
+    `test_a_real_request_reaches_it` covers the half the synthetic events cannot:
+    that htmx's own events arrive in the shape the script reads.
+    """
+
+    START = ("(x) => document.body.dispatchEvent(new CustomEvent("
+             "'htmx:beforeRequest', {detail: {xhr: window[x] = window[x] || {}}}))")
+    END = ("(x) => document.body.dispatchEvent(new CustomEvent("
+           "'htmx:afterRequest', {detail: {xhr: window[x]}}))")
+
+    def test_it_counts_a_slow_request_and_then_goes_away(self, page, live_server):
+        _open(page, live_server)
+        timer = page.locator("#request-timer")
+        assert timer.is_hidden(), "the timer must be hidden with nothing in flight"
+
+        page.evaluate(self.START, "slow")
+        page.wait_for_timeout(150)
+        assert timer.is_hidden(), "under 0.3s the timer must not flash"
+        page.wait_for_timeout(750)
+        assert timer.is_visible(), "a request 0.9s in must show the timer"
+        shown = float(page.locator("#request-timer-seconds").inner_text())
+        assert 0.6 <= shown <= 1.3, f"the timer read {shown}s about 0.9s in"
+
+        page.evaluate(self.END, "slow")
+        page.wait_for_timeout(50)
+        assert timer.is_hidden(), "the timer must go away when the request ends"
+
+    def test_a_request_ending_twice_does_not_hide_one_still_running(self, page, live_server):
+        """Keyed by XHR, not counted: htmx can fire afterRequest twice for one
+        request. A counter would reach zero with the slow request still out."""
+        _open(page, live_server)
+        page.evaluate(self.START, "slow")
+        page.evaluate(self.START, "fast")
+        page.evaluate(self.END, "fast")
+        page.evaluate(self.END, "fast")
+        page.wait_for_timeout(600)
+        assert page.locator("#request-timer").is_visible(), (
+            "the slow request is still in flight, so the timer must still show"
+        )
+
+    def test_a_real_request_reaches_it(self, page, live_server):
+        """htmx's own events, not synthetic ones: a real request must register
+        and clear, which proves `e.detail.xhr` is where the script looks."""
+        _open(page, live_server)
+        page.evaluate("""() => {
+            window.__seen = [];
+            document.body.addEventListener('htmx:beforeRequest', e => window.__seen.push(!!e.detail.xhr));
+        }""")
+        with page.expect_response(re.compile(r"/nhl-odds")):
+            page.evaluate("htmx.ajax('GET', '/nhl-odds', {target: '#nhl-odds-body'})")
+        page.wait_for_timeout(200)
+        assert page.evaluate("window.__seen") == [True]
+        assert page.locator("#request-timer").is_hidden(), (
+            "a finished request must leave nothing in flight"
+        )
+
+    def test_it_survives_the_panel_swap_it_is_timing(self, page, live_server):
+        """Outside #app: an all_panels response replaces #app, and a timer inside
+        it would be deleted by the very response it was counting."""
+        _open(page, live_server)
+        assert page.evaluate(
+            "!document.getElementById('app').contains(document.getElementById('request-timer'))"
+        )

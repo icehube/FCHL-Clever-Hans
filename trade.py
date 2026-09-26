@@ -182,6 +182,10 @@ def _solve_jobs(
         return list(ex.map(solve, jobs))
 
 
+def _points(n: int) -> str:
+    return f"{n} point" if n == 1 else f"{n} points"
+
+
 def evaluate_trade(
     state: AuctionState,
     give: list[PlayerTrade],
@@ -393,9 +397,16 @@ def evaluate_trade(
     # latter: "the trade loses 3" is baffling beside a table where it plainly
     # beats the current roster, unless the reasoning says what it lost to.
     bar = baseline_best
+    # Whole points, truncated -- the figure the table, the team panel and the
+    # Proj column all print (`int()`). Since 2026-09-25 totals are EXPECTED
+    # points and fractional, so comparing raw floats made a 0.3-point edge an
+    # ACCEPT reading "+0 points", made EVEN (an exact tie) all but unreachable,
+    # and let the verdict disagree with the table beneath it: the verify pass
+    # caught "1446" in the trade table beside "1445" on the team panel.
+    best_pts, bar_pts = int(best.total_points), int(bar.total_points)
     bar_label = (
-        f"buying out {bar.buyouts[0]} yourself ({bar.total_points:.0f})"
-        if bar.buyouts else f"standing pat ({bar.total_points:.0f})"
+        f"buying out {bar.buyouts[0]} yourself ({bar_pts})"
+        if bar.buyouts else f"standing pat ({bar_pts})"
     )
     # Buying out everything you receive means the trade is a salary dump: the
     # partner absorbs your contracts and you keep nothing. Legitimate, but the
@@ -405,16 +416,16 @@ def evaluate_trade(
     lead = "Salary dump — you keep nothing you receive. " if dump else ""
     unspent = round(best.left_after_plan - bar.left_after_plan, 1)
 
-    if best.total_points > bar.total_points:
+    if best_pts > bar_pts:
         recommendation = "accept"
         reasoning = (
-            f"{lead}+{best.total_points - bar.total_points:.0f} points over "
+            f"{lead}+{_points(best_pts - bar_pts)} over "
             f"{bar_label}. Best line: {best.description}"
         )
-    elif best.total_points < bar.total_points:
+    elif best_pts < bar_pts:
         recommendation = "decline"
         reasoning = (
-            f"{lead}{bar.total_points - best.total_points:.0f} points worse than "
+            f"{lead}{_points(bar_pts - best_pts)} worse than "
             f"{bar_label}. Best line: {best.description}"
         )
     elif unspent < 0:

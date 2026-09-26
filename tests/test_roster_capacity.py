@@ -303,9 +303,12 @@ class TestFullRosterTrades:
 
         assert bot.roster_count == ROSTER_SIZE
         assert any(p.name == stud.name for p in bot.minor_players)
-        assert bot.current_roster_points == previewed, (
-            f"preview promised {previewed} lineup points, execution delivered "
-            f"{bot.current_roster_points}"
+        # Expected points on both sides -- the figure every verdict compares
+        # since 2026-09-25. current_roster_points is the starters alone, and
+        # comparing it with a preview that counts the bench always fails.
+        assert bot.expected_roster_points == pytest.approx(previewed), (
+            f"preview promised {previewed} points, execution delivered "
+            f"{bot.expected_roster_points}"
         )
 
     def test_received_player_still_costs_full_cap(self):
@@ -368,16 +371,12 @@ class TestBenchCapacity:
         )
 
     def test_the_cap_is_the_leftover_roster_spots(self):
-        """Derived, not the literal 4 — and NOT sum(BACKUP_TARGETS), which is
-        also 4 but is a soft objective preference the MILP may deviate from."""
-        from config import BACKUP_TARGETS, STARTING_LINEUP
+        """Derived, not the literal 4. The bench's COMPOSITION is the solver's
+        choice (config.BENCH_DEPTH_WEIGHTS) and sets no count of its own."""
+        from config import STARTING_LINEUP
 
         assert BENCH_SIZE == ROSTER_SIZE - sum(STARTING_LINEUP.values())
         assert BENCH_SIZE == 4, "if the lineup shape changed, so did this"
-        assert sum(BACKUP_TARGETS.values()) == BENCH_SIZE, (
-            "they agree today by coincidence; BENCH_SIZE must not be derived "
-            "from the soft preference"
-        )
 
     def test_bench_count_ignores_the_minors(self, client):
         """send_to_minors forces is_bench on the way down so a later recall

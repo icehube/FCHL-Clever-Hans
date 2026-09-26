@@ -13,7 +13,6 @@ import market
 import optimizer
 import scenarios
 from config import (
-    BACKUP_TARGETS,
     MAX_SALARY,
     MIN_SALARY,
     MY_TEAM,
@@ -538,7 +537,7 @@ class TestEndgameLastGoalie:
             for code, team in state.teams.items()
             if code != MY_TEAM
         }
-        expected = POSITION_MINIMUMS["G"] + BACKUP_TARGETS["G"]
+        expected = POSITION_MINIMUMS["G"] + 1  # two starters and one backup
         assert set(crease.values()) == {expected}, (
             f"goalies per opponent: {crease} — every rival should carry "
             f"{expected}, the 14/7/3 shape"

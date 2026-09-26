@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import heapq
+import logging
 from dataclasses import dataclass
 
 import pulp
 
 from config import (
-    BACKUP_BONUS,
-    BACKUP_TARGETS,
-    BENCH_WEIGHT,
+    BENCH_DEPTH_WEIGHTS,
+    BENCH_SIZE,
     CAUTION_BAND,
     MAX_SALARY,
     MIN_DRAIN_PRICE,
@@ -20,15 +21,18 @@ from config import (
     STARTING_LINEUP,
 )
 from market import MarketInfo, is_capped
-from state import AuctionState, Player, TeamState, lineup_points
+from state import AuctionState, Player, TeamState, expected_points, lineup_points
 
 
 @dataclass
 class MILPSolution:
     """Result of a MILP roster optimization.
 
-    total_points is STARTING LINEUP points (12F/6D/2G) — bench players
-    contribute nothing, per league scoring.
+    total_points is EXPECTED points (`state.expected_points`): the best
+    12F/6D/2G in full plus each backup's share of the season he covers for an
+    absent starter. It is the figure every decision compares. lineup_points is
+    the starters alone, for display -- never compare two solutions on it, or a
+    40-point backup is worth nothing again.
     """
 
     total_points: float
@@ -36,6 +40,11 @@ class MILPSolution:
     total_cost: float
     by_position: dict[str, list[Player]]
     status: str  # "Optimal", "Infeasible", etc.
+    lineup_points: float | None = None
+    # True when CBC hit SOLVE_TIME_LIMIT holding a feasible roster it had not
+    # proved optimal. The roster is used anyway (it is the best one found), but
+    # it is not the optimum, and a caller comparing two solves should know.
+    timed_out: bool = False
 
 
 @dataclass
@@ -108,6 +117,54 @@ class CounterfactualResult:
     alternative_players: list[Player]
 
 
+# Seconds CBC may spend on one solve. CBC's default is UNBOUNDED, and a request
+# on the event loop that never returns hangs the whole UI mid-auction. Normal
+# solves take ~0.5s (measured 2026-09-25, 463ms median on the live draft), so
+# this caps a runaway and nothing else. In main.py's sense a machine setting,
+# not a league one, which is why it is here and not in config.py.
+SOLVE_TIME_LIMIT = 10
+
+BENCH_CANDIDATES_PER_POSITION = 60
+
+
+def _bench_candidates(
+    candidates: dict[str, Player], market_prices: dict[str, float],
+) -> set[str]:
+    """Candidates allowed a bench-slot variable: per position, the top N by
+    points AND the top N by points per dollar.
+
+    Not every candidate, for speed. y costs a variable per candidate per depth
+    slot; measured 2026-09-25 on the live draft, giving all ~670 one took a
+    solve from 260ms to 585ms median (1180ms p90), and this solve runs ~10
+    times per cold max bid. Pruned, it is 463ms (563ms p90).
+
+    BOTH rankings, because a good backup is a CHEAP good player: by points
+    alone, N=40 missed up to 2.6 points against the unpruned optimum, since a
+    50-point forward at $0.5M ranks outside the top 40 forwards. The union at
+    60 measured a worst shortfall of 0.14 points across all eleven teams. A
+    pruned candidate can still be bought and can still sit on the bench; he
+    just earns no bench credit in the OBJECTIVE, and the reported total is
+    recomputed by `expected_points` either way.
+    """
+    by_pos: dict[str, list[Player]] = {}
+    for p in candidates.values():
+        by_pos.setdefault(p.position, []).append(p)
+
+    def points(q: Player) -> float:
+        return q.projected_points
+
+    def points_per_dollar(q: Player) -> float:
+        return q.projected_points / max(market_prices.get(q.name, MIN_SALARY), MIN_SALARY)
+
+    keep: set[str] = set()
+    for players in by_pos.values():
+        for rank in (points, points_per_dollar):
+            keep.update(
+                q.name for q in heapq.nlargest(BENCH_CANDIDATES_PER_POSITION, players, key=rank)
+            )
+    return keep
+
+
 def solve_optimal_roster(
     team: TeamState,
     available_players: dict[str, Player],
@@ -165,7 +222,8 @@ def solve_optimal_roster(
         # made compute_marginal_value price ANY player at the floor when
         # one spot remained.)
         return MILPSolution(
-            total_points=lineup_points(list(team.roster_players) + forced_objs),
+            total_points=expected_points(list(team.roster_players) + forced_objs),
+            lineup_points=lineup_points(list(team.roster_players) + forced_objs),
             roster=[],
             total_cost=forced_cost,
             by_position={"F": [], "D": [], "G": []},
@@ -174,7 +232,8 @@ def solve_optimal_roster(
 
     if spots < 0 or budget < 0 or budget < spots * MIN_SALARY:
         return MILPSolution(
-            total_points=lineup_points(team.roster_players),
+            total_points=expected_points(team.roster_players),
+            lineup_points=lineup_points(team.roster_players),
             roster=[],
             total_cost=0.0,
             by_position={"F": [], "D": [], "G": []},
@@ -194,10 +253,11 @@ def solve_optimal_roster(
             needs[pos] -= reduction
             excess -= reduction
 
-    # Build MILP. Roster selection (x) and starter assignment (s) are chosen
-    # together: only the best 12F/6D/2G score points, so the objective is
-    # starter points, with small terms for bench quality and a soft 2F/1D/1G
-    # backup-composition preference (the classic 14/7/3 shape) — see config.
+    # Build MILP. Roster selection (x), starter assignment (s) and the bench
+    # depth chart (y) are chosen together: the best 12F/6D/2G score in full,
+    # and the k-th backup at a position scores BENCH_DEPTH_WEIGHTS[pos][k-1] of
+    # his points -- the season fraction he covers for an absent starter. This
+    # is `state.expected_points`, which the reported figure is recomputed with.
     prob = pulp.LpProblem("roster_optimizer", pulp.LpMaximize)
 
     # Roster decision variables for candidates (use index for LP-safe names)
@@ -228,27 +288,44 @@ def solve_optimal_roster(
             )
         ) <= slots
 
-    # Soft backup-composition credit: bk_pos counts bench players at pos,
-    # capped at the 2F/1D/1G target. rostered - starters >= bench by
-    # construction, so the constraint is always satisfiable.
-    bk = {}
-    for pos, target in BACKUP_TARGETS.items():
-        bk[pos] = pulp.LpVariable(f"bk_{pos}", lowBound=0, upBound=target)
-        rostered_pos = (
-            sum(1 for p in fixed_members if p.position == pos)
-            + pulp.lpSum(x[n] for n in candidates if candidates[n].position == pos)
-        )
-        starters_pos = (
-            pulp.lpSum(
-                s_fixed[j] for j, p in enumerate(fixed_members) if p.position == pos
-            )
-            + pulp.lpSum(
-                s_cand[n] for n in candidates if candidates[n].position == pos
-            )
-        )
-        prob += bk[pos] <= rostered_pos - starters_pos
+    # Bench depth chart: each binary y puts one non-starter in the k-th backup
+    # slot at his position. For EVERY rostered player, keepers included: the
+    # old BENCH_WEIGHT term counted only players the MILP bought, so the bench
+    # you already had was worth nothing and an identical candidate was worth
+    # 10%. The descending weights put the best backup in slot 1 without an
+    # order constraint. BINARY, although for fixed x and s the LP optimum is
+    # integral anyway: measured, CBC branched far more on the continuous form
+    # (1091ms median against 649ms binary, same answers to the point).
+    y: list[pulp.LpVariable] = []
+    bench_eligible = _bench_candidates(candidates, market_prices)
+    slot_terms: dict[tuple[str, int], list] = {}
+    bench_value = []
 
-    # Objective: starter points + 10%-weighted bench points + backup credits
+    def _bench_slots(key: str, pos: str, pts: int, available) -> None:
+        weights = BENCH_DEPTH_WEIGHTS.get(pos, ())
+        if pts <= 0 or not weights:
+            return
+        mine = []
+        for k, w in enumerate(weights):
+            var = pulp.LpVariable(f"y_{key}_{k}", cat="Binary")
+            y.append(var)
+            slot_terms.setdefault((pos, k), []).append(var)
+            bench_value.append(w * pts * var)
+            mine.append(var)
+        # One slot at most, and only if rostered and not starting.
+        prob.addConstraint(pulp.lpSum(mine) <= available)
+
+    for j, p in enumerate(fixed_members):
+        _bench_slots(f"f{j}", p.position, p.projected_points, 1 - s_fixed[j])
+    for i, (n, p) in enumerate(candidates.items()):
+        if n in bench_eligible:
+            _bench_slots(f"c{i}", p.position, p.projected_points, x[n] - s_cand[n])
+    for terms in slot_terms.values():
+        prob += pulp.lpSum(terms) <= 1
+    if y:
+        prob += pulp.lpSum(y) <= BENCH_SIZE
+
+    # Objective: starters in full + the expected bench contribution
     starter_pts = (
         pulp.lpSum(
             p.projected_points * s_fixed[j] for j, p in enumerate(fixed_members)
@@ -257,10 +334,7 @@ def solve_optimal_roster(
             candidates[n].projected_points * s_cand[n] for n in candidates
         )
     )
-    bench_pts = pulp.lpSum(
-        candidates[n].projected_points * (x[n] - s_cand[n]) for n in candidates
-    )
-    prob += starter_pts + BENCH_WEIGHT * bench_pts + BACKUP_BONUS * pulp.lpSum(bk.values())
+    prob += starter_pts + pulp.lpSum(bench_value)
 
     # Budget constraint
     prob += pulp.lpSum(
@@ -277,12 +351,23 @@ def solve_optimal_roster(
             prob += pulp.lpSum(x[n] for n in pos_players) >= need
 
     # Solve
-    prob.solve(pulp.PULP_CBC_CMD(msg=0))
+    prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=SOLVE_TIME_LIMIT))
 
     status = pulp.LpStatus[prob.status]
+    # A solve cut off by the time limit with a feasible roster in hand reports
+    # status "Optimal" -- PuLP maps CBC's stopped-on-time to 1 -- and only
+    # sol_status says the roster is merely feasible. Keep the roster (it is the
+    # best found, and every caller needs one) but say so.
+    timed_out = prob.sol_status == pulp.LpSolutionIntegerFeasible
+    if timed_out:
+        logging.warning(
+            "MILP for %s hit the %ss time limit; using the best roster found, "
+            "not a proven optimum", team.code, SOLVE_TIME_LIMIT,
+        )
     if status != "Optimal":
         return MILPSolution(
-            total_points=lineup_points(team.roster_players),
+            total_points=expected_points(team.roster_players),
+            lineup_points=lineup_points(team.roster_players),
             roster=[],
             total_cost=0.0,
             by_position={"F": [], "D": [], "G": []},
@@ -292,9 +377,9 @@ def solve_optimal_roster(
     # Extract solution
     selected = [candidates[n] for n in candidates if x[n].varValue and x[n].varValue > 0.5]
     total_cost = sum(market_prices.get(p.name, MIN_SALARY) for p in selected) + forced_cost
-    # Report pure lineup points (recomputed greedily — exact for a fixed
-    # roster), not the objective value, which includes the soft-bonus terms
-    total_points = lineup_points(fixed_members + selected)
+    # Recomputed from the roster rather than read off the objective, so the
+    # figure is exact even where the LP left a tie between two backups.
+    total_points = expected_points(fixed_members + selected)
 
     by_position: dict[str, list[Player]] = {"F": [], "D": [], "G": []}
     for p in selected:
@@ -307,10 +392,12 @@ def solve_optimal_roster(
 
     return MILPSolution(
         total_points=total_points,
+        lineup_points=lineup_points(fixed_members + selected),
         roster=selected,
         total_cost=total_cost,
         by_position=by_position,
         status="Optimal",
+        timed_out=timed_out,
     )
 
 

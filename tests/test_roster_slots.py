@@ -62,7 +62,7 @@ class TestTheSlotRule:
         Not a per-position sequence: the second bench player is `BD2` even
         though he is the first benched defenceman. The number answers "how full
         is the bench" against the hard `BENCH_SIZE` of 4, which is what binds —
-        bench composition against `BACKUP_TARGETS` is a soft MILP preference and
+        bench composition is the solver's choice, priced by depth weights, and
         would be the wrong thing to count.
         """
         rows = main._roster_slots(

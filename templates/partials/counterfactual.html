@@ -81,12 +81,12 @@
     <div class="grid grid-cols-2 gap-2 mt-2">
         <div class="card bg-base-300 p-3">
             <h4 class="text-xs font-semibold opacity-70 mb-1">With {{ cf_player.name }}</h4>
-            <div class="text-sm">Points: {{ "%.0f"|format(counterfactual.with_player.total_points) }}</div>
+            <div class="text-sm">Points: {{ counterfactual.with_player.total_points|int }}</div>
             <div class="text-sm">Cost: ${{ "%.1f"|format(counterfactual.with_player.total_cost) }}M</div>
         </div>
         <div class="card bg-base-300 p-3">
             <h4 class="text-xs font-semibold opacity-70 mb-1">Without {{ cf_player.name }}</h4>
-            <div class="text-sm">Points: {{ "%.0f"|format(counterfactual.without_player.total_points) }}</div>
+            <div class="text-sm">Points: {{ counterfactual.without_player.total_points|int }}</div>
             <div class="text-sm">Cost: ${{ "%.1f"|format(counterfactual.without_player.total_cost) }}M</div>
         </div>
     </div>
@@ -94,7 +94,10 @@
     {# Lead with the verdict, not the delta. The numbers alone don't answer
        "so do I bid?", and they're meaningless without the price they were
        computed at. #}
-    {% set gain = counterfactual.points_difference %}
+    {# The difference of the two figures printed above, both truncated, so the
+       sentence and the numbers agree. points_difference is a float of EXPECTED
+       points since 2026-09-25, and "%.0f" of a 0.3 gain read "adds 0". #}
+    {% set gain = (counterfactual.with_player.total_points|int) - (counterfactual.without_player.total_points|int) %}
     {% set alt = counterfactual.alternative_players[0].name if counterfactual.alternative_players else None %}
     {# Three cases, not two: a zero delta is a genuine toss-up, and folding
        it into "skip" produced "costs you 0 lineup points". Common in an
@@ -104,7 +107,7 @@
         {% if gain > 0 %}
         <span>
             <strong>Worth having at ${{ cf_price }}M</strong> — he adds
-            {{ "%.0f"|format(gain) }} lineup points over your best roster without him{% if alt %},
+            {{ gain }} point{{ "" if gain == 1 else "s" }} over your best roster without him{% if alt %},
             where you'd draft {{ alt }} instead{% endif %}.
             Cap effect: {{ "%+.1f"|format(counterfactual.budget_difference) }}M.
         </span>
@@ -117,7 +120,7 @@
         {% else %}
         <span>
             <strong>Skip him at ${{ cf_price }}M</strong> — locking him in at that price
-            costs you {{ "%.0f"|format(-gain) }} lineup points versus spending the money
+            costs you {{ -gain }} point{{ "" if gain == -1 else "s" }} versus spending the money
             elsewhere{% if alt %}, starting with {{ alt }}{% endif %}.
             Worth revisiting only at a lower price.
         </span>

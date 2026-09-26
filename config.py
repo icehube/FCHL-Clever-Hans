@@ -27,10 +27,9 @@ ROSTER_SIZE = 24
 STARTING_LINEUP = {"F": 12, "D": 6, "G": 2}
 
 # How many roster spots are left over once the lineup is fielded. Derived from
-# the two structural numbers rather than written as 4, and deliberately NOT
-# taken from sum(BACKUP_TARGETS) below — which also happens to be 4 but is a
-# soft objective preference the MILP is free to deviate from. This one is a
-# hard legality rule: 24 spots, 20 of them starting, so at most 4 on the bench.
+# the two structural numbers rather than written as 4. A hard legality rule:
+# 24 spots, 20 of them starting, so at most 4 on the bench. How the bench is
+# MADE UP is the solver's choice, priced by BENCH_DEPTH_WEIGHTS below.
 BENCH_SIZE = ROSTER_SIZE - sum(STARTING_LINEUP.values())
 
 # Position minimums (active roster) = must be able to field the lineup
@@ -38,15 +37,51 @@ MIN_FORWARDS = 12
 MIN_DEFENSE = 6
 MIN_GOALIES = 2
 
-# Bench composition preference (2F/1D/1G -> the classic 14F/7D/3G roster).
-# Soft, not a constraint: BACKUP_BONUS points of objective credit per filled
-# backup slot, so the optimizer gives up the balanced bench only when a
-# different shape wins more than ~BACKUP_BONUS starter points. BENCH_WEIGHT
-# values bench players' projected points at 10% so backups are good players,
-# not warm bodies, without letting bench depth outbid starter upgrades.
-BACKUP_TARGETS = {"F": 2, "D": 1, "G": 1}
-BACKUP_BONUS = 5.0
-BENCH_WEIGHT = 0.1
+# Bench value: a backup scores when a starter at his position is out -- injured,
+# or swapped out for poor form at a monthly adjustment, the only two times the
+# league lets a lineup change. OUT_RATE is the fraction of the season each
+# starter is out, independently. So the k-th backup at a position plays when at
+# least k of its n starters are out, which is P(Binomial(n, m) >= k): a season
+# fraction that falls fast with depth and depends on how many starters the
+# position has. At m = 0.15 the first backup F plays 0.86 of the season, the
+# first D 0.62, the first G 0.28, and a 3rd backup D 0.05.
+#
+# A GUESS to tune, not a measurement: ~10% games lost to injury plus some bust
+# cover. The league DB archives carry no games-played or weekly data to fit it
+# from (checked 2026-09-25).
+#
+# Replaced, on 2026-09-25, BACKUP_TARGETS / BACKUP_BONUS / BENCH_WEIGHT: a flat
+# 5 points of objective credit per filled 2F/1D/1G backup slot, whoever filled
+# it, plus 10% of a backup's points -- but only for players the MILP BOUGHT, and
+# in no figure any decision compared. A 1-point defenceman earned the D backup
+# credit exactly as well as a 40-point one.
+OUT_RATE = {"F": 0.15, "D": 0.15, "G": 0.15}
+
+
+def _depth_weights(starters: int, out_rate: float, depth: int) -> tuple[float, ...]:
+    """P(Binomial(starters, out_rate) >= k) for k = 1..depth."""
+    from math import comb
+    pmf = [comb(starters, i) * out_rate**i * (1 - out_rate) ** (starters - i)
+           for i in range(starters + 1)]
+    return tuple(sum(pmf[k:]) for k in range(1, depth + 1))
+
+
+# A depth slot worth less than this share of the season is not modelled. Each
+# slot costs the MILP a variable per candidate, and the ones dropped at 0.15 --
+# a 3rd backup D (0.047), a 4th (0.006), a 2nd backup G (0.022) -- are worth at
+# most ~2 points between them. Dropped from the model itself, not just the
+# solver, so `expected_points` and the MILP value the same bench.
+MIN_DEPTH_WEIGHT = 0.05
+
+# Season fraction the k-th backup plays, per position: F 0.86/0.56/0.26/0.09,
+# D 0.62/0.22, G 0.28 at the default OUT_RATE.
+BENCH_DEPTH_WEIGHTS = {
+    pos: tuple(
+        w for w in _depth_weights(n, OUT_RATE[pos], min(BENCH_SIZE, n))
+        if w >= MIN_DEPTH_WEIGHT
+    )
+    for pos, n in STARTING_LINEUP.items()
+}
 
 # League
 MY_TEAM = "BOT"

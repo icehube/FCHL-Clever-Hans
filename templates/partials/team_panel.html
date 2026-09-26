@@ -77,18 +77,29 @@
            the same expression `_context` uses (`int(...)`) rather than "%.0f",
            which rounds where int() truncates.
 
-           Not a live bug, and worth saying so: MILPSolution.total_points is
-           DECLARED float but is always fed from state.lineup_points, which
-           sums ints — measured across all six scenarios, the two formats never
-           disagree. So this is consistency, not a fix, and a mutation swapping
-           them back dies in no test. The parenthetical is the part that earns
-           its place: it tells the operator these two figures are one number. #}
-        <strong>Optimal Projected Points: {{ milp.total_points|int }}</strong>
-        (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
-        {# After the cost, not before it: between the headline and "(Cost: …)"
-           this rendered as two consecutive parentheticals — "1230 (your Proj in
-           League State) (Cost: $26.5M)". #}
-        <span class="opacity-70">— your <em>Proj</em> in League State</span>
+           Load-bearing since 2026-09-25: total_points became EXPECTED
+           points (starters plus the bench's share of the season), a real
+           float like 1445.7, so "%.0f" and int() can now disagree -- the
+           verify pass saw 1446 in one panel beside 1445 in another. The
+           parenthetical tells the operator these two figures are one number,
+           and they are only if both use int().
+
+           ONE child element, deliberately: DaisyUI's .alert is a grid that
+           makes each direct child a column, and columns do not wrap. Adding
+           the starters figure as a fourth child overflowed the 1024px grid by
+           3px (test_the_grid_never_overflows_its_own_width, measured with
+           tests/measure_layout.py). Wrapped, the line flows like text. The
+           starters figure is a "·" clause, not a parenthetical, for the reason
+           the note below gives about two in a row. #}
+        <div>
+            <strong>Optimal Projected Points: {{ milp.total_points|int }}</strong>{% if milp.lineup_points is not none %}
+            <span class="opacity-70" title="Expected points count each backup at the share of the season he would play, covering injuries and monthly adjustments. Starters is the 12F/6D/2G alone.">· starters {{ milp.lineup_points|int }}</span>{% endif %}
+            (Cost: ${{ "%.1f"|format(milp.total_cost) }}M)
+            {# After the cost, not before it: between the headline and "(Cost: …)"
+               this rendered as two consecutive parentheticals — "1230 (your Proj in
+               League State) (Cost: $26.5M)". #}
+            <span class="opacity-70">— your <em>Proj</em> in League State</span>
+        </div>
     </div>
     {# An EMPTY STATE, not a second warning. A failed MILP takes both the
        headline above and every target row out of the table below (measured

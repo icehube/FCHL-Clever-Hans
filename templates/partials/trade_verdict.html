@@ -59,7 +59,7 @@
     {% set outcome = trade_result.overpay_outcome %}
     {% if outcome is not none %}
     {% set pct = ((trade_result.stress_rate - 1) * 100)|round|int %}
-    {% set vs = "%.0f vs %.0f without the trade"|format(trade_result.stress_trade_points, trade_result.stress_baseline_points) %}
+    {% set vs = "%d vs %d without the trade"|format(trade_result.stress_trade_points|int, trade_result.stress_baseline_points|int) %}
     {% if outcome == "ahead" %}
     <p class="trade-overpay text-xs text-success mt-1">Still ahead if the auction runs {{ pct }}% over the model: {{ vs }}.</p>
     {% elif outcome == "level" %}
@@ -96,7 +96,7 @@
         {% for s in rows %}
         <tr class="{% for w in winners if s is sameas w %}font-bold text-accent{% endfor %}">
             <td>{{ s.description }}</td>
-            <td>{{ "%.0f"|format(s.total_points) }}</td>
+            <td>{{ s.total_points|int }}</td>
             <td>${{ "%.1f"|format(s.cap_remaining) }}M</td>
             <td>{{ s.spots_to_fill }}</td>
         </tr>

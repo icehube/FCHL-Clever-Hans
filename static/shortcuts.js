@@ -146,6 +146,52 @@ document.body.addEventListener('htmx:sendError', function() {
     }}));
 });
 
+/* The request timer (#request-timer in base.html): how long the server has
+   been working, counted live, so a 5s cold bid-check reads as working rather
+   than hung. Every htmx request counts, the background standings solve
+   included.
+
+   In-flight requests are a Map keyed by their XHR, never a counter. htmx
+   re-fires afterRequest on the nearest surviving ancestor when the triggering
+   element has left the DOM (see the dismiss-on-interaction note in CLAUDE.md),
+   so one request can end twice; a counter would go negative and hide the
+   timer while a second request was still running. Deleting from a Map twice
+   is harmless. The clock runs from the OLDEST request still in flight. */
+(function () {
+    var box = document.getElementById('request-timer');
+    var out = document.getElementById('request-timer-seconds');
+    if (!box || !out) return;
+    var inflight = new Map();  // xhr -> start time
+    var tick = null;
+    var SHOW_AFTER = 300;      // ms: ordinary requests never flash the badge
+
+    function render() {
+        if (!inflight.size) return;
+        var oldest = Math.min.apply(null, Array.from(inflight.values()));
+        var ms = performance.now() - oldest;
+        out.textContent = (ms / 1000).toFixed(1);
+        box.style.display = ms >= SHOW_AFTER ? '' : 'none';
+    }
+    function stop() {
+        clearInterval(tick);
+        tick = null;
+        box.style.display = 'none';
+    }
+    document.body.addEventListener('htmx:beforeRequest', function (e) {
+        var xhr = e.detail && e.detail.xhr;
+        if (!xhr || inflight.has(xhr)) return;
+        inflight.set(xhr, performance.now());
+        if (!tick) tick = setInterval(render, 100);
+    });
+    ['htmx:afterRequest', 'htmx:abort', 'htmx:timeout'].forEach(function (name) {
+        document.body.addEventListener(name, function (e) {
+            var xhr = e.detail && e.detail.xhr;
+            if (xhr) inflight.delete(xhr);
+            if (!inflight.size) stop(); else render();
+        });
+    });
+})();
+
 /* Dismiss a nomination recommendation once you have acted on it.
 
    The recommendation is stale the moment bidding starts, and it competes with

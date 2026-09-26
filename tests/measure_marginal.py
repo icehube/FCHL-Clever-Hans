@@ -94,14 +94,22 @@ import market
 import optimizer
 import scenarios
 from config import (
-    BACKUP_BONUS,
-    BACKUP_TARGETS,
-    BENCH_WEIGHT,
     MIN_SALARY,
     MY_TEAM,
     SALARY_INCREMENT,
     STARTING_LINEUP,
 )
+
+# FROZEN: the bench terms of the formulation this instrument was written against.
+# `optimizer.solve_optimal_roster` replaced them on 2026-09-25 with a depth
+# chart of bench-slot variables (config.BENCH_DEPTH_WEIGHTS), which also made
+# every solve ~1.7x dearer. So the candidates below reproduce the PRE-2026-09-25
+# MILP, not today's, and their "byte-for-byte against the reference" check no
+# longer holds against the live optimizer. Kept runnable, and kept as a record
+# of what was measured; re-derive the candidates before quoting a figure from it.
+BACKUP_TARGETS = {"F": 2, "D": 1, "G": 1}
+BACKUP_BONUS = 5.0
+BENCH_WEIGHT = 0.1
 from data_loader import build_initial_state
 from price_model import load_model_params, predict_all_prices
 from state import AuctionState, Player, TeamState, lineup_points

@@ -8,7 +8,6 @@ draft state without manually drafting players.
 from __future__ import annotations
 
 from config import (
-    BACKUP_TARGETS,
     MIN_SALARY,
     MY_TEAM,
     POSITION_MINIMUMS,
@@ -402,7 +401,11 @@ def _scenario_endgame_last_goalie(state: AuctionState) -> None:
     sold = [n for n in ranked[1:] if price[n] <= affordable]
 
     opponents = [code for code in state.teams if code != MY_TEAM]
-    per_team = POSITION_MINIMUMS["G"] + BACKUP_TARGETS["G"]  # the 14/7/3 shape
+    # The classic 14F/7D/3G roster's goalie count: two starters and one backup.
+    # A league convention, and all this scenario needs -- a count to fill each
+    # opponent to. It read config.BACKUP_TARGETS until that soft MILP preference
+    # was replaced on 2026-09-25 by bench depth weights, which set no count.
+    per_team = POSITION_MINIMUMS["G"] + 1
     surplus = iter(sold)
     for code in opponents:
         team = state.teams[code]

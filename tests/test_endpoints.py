@@ -284,7 +284,11 @@ class TestCounterfactualVerdict:
             pool[name], main._cf_price(name),
             main.auction_state.teams[main.MY_TEAM], pool, main.market_prices,
         )
-        return cf.points_difference
+        # The difference of the two TRUNCATED totals, which is what the panel
+        # branches on since totals became fractional expected points
+        # (2026-09-25) -- for the reason above: predict the verdict from the
+        # number the panel used, or a sub-point delta fails at the boundary.
+        return int(cf.with_player.total_points) - int(cf.without_player.total_points)
 
     # Verdict wording keyed by the sign of the engine's delta. THREE entries,
     # not two: the panel has a break-even branch (see
@@ -293,7 +297,7 @@ class TestCounterfactualVerdict:
     # refresh drill produced exactly that — a goalie whose delta came out 0 on
     # perturbed points — and the test failed on correct behaviour.
     _VERDICTS = {
-        1: ("buy", "Worth having at $", "lineup points over your best roster without him"),
+        1: ("buy", "Worth having at $", "over your best roster without him"),
         # The unconditional half of each sentence: the clauses naming an
         # alternative player are all `{% if alt %}`, so asserting on one would
         # fail whenever the counterfactual happens to find no replacement.
@@ -348,12 +352,15 @@ class TestCounterfactualVerdict:
 
         import main
 
-        sol = SimpleNamespace(total_points=100, total_cost=30.0)
+        # The panel reads the gain off the two TOTALS it prints (both
+        # truncated), not off points_difference, so the stub carries it there.
+        without = SimpleNamespace(total_points=100, total_cost=30.0)
+        with_ = SimpleNamespace(total_points=100 + gain, total_cost=30.0)
         alts = [SimpleNamespace(name=alt, position="F", projected_points=20)] if alt else []
         return main.templates.env.get_template("partials/explanation.html").render(
             counterfactual=SimpleNamespace(
-                with_player=sol,
-                without_player=sol,
+                with_player=with_,
+                without_player=without,
                 points_difference=gain,
                 budget_difference=0.0,
                 alternative_players=alts,
@@ -6153,26 +6160,25 @@ class TestExactStandingsOnDemand:
             f"{expected}th of the figures in the same response"
         )
 
-    def test_on_the_endgame_scenario_the_estimate_flatters_an_opponent(self, client):
+    def test_on_the_endgame_scenario_the_scan_replaces_every_estimate(self, client):
         """The mechanism the feature exists for, on the pinned state.
 
         `endgame-ceiling-binds` is a pinned scenario whose shape
         `tests/test_scenarios.py` guards (BOT plus exactly two live opponents).
 
-        This asserted `after < before` on BOT's rank BADGE until 2026-09-10 —
-        measured 2026-08-17, the badge read #2 while BOT was #1 because the
-        estimate handed a live opponent 146 points it could not reach. The
-        overstatement is still here and still 128 points, but the price refit
-        moved every team's total and it no longer happens to cross BOT, so the
-        rank flip was the incidental half. A gap between two teams' point
-        totals is as much a data fingerprint as a literal rank; what is NOT
-        incidental is that the estimate is above the achievable optimum and the
-        scan corrects it downward. That is what this pins, plus BOT's own
-        figure holding still — which is the half that says the column really is
-        two different rules. `test_the_scan_changes_the_standings` carries the
-        rank claim, on the state where it reproduces.
+        This asserted the estimate FLATTERED an opponent -- a live team's figure
+        fell when solved -- and before that the direction of BOT's rank badge.
+        Both were the incidental half. Since 2026-09-25 every figure is expected
+        points, bench included, and the estimate stands in for open STARTER
+        slots only, so late in a draft it runs LOW (measured -66 on this
+        scenario): the direction of the error is a property of the pool, not
+        of the code. What is not incidental is that the scan replaces each live
+        opponent's estimate with that team's real optimum, which is asserted
+        exactly, plus BOT's own figure holding still -- the half that says the
+        column really is two different rules.
         """
         import main
+        from optimizer import solve_optimal_roster
 
         client.post("/load-scenario", data={"name": "endgame-ceiling-binds"})
         opponents = self._live_opponents()
@@ -6184,13 +6190,19 @@ class TestExactStandingsOnDemand:
         page = section_of(client.get("/").text, "league-state")
         after = {c: self._figure(page, c) for c in opponents + [main.MY_TEAM]}
 
-        flattered = {c: before[c] - after[c] for c in opponents
-                     if after[c] < before[c]}
-        assert flattered, (
-            f"no live opponent's figure fell when solved exactly "
-            f"({ {c: (before[c], after[c]) for c in opponents} }) — the estimate "
-            f"is supposed to overstate the achievable optimum, and if it no "
-            f"longer does on this scenario the scan is pinned by nothing here"
+        exact = {
+            c: int(solve_optimal_roster(main.auction_state.teams[c],
+                                        main.auction_state.available_players,
+                                        main.market_prices).total_points)
+            for c in opponents
+        }
+        assert {c: after[c] for c in opponents} == exact, (
+            f"the scan must publish each live opponent's real optimum: "
+            f"showed { {c: after[c] for c in opponents} }, solved {exact}"
+        )
+        assert any(before[c] != exact[c] for c in opponents), (
+            f"every estimate already equalled its solve ({before}), so this "
+            f"state cannot tell a working scan from one that publishes nothing"
         )
         assert after[main.MY_TEAM] == before[main.MY_TEAM], (
             f"BOT's Proj moved {before[main.MY_TEAM]} -> {after[main.MY_TEAM]} "
@@ -6289,7 +6301,7 @@ class TestExactStandingsOnDemand:
         page = section_of(client.get("/").text, "league-state")
         for code, team in main.auction_state.teams.items():
             if team.is_done:
-                assert self._figure(page, code) == team.current_roster_points, (
+                assert self._figure(page, code) == int(team.expected_roster_points), (
                     f"done team {code} is not showing its final roster, so "
                     f"'exact' would be the wrong label for a different reason"
                 )
@@ -6304,7 +6316,7 @@ class TestExactStandingsOnDemand:
         assert main.exact_projections == {}, "there was nothing to solve"
         for code, team in main.auction_state.teams.items():
             if team.is_done:
-                assert self._figure(after, code) == team.current_roster_points, (
+                assert self._figure(after, code) == int(team.expected_roster_points), (
                     f"the button performed zero solves, so done team {code}'s "
                     f"figure must be exactly where it was"
                 )

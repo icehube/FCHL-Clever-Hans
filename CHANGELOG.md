@@ -24,6 +24,105 @@ rediscover the same non-problem.
 
 ### Fixed
 
+- **Every MILP solve is time-boxed at 10s, and a corner timer shows how long
+  the server has been working.** The solver-checker's `/go` pass flagged that
+  the one `prob.solve` had no time limit (true since the first commit; the
+  bench change made solves ~1.8x dearer and made it matter). The owner took the
+  10s limit on one condition: seeing how long a request runs. So
+  `optimizer.SOLVE_TIME_LIMIT` goes to CBC, a solve cut off with a feasible
+  roster sets `MILPSolution.timed_out` (PuLP still says "Optimal" there; only
+  `sol_status` tells) and logs a warning, and `#request-timer` counts any htmx
+  request past 0.3s. The browser tests' first draft failed on the harness, not
+  the code: a `page.route` handler that sleeps blocks the sync test thread, so
+  they now drive the htmx events directly, plus one real request proving the
+  events arrive where the script reads them.
+
+- **Points are whole numbers everywhere, and the verdicts compare the figures
+  on screen.** Totals became fractional expected points in the bench change,
+  and the verify pass caught the same number printed 1446 in the trade table and
+  1445 on the team panel: `"%.0f"` rounds, `int()` truncates. Every total now
+  truncates like the team panel and Proj column, and the trade verdict and the
+  counterfactual sentence compare those truncated figures, which also stops a
+  0.3-point edge reading ACCEPT "+0 points", keeps EVEN reachable, and fixed
+  "1 points worse".
+
+- **A solver test that the objective really is expected points.** The
+  solver-checker found that letting a starting candidate also hold a bench slot
+  (dropping `- s_cand[n]`) double-credits him and survived every test, because
+  `total_points` is recomputed and so stays honest about the wrong roster.
+  `test_it_finds_the_true_optimum_by_brute_force` enumerates every legal pair
+  of purchases on 25 random cases and requires the solver to match the best; it
+  kills that mutant.
+
+- **The bench is worth points now, in every decision the tool makes.** The
+  owner's point: only the 20 starters score, but a lineup changes when a
+  starter is injured and at the monthly adjustments, so a competent backup
+  plays, and a 0-point one is dead weight. Two things were wrong. **Every
+  decision ignored the bench**: `MILPSolution.total_points` was `lineup_points`,
+  starters only, and the trade and buyout verdicts, Scan Roster, max bids and
+  the Proj column all compared it, so a 40-point backup counted as nothing. And
+  **the solver's own bench term had the wrong shape**: `BACKUP_BONUS` paid a flat
+  5 objective points per filled 2F/1D/1G slot whoever filled it (a 1-point
+  Henry Thrun earned the D credit exactly as a 40-point defenceman would), and
+  `BENCH_WEIGHT` credited only players the MILP bought, never the bench already
+  on the roster.
+
+  The owner offered two fixes, and both missed in opposite directions: every
+  player at 100% treats a 4th backup like a starter, and a flat 50% is about
+  right for the first backup D, too low for the first backup F and far too high
+  for a 3rd. Instead the k-th backup at a position is worth `P(Binomial(n, m)
+  >= k)` of his points, the share of the season at least k of that position's
+  n starters are out. With `config.OUT_RATE` at 0.15 (a guess: the league DB
+  archives hold no games-played data to fit it) that is F 0.86/0.56/0.26/0.09,
+  D 0.62/0.22, G 0.28, and slots under 5% are not modelled. `state.expected_points`
+  scores it; the MILP optimizes it with a binary depth-chart variable per player
+  per slot, keepers included; `total_points` **is** it; `lineup_points` stays on
+  the solution for the "starters N" display. `BACKUP_TARGETS`, `BACKUP_BONUS`
+  and `BENCH_WEIGHT` are gone, and no bench shape is encoded: the solver now
+  picks one, and on the live draft it plans three backup forwards and a backup
+  D with no backup goalie.
+
+  **The cost was measured and accepted by the owner.** A solve went 260ms to
+  **463ms** median on the live draft, and a cold max bid (about ten solves, the
+  first `/bid-check` on a player after a pick) from about 2.5s to 4s. It took
+  pruning to get there: all ~670 candidates with bench variables measured 1016ms
+  (continuous) and 585ms (binary; CBC branched far less). Pruning by points
+  alone was the obvious move and was wrong: at the top 40 per position it
+  missed the optimum by up to 2.6 points, because a good backup is a *cheap*
+  good player and a 50-point forward at $0.5M ranks outside the top 40
+  forwards. `optimizer._bench_candidates` takes the top 60 by points **and** the
+  top 60 by points per dollar, for a worst shortfall of 0.14 points across all
+  eleven teams. A dominance prune (drop anyone with 16 cheaper-and-better
+  players) was sound but kept 511 of 678, because prices vary too finely.
+
+  What it changed on the live draft: Kyrou for Thrun + Perunovich went from
+  ACCEPT +14 to a verdict that buys the dead weight out (1443/1444 against 1425
+  kept), as the owner expected. It also surfaced a real limit, the evaluator
+  trying only ONE buyout per option, which is the next change. The opponents'
+  Proj estimate now scores through `expected_points` too, so estimate and
+  solve differ in how a roster is filled and never in how it is scored. Stand-ins
+  for open BENCH spots were tried and dropped on the measurement: they cut the
+  endgame error (-66 to +32) and inflated a fresh league (+44 to +150), mean
+  |error| 91 against 62 without them. So the estimate now runs low late in a
+  draft, and the endgame test that pinned it running HIGH was rewritten to pin
+  what it was for: the scan publishes each opponent's exact optimum.
+
+  Three tests had pinned the old rules and were rewritten rather than loosened:
+  "the bench does not score" (now: it scores at its depth weight), the
+  preview-against-execution comparison (now expected points on both sides),
+  and a done team's Proj (its expected points). `test_prefers_balanced_bench`
+  was deleted: its pool held exactly 14F/7D/3G, 24 players, so every roster was
+  that shape under any model and it could not fail. `tests/test_bench_value.py`
+  pins the model: the greedy against brute force, the weights against the
+  binomial, zero out-rate reducing exactly to starters-only, and three solver
+  cases. Each was mutation-checked, and two needed rewriting because their
+  first versions survived the mutant they named. `tests/measure_marginal.py`
+  keeps the old bench constants frozen locally, since it replicates the pre-change
+  formulation. And `test_stress.py`'s simulation now bids only what a team may
+  legally bid: random salaries up to $5M whatever the team had left held only
+  because the pool left every team slack, and the owner's recall of three LGN
+  prospects took LGN over the cap by pick 49.
+
 - **The trade evaluator no longer counts a buyout you could do yourself as
   something the trade gained.** Reported from the live draft: giving Filip
   Gustavsson (G, $3.2M, just drafted against a $1.76M model price) for Jordan
@@ -3796,11 +3895,11 @@ than defects, and the answers are the deliverable; two were real.
   CSV, so booting an alternate pool against `data/state/` would load the real
   draft's JSON, backfill it from the wrong CSV, and then save over it — the same
   write-through that `tests/conftest.py` was written to stop pytest doing. So
-  `main.py:84 (_default_state_dir)` derives `data/state-<stem>` for any
+  `main.py:94 (_default_state_dir)` derives `data/state-<stem>` for any
   non-default pool, rather than leaving it to a second variable the operator has
   to remember; `FCHL_STATE_DIR` overrides it explicitly.
-  `main.py:229 (_backfill_nhl_teams)` and
-  `main.py:253 (_backfill_keeper_flags)` follow the
+  `main.py:239 (_backfill_nhl_teams)` and
+  `main.py:263 (_backfill_keeper_flags)` follow the
   same global instead of hardcoding `data/players.csv`, and startup logs the pool
   and the directory together, because a mismatch between them is otherwise
   silent. `.gitignore` widened from `data/state/` to `data/state*/` to cover the
@@ -3994,7 +4093,7 @@ than defects, and the answers are the deliverable; two were real.
   mutation, not by reading.
 
 - **The startup banner is a list, because this change made a third message
-  reachable.** `main.py:406 (_warn_at_startup)` concatenated into one string, and
+  reachable.** `main.py:416 (_warn_at_startup)` concatenated into one string, and
   its own backlog entry said the fix was worth doing *"when a third warning source
   is added, not before"*. (a) above adds one, and three are now simultaneously
   true: the current file will not parse, setting it aside fails, and the backup
@@ -4542,7 +4641,7 @@ work that genuinely needs a draft to settle.
   `BACKLOG.md`"* and never arrived, surviving only because later work happened to
   fix them anyway — the hardcoded `CAUTION_BAND`, the live `MarketInfo`'s
   `floor_demand` inconsistency (now consistent, with a comment at
-  `main.py:1655 (bid_check)` naming that exact trap), and the negative `Spots` display
+  `main.py:1699 (bid_check)` naming that exact trap), and the negative `Spots` display
   (clamped). **So a report saying "this goes to the backlog" is not evidence that
   it did** — three of the four items named in that sentence in the very first
   grill round never appeared in the file. Every dropped item was in a *closing
@@ -4647,7 +4746,7 @@ work that genuinely needs a draft to settle.
 - **Parallelism does not help anything on the request path**, so nothing there
   changed. `_recompute`'s single solve for BOT has nothing to overlap it with,
   and `/bid-check`'s cold ~935ms is a *sequential* binary search over solves, not
-  a fan-out — its lever is still a cheaper solve, as `main.py:1655 (bid_check)`
+  a fan-out — its lever is still a cheaper solve, as `main.py:1699 (bid_check)`
   says. Even at 384ms the standings scan is far too expensive for an action path:
   on top of `/assign`'s 150ms it would blow the 500ms interaction budget, so
   "never put this on an action path" stands.
@@ -4879,7 +4978,7 @@ about the change being *undefended* rather than wrong.
 
   **The determinism tests do not pin the name tie-breaks.** Removing `_fill`'s tie-break leaves all 58 tests green — dict iteration is insertion-ordered, so two loads in one process give the same answer either way. The tie-breaks matter *across* processes, where hash and set order vary, and nothing in this file can see that. What the test does catch is state leaking between loads (a cached price dict, a mutated `POSITION_MINIMUMS`), which is worth its 20ms; the docstring now says so instead of the opposite, and the two new copies point at it.
 
-  **`test_every_team_still_solves` has no teeth on a full team.** `solve_optimal_roster` answers `spots == 0` from its own branch (`optimizer.py:162 (solve_optimal_roster)`) and returns Optimal without running the MILP, so filling that team with skaters only left everything green. Its position legality is pinned by the `roster_needs` assertion in the exactly-one-full test instead.
+  **`test_every_team_still_solves` has no teeth on a full team.** `solve_optimal_roster` answers `spots == 0` from its own branch (`optimizer.py:201 (solve_optimal_roster)`) and returns Optimal without running the MILP, so filling that team with skaters only left everything green. Its position legality is pinned by the `roster_needs` assertion in the exactly-one-full test instead.
 
   The first attempt at the done-team mutation matched **two** sites and was not applied — the fifth anchor miss in this repo, caught by asserting exactly one replacement rather than by noticing a suspiciously green run.
 

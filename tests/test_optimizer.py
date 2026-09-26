@@ -84,30 +84,24 @@ class TestSolveOptimalRoster:
         assert d_count >= 6
         assert g_count >= 2
 
-    def test_prefers_balanced_bench(self):
-        """With flat-ish points, the soft 2F/1D/1G backup preference should
-        produce the classic 14F/7D/3G shape."""
+    def test_the_bench_scores_at_its_depth_weight(self):
+        """total_points is EXPECTED points: starters in full, each backup at the
+        season share he covers (config.BENCH_DEPTH_WEIGHTS). It said "the bench
+        does not score" until 2026-09-25. lineup_points keeps the starters."""
         players, prices = _simple_pool()
         team = _make_team()
         sol = solve_optimal_roster(team, players, prices)
         assert sol.status == "Optimal"
-        counts = {pos: len(ps) for pos, ps in sol.by_position.items()}
-        assert counts == {"F": 14, "D": 7, "G": 3}
-
-    def test_bench_does_not_score(self):
-        """total_points counts only the best 12F/6D/2G starting lineup."""
-        players, prices = _simple_pool()
-        team = _make_team()
-        sol = solve_optimal_roster(team, players, prices)
-        assert sol.status == "Optimal"
-        from state import lineup_points
-        assert sol.total_points == lineup_points(sol.roster)
-        # And strictly less than the sum over all 24 rostered players
-        assert sol.total_points < sum(p.projected_points for p in sol.roster)
+        from state import expected_points, lineup_points
+        assert sol.total_points == pytest.approx(expected_points(sol.roster))
+        assert sol.lineup_points == lineup_points(sol.roster)
+        # More than the starters, less than every rostered player in full
+        assert sol.lineup_points < sol.total_points < sum(
+            p.projected_points for p in sol.roster)
 
     def test_sacrifices_bench_shape_for_big_starter_gain(self):
-        """The 14/7/3 preference is soft: a starter upgrade worth far more
-        than the backup bonus must win."""
+        """No bench SHAPE is required: when the only legal 24-man roster is
+        16F/6D/2G, the solver takes it rather than calling it infeasible."""
         players = {}
         prices = {}
         # 16 forwards: 12 stars + 4 good ones (points beat any D/G bench value)

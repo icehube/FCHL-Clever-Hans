@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, fields
 from functools import lru_cache
 
 from config import (
+    BENCH_DEPTH_WEIGHTS,
     BENCH_SIZE,
     BUYOUT_ELIGIBLE_GROUPS,
     MAX_SALARY,
@@ -38,6 +39,35 @@ def lineup_points(players) -> int:
     for pos, slots in STARTING_LINEUP.items():
         total += sum(sorted(by_pos[pos], reverse=True)[:slots])
     return total
+
+
+def expected_points(players) -> float:
+    """Starting-lineup points plus the expected contribution of the bench.
+
+    THE figure every decision compares -- trade and buyout verdicts, max bids,
+    the Proj column -- because a backup is worth real points: he plays when a
+    starter at his position is out (see config.OUT_RATE). The best 12F/6D/2G
+    start and score in full; then up to BENCH_SIZE of the rest fill the bench,
+    the k-th backup at a position scoring BENCH_DEPTH_WEIGHTS[pos][k-1] of his
+    points. Beyond BENCH_SIZE a player adds nothing (the minors never play).
+
+    Greedy is exact: within a position both the weights and the sorted points
+    fall, so each position's marginal values are already descending, and the
+    best BENCH_SIZE of all of them respect every position's depth order.
+    `solve_optimal_roster` optimizes this same quantity, and
+    tests/test_bench_value.py pins the two agreeing.
+    """
+    by_pos: dict[str, list[int]] = {"F": [], "D": [], "G": []}
+    for p in players:
+        if p.position in by_pos:
+            by_pos[p.position].append(p.projected_points)
+    total = 0.0
+    bench: list[float] = []
+    for pos, slots in STARTING_LINEUP.items():
+        ranked = sorted(by_pos[pos], reverse=True)
+        total += sum(ranked[:slots])
+        bench += [w * pts for w, pts in zip(BENCH_DEPTH_WEIGHTS[pos], ranked[slots:])]
+    return total + sum(sorted(bench, reverse=True)[:BENCH_SIZE])
 
 
 @dataclass
@@ -294,8 +324,14 @@ class TeamState:
 
     @property
     def current_roster_points(self) -> int:
-        """Projected points from the best starting lineup (bench scores 0)."""
+        """Projected points from the best starting lineup alone -- the
+        "starters" figure for display. Decisions use expected_roster_points."""
         return lineup_points(self.roster_players)
+
+    @property
+    def expected_roster_points(self) -> float:
+        """Starters plus expected bench contribution (see `expected_points`)."""
+        return expected_points(self.roster_players)
 
     def find_player(self, name: str) -> PlayerOnRoster | None:
         """Find a player by name across all lists."""

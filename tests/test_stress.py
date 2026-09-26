@@ -70,6 +70,8 @@ class TestStressAuction:
 
     def test_full_simulation(self, client):
         """Run 50 randomized picks and verify invariants throughout."""
+        import main
+
         random.seed(42)  # Reproducible
 
         state = _get_state(client)
@@ -96,11 +98,23 @@ class TestStressAuction:
             pick_idx = random.randint(0, top_n - 1)
             player = draft_pool[pick_idx]
 
-            # Pick a random team
-            team = random.choice(teams)
+            # Pick a random team that can still legally bid. The league's
+            # commissioner software refuses a bid that would leave a team
+            # unable to fill its roster (owner decision 2026-08-06), so a sim
+            # that ignores it tests a state the league cannot reach. It did,
+            # until 2026-09-25: salaries were random up to $5M whatever the
+            # team had left, which held only because the pool happened to
+            # leave every team slack -- recalling three LGN prospects onto
+            # its active roster took LGN over the cap by pick 49.
+            live = main.auction_state.teams
+            bidders = [t for t in teams if live[t].physical_max_bid >= MIN_SALARY]
+            assert bidders, f"Pick {i+1}: no team can make a legal bid"
+            team = random.choice(bidders)
 
-            # Random salary between MIN and market-reasonable
-            salary = round(random.uniform(MIN_SALARY, min(5.0, MAX_SALARY)), 1)
+            # Random salary between MIN and market-reasonable, never above what
+            # this team may legally bid.
+            ceiling = min(5.0, MAX_SALARY, live[team].physical_max_bid)
+            salary = round(random.uniform(MIN_SALARY, ceiling), 1)
 
             # Assign
             r = client.post("/assign", data={

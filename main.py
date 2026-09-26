@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
 from functools import lru_cache, partial
 from pathlib import Path
+from typing import NamedTuple
 
 try:
     import fcntl
@@ -72,7 +73,15 @@ from price_model import (
     load_model_params,
     predict_all_prices,
 )
-from state import AuctionState, ChangeRecord, Player, PlayerOnRoster, TransactionRecord
+from state import (
+    AuctionState,
+    ChangeRecord,
+    Player,
+    PlayerOnRoster,
+    TeamState,
+    TransactionRecord,
+    expected_points,
+)
 from trade import (
     PlayerTrade,
     evaluate_buyout,
@@ -720,9 +729,8 @@ def _roster_slots(rows: list[dict]) -> list[dict]:
     stays one running sequence across every position rather than restarting per
     position. The number is therefore "how full is the bench", against the hard
     `BENCH_SIZE` of 4, which is the constraint that actually binds; bench
-    COMPOSITION against `BACKUP_TARGETS` (2F/1D/1G) is a soft objective
-    preference the MILP is free to ignore, so it would be the wrong thing to
-    count. The letter went in on 2026-09-20, when dropping the `Pos` column left
+    COMPOSITION is the solver's choice, priced by `config.BENCH_DEPTH_WEIGHTS`,
+    and sets no count, so it would be the wrong thing to count. The letter went in on 2026-09-20, when dropping the `Pos` column left
     `B1` as the only row on the panel whose position nothing stated.
 
     Bench membership is read off the `is_bench` FLAG, not derived from points.
@@ -1366,6 +1374,48 @@ def _view_team(code: str) -> None:
         _viewed_team = code
 
 
+class _StandIn(NamedTuple):
+    """A hypothetical purchase, carrying only what `expected_points` reads."""
+
+    position: str
+    projected_points: float
+
+
+def _estimated_projection(team: TeamState, pool_by_points: list[Player]) -> int:
+    """The no-solve Proj estimate for a live team: its roster plus stand-ins.
+
+    Each open STARTER slot gets a stand-in at the average of the best
+    affordable players (the long-standing rule), and the result is scored by
+    `state.expected_points`, the same rule as every exact figure -- so a
+    stand-in that out-scores a current starter pushes him to the bench, where he
+    still counts at his depth weight.
+
+    Open BENCH spots get no stand-in, and that was measured rather than
+    assumed (2026-09-25, 10 opponents fresh plus the two live ones in
+    `endgame-ceiling-binds`). Stand-ins at the best near-minimum players cut
+    the endgame error (-66 to +32) but inflated a fresh league (+44 to +150),
+    for a mean |error| of 91 against 62 without them. So the estimate runs high
+    early, where starter slots dominate, and low late, where the open spots are
+    bench spots. It is still an ESTIMATE; CLAUDE.md records why no smarter one
+    is attempted, and Solve Standings -- which every pick now triggers --
+    replaces it.
+    """
+    roster = list(team.roster_players)
+    starter_needs = team.roster_needs
+    starter_slots = sum(starter_needs.values())
+    if starter_slots and pool_by_points:
+        affordable = [
+            p for p in pool_by_points
+            if market_prices.get(p.name, MIN_SALARY) <= team.physical_max_bid
+        ]
+        top = min(len(affordable), starter_slots * 3)
+        if top:
+            avg = sum(p.projected_points for p in affordable[:top]) / top
+            for pos, need in starter_needs.items():
+                roster += [_StandIn(pos, avg)] * need
+    return int(expected_points(roster))
+
+
 def _context(request: Request) -> dict:
     """Build template context with all current state."""
     team = auction_state.teams[MY_TEAM]
@@ -1405,7 +1455,14 @@ def _context(request: Request) -> dict:
     )
     projections = {}
     for code, t in auction_state.teams.items():
+        # Two figures on two bases, on purpose. `current` is the Pts column:
+        # what the roster's STARTERS score today, a fact you can check against
+        # the lineup. Every Proj figure is EXPECTED points -- starters plus the
+        # bench's share of the season it covers (`state.expected_points`) --
+        # because that is what BOT's MILP figure and every exact solve report,
+        # and a column mixing the two bases would rank teams on different rules.
         current = t.current_roster_points
+        expected_now = int(t.expected_roster_points)
         if t.is_done:
             # A done team has STOPPED drafting, so its roster is final and its
             # projection is simply what it has. Projecting its unfilled slots is
@@ -1428,7 +1485,7 @@ def _context(request: Request) -> dict:
             # lie pointed at yourself. Done teams are already excluded from
             # market ceilings, demand counts and nomination order; this is the
             # same rule reaching the one place it had not.
-            projected = current
+            projected = expected_now
         elif code == MY_TEAM and milp_solution and milp_solution.status == "Optimal":
             projected = int(milp_solution.total_points)
         elif code in exact_projections:
@@ -1442,21 +1499,7 @@ def _context(request: Request) -> dict:
             # here, and only they read the estimate below.
             projected = exact_projections[code]
         else:
-            # Only unfilled STARTER slots add points — bench scores nothing
-            starter_slots = sum(t.roster_needs.values())
-            if starter_slots > 0 and available_pool:
-                affordable = [
-                    p for p in available_pool
-                    if market_prices.get(p.name, MIN_SALARY) <= t.physical_max_bid
-                ]
-                sample = min(len(affordable), starter_slots * 3)
-                if sample > 0:
-                    avg_pts = sum(p.projected_points for p in affordable[:sample]) / sample
-                    projected = current + int(starter_slots * avg_pts)
-                else:
-                    projected = current
-            else:
-                projected = current
+            projected = _estimated_projection(t, available_pool)
         projections[code] = {"current": current, "projected": projected}
 
     # What BASIS the figures above were computed on. `total` is the live

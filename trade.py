@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass, field
 
@@ -10,10 +11,15 @@ from config import (
     BUYOUT_ELIGIBLE_GROUPS,
     BUYOUT_PENALTY_RATE,
     DEFAULT_TEAM_PROBABILITY,
+    MAX_SALARY,
+    MIN_SALARY,
     MY_TEAM,
+    OVERPAY_STRESS,
 )
+from market import compute_market_ceiling, compute_market_price
 from optimizer import MILPSolution, solve_optimal_roster
-from state import AuctionState, Player, PlayerOnRoster
+from price_model import load_model_params, predict_all_prices
+from state import AuctionState, Player, PlayerOnRoster, TeamState
 
 
 def _pool_rank(pool: dict[str, Player], position: str, projected_points: float) -> int:
@@ -60,6 +66,25 @@ class TradeScenario:
     roster: MILPSolution
     buyouts: list[str] = field(default_factory=list)
 
+    @property
+    def left_after_plan(self) -> float:
+        """Cap still unspent once the MILP has filled every open spot.
+
+        THE figure to break a points tie on, never `cap_remaining`. Two
+        scenarios can differ in how many spots they leave open -- a trade that
+        sends out two players and buys the incoming one out opens one more than
+        a single buyout -- and the extra cap is then already spoken for.
+        Measured 2026-09-25: Dobson + Gustavsson for Kyrou-then-buyout "freed
+        $1.6M" over buying Gustavsson out alone, and the solver spent exactly
+        that money replacing Dobson (Hronek, D 48pts at $1.8M). Both plans
+        spent every dollar; the tie-break called it a win.
+        """
+        return self.cap_remaining - self.roster.total_cost
+
+    @property
+    def spots_to_fill(self) -> int:
+        return len(self.roster.roster)
+
 
 @dataclass
 class TradeEvaluation:
@@ -71,9 +96,90 @@ class TradeEvaluation:
     current_scenario: TradeScenario
     scenarios: list[TradeScenario]
     best_scenario: TradeScenario
-    recommendation: str  # "accept" or "decline"
+    recommendation: str  # "accept", "even" or "decline"
     reasoning: str
     source_team_code: str | None = None  # The team BOT is trading with, if any
+    # The no-trade side of the comparison: BOT buying one of its OWN players
+    # out without trading at all. The verdict is measured against the best of
+    # these (or the current roster, if none beats it), never against the bare
+    # current roster -- see evaluate_trade.
+    baseline_scenarios: list[TradeScenario] = field(default_factory=list)
+    baseline_best: TradeScenario | None = None
+    # The same two winners re-solved with every auction price marked up by
+    # `stress_rate`. None when there was no legal trade outcome to stress.
+    stress_rate: float = OVERPAY_STRESS
+    stress_trade_points: float | None = None
+    stress_baseline_points: float | None = None
+
+    @property
+    def overpay_outcome(self) -> str | None:
+        """"ahead", "level" or "behind" at stressed prices; None when unknown.
+
+        Three-way, not a bool: EVEN is the verdict most likely to tie again at
+        stressed prices, and a strict `>` printed "Falls behind: 1276 vs 1276".
+        """
+        if self.stress_trade_points is None or self.stress_baseline_points is None:
+            return None
+        if self.stress_trade_points > self.stress_baseline_points:
+            return "ahead"
+        if self.stress_trade_points < self.stress_baseline_points:
+            return "behind"
+        return "level"
+
+
+# One MILP to run: (description, team to solve, pool it may buy from, buyouts).
+_Job = tuple[str, TeamState, dict[str, Player], list[str]]
+
+
+def _buyout_jobs(team: TeamState, pool: dict[str, Player], label: str) -> list[_Job]:
+    """One job per legal single buyout on `team`, in roster order.
+
+    Only `can_be_bought_out` players: a scenario can be the recommended one, so
+    an ineligible prospect here would be the tool advising an illegal move.
+
+    The clones are made HERE, on the caller's thread, before anything fans out:
+    `roster_players` lazily writes `_roster_cache`, so deep-copying one team
+    from several workers at once is a write race on the source (the same
+    reason `main._solve_buyout_indicators` materialises its candidates first).
+    """
+    jobs: list[_Job] = []
+    for p in team.all_players:
+        if not p.can_be_bought_out:
+            continue
+        clone = deepcopy(team)
+        clone.remove_player(p.name)
+        penalty = p.salary * BUYOUT_PENALTY_RATE
+        clone.penalties += penalty
+        jobs.append((f"{label} {p.name} (penalty ${penalty:.1f}M)", clone, pool, [p.name]))
+    return jobs
+
+
+def _solve_jobs(
+    jobs: list[_Job], market_prices: dict[str, float], workers: int,
+) -> list[TradeScenario]:
+    """Solve every job, `workers` at a time, returning scenarios in job order.
+
+    ONE batch for the whole evaluation rather than one per side: each solve is
+    ~300ms of CBC on a full pool, and measured 2026-09-25 on the live draft (14
+    solves, 8 workers) three batches took 2.0s against 1.4s for one. `map` yields in input order, which is what keeps the scenario
+    list deterministic; concurrent CBC solves are safe because PuLP gives each
+    one its own scratch files (see TestTwoSolvesAtOnceAgreeWithTwoSolvesInARow).
+    """
+    def solve(job: _Job) -> TradeScenario:
+        description, team, pool, buyouts = job
+        sol = solve_optimal_roster(team, pool, market_prices)
+        return TradeScenario(
+            description=description,
+            total_points=sol.total_points,
+            cap_remaining=team.remaining_budget,
+            roster=sol,
+            buyouts=buyouts,
+        )
+
+    if workers <= 1 or len(jobs) <= 1:
+        return [solve(j) for j in jobs]
+    with ThreadPoolExecutor(max_workers=min(workers, len(jobs))) as ex:
+        return list(ex.map(solve, jobs))
 
 
 def evaluate_trade(
@@ -83,26 +189,44 @@ def evaluate_trade(
     market_prices: dict[str, float],
     auto_check_buyouts: bool = True,
     source_team_code: str | None = None,
+    workers: int = 1,
+    model_params: dict | None = None,
+    overpay: float = OVERPAY_STRESS,
 ) -> TradeEvaluation:
     """
     Evaluate a proposed trade by comparing MILP solutions.
 
     1. Solve current state → baseline
     2. Clone state, apply trade, solve → "keep all" scenario
-    3. If auto_check_buyouts: test buying out each received player
-    4. Pick best scenario, recommend accept/decline
+    3. If auto_check_buyouts: test every legal single buyout on BOTH sides --
+       the post-trade roster, and the current roster with no trade at all
+    4. Recommend accept iff the best trade outcome beats the best no-trade one
+
+    Step 3 has to be symmetric. Until 2026-09-25 only the trade side got
+    buyouts, and only of RECEIVED players, while the trade was compared against
+    the bare current roster -- so a trade that merely moved one of BOT's own bad
+    contracts scored the salary relief as a trade gain. Measured on the live
+    draft: Gustavsson ($3.2M, drafted at a $1.76M model price) for Kyrou, then
+    buying Kyrou out, read ACCEPT at +7 (1348); buying Gustavsson out with no
+    trade scores 1351. The trade was worth -3, and the tool said take it.
+
+    `workers` fans the solves out (main passes SCAN_WORKERS). ~2 per eligible
+    contract, so this costs ~1.4s where the one-sided version cost ~0.9s. It
+    still runs on the event loop: trades happen in auction breaks, with no bid
+    in flight to stall.
+
+    The two winners are then re-solved with every auction price marked up by
+    `overpay`. Every plan here assumes BOT buys its open spots at the model's
+    EXPECTED price, and a give-for-nothing trade is a bet on exactly that --
+    Larkin + Dobson for nothing measured +2 (1333 -> 1335) by refilling their
+    spots at expected prices, in a league whose one replayed draft paid 27%
+    over the model. The stress solves say whether the gain survives that.
+
+    `model_params` prices players the free-agent flow returns to the pool;
+    main passes its loaded copy, and it is read from disk when omitted.
     """
     team = state.teams[MY_TEAM]
     trade_id = str(uuid.uuid4())[:8]
-
-    # Baseline: current optimal
-    current_sol = solve_optimal_roster(team, state.available_players, market_prices)
-    current_scenario = TradeScenario(
-        description="Current roster (no trade)",
-        total_points=current_sol.total_points,
-        cap_remaining=team.remaining_budget,
-        roster=current_sol,
-    )
 
     # Apply trade to cloned state
     trade_state = deepcopy(state)
@@ -172,39 +296,39 @@ def evaluate_trade(
                 pos_rank=_pool_rank(trade_available, p.position, p.projected_points),
             )
 
-    # Scenario: keep all received players
-    keep_sol = solve_optimal_roster(trade_team, trade_available, market_prices)
-    scenarios = [TradeScenario(
-        description="Keep all received players",
-        total_points=keep_sol.total_points,
-        cap_remaining=trade_team.remaining_budget,
-        roster=keep_sol,
-    )]
+    # ...and they need PRICES. `market_prices` was computed before they were
+    # in the pool, and the MILP prices a missing name at MIN_SALARY, so without
+    # this every released player could be "bought back" for $0.5M: Larkin +
+    # Dobson for nothing measured a bogus +35 that way (2026-09-25). Priced the
+    # way /trade-execute's recompute will price them once the trade is real:
+    # the model, capped by the post-trade market ceiling. Adding names to a
+    # copy is safe for the no-trade solves, which only iterate their own pool.
+    prices = dict(market_prices)
+    returned = {n: q for n, q in trade_available.items() if n not in market_prices}
+    if returned:
+        preds = predict_all_prices(returned, model_params or load_model_params())
+        ceiling = compute_market_ceiling(trade_state.teams)
+        for n, pred in preds.items():
+            prices[n] = compute_market_price(pred.expected_price, ceiling)
 
-    # Auto-check buyouts on each received player
+    # Every legal single buyout, on both sides of the comparison -- see the
+    # docstring for why the no-trade side is not optional.
+    trade_jobs: list[_Job] = [
+        ("Keep all received players", trade_team, trade_available, []),
+    ]
+    baseline_jobs: list[_Job] = []
     if auto_check_buyouts:
-        for p in receive:
-            buyout_state = deepcopy(trade_state)
-            buyout_team = buyout_state.teams[MY_TEAM]
-            # Only propose buyouts the league would allow. A scenario can be the
-            # RECOMMENDED one, so an unfiltered prospect here meant the tool
-            # advising an illegal move as the best available outcome.
-            incoming = buyout_team.find_player(p.name)
-            if incoming is None or not incoming.can_be_bought_out:
-                continue
-            try:
-                buyout_team.remove_player(p.name)
-            except ValueError:
-                continue
-            buyout_team.penalties += p.salary * BUYOUT_PENALTY_RATE
-            buyout_sol = solve_optimal_roster(buyout_team, trade_available, market_prices)
-            scenarios.append(TradeScenario(
-                description=f"Buy out {p.name} (penalty ${p.salary * BUYOUT_PENALTY_RATE:.1f}M)",
-                total_points=buyout_sol.total_points,
-                cap_remaining=buyout_team.remaining_budget,
-                roster=buyout_sol,
-                buyouts=[p.name],
-            ))
+        trade_jobs += _buyout_jobs(trade_team, trade_available, "Trade + buy out")
+        baseline_jobs = _buyout_jobs(team, state.available_players, "No trade, buy out")
+
+    all_jobs = (
+        [("Current roster (no trade)", team, state.available_players, [])]
+        + trade_jobs + baseline_jobs
+    )
+    solved = _solve_jobs(all_jobs, prices, workers)
+    current_scenario = solved[0]
+    scenarios = solved[1:1 + len(trade_jobs)]
+    baseline_scenarios = solved[1 + len(trade_jobs):]
 
     # A scenario is only acceptable if it leaves a legal team: cap space
     # non-negative and a solvable roster. Comparing raw total_points let
@@ -212,6 +336,14 @@ def evaluate_trade(
     # lineup points).
     def _is_legal(s: TradeScenario) -> bool:
         return s.cap_remaining >= 0 and s.roster.status == "Optimal"
+
+    # The bar the trade has to clear. The current roster is always a candidate,
+    # legal or not: the league tolerates a temporary over-cap state, and "do
+    # nothing" is always available.
+    baseline_best = max(
+        [current_scenario] + [s for s in baseline_scenarios if _is_legal(s)],
+        key=lambda s: (s.total_points, s.left_after_plan),
+    )
 
     legal = [s for s in scenarios if _is_legal(s)]
     if not legal:
@@ -229,27 +361,78 @@ def evaluate_trade(
                 f"(${worst_cap:.1f}M remaining) or unsolvable"
             ),
             source_team_code=source_team_code,
+            baseline_scenarios=baseline_scenarios,
+            baseline_best=baseline_best,
         )
 
     # Find best legal scenario
-    best = max(legal, key=lambda s: s.total_points)
+    best = max(legal, key=lambda s: (s.total_points, s.left_after_plan))
 
-    # Compare best to current
-    if best.total_points > current_scenario.total_points:
+    # Re-solve the two winners at stressed prices, in one batch. Found by
+    # identity: solved[i] came from all_jobs[i].
+    #
+    # Only the part of a price ABOVE the league minimum is marked up. Nobody
+    # can be made to pay more than the floor for a floor player, and marking
+    # the floor itself up can make a tight roster unfillable -- 10 open spots
+    # on $5.1M is feasible at $0.5M each and not at $0.625M. (Exempting only
+    # prices of exactly MIN_SALARY is not enough: expected prices near the
+    # floor are 0.51, 0.52..., and those are what a tight roster fills with.)
+    # An Infeasible solve still reports the bare roster's points, which is not
+    # a plan, so any non-Optimal stress solve leaves the figures unset.
+    stressed_prices = {
+        n: min(MIN_SALARY + max(v - MIN_SALARY, 0.0) * overpay, MAX_SALARY)
+        for n, v in prices.items()
+    }
+    job_of = {id(sc): job for sc, job in zip(solved, all_jobs)}
+    stress_trade, stress_bar = _solve_jobs(
+        [job_of[id(best)], job_of[id(baseline_best)]], stressed_prices, workers,
+    )
+    stress_ok = stress_trade.roster.status == "Optimal" == stress_bar.roster.status
+
+    # Compare the best trade outcome to the best NO-trade outcome, and name the
+    # latter: "the trade loses 3" is baffling beside a table where it plainly
+    # beats the current roster, unless the reasoning says what it lost to.
+    bar = baseline_best
+    bar_label = (
+        f"buying out {bar.buyouts[0]} yourself ({bar.total_points:.0f})"
+        if bar.buyouts else f"standing pat ({bar.total_points:.0f})"
+    )
+    # Buying out everything you receive means the trade is a salary dump: the
+    # partner absorbs your contracts and you keep nothing. Legitimate, but the
+    # owner should not have to reverse-engineer that from a scenario name.
+    received = {p.name for p in receive}
+    dump = bool(received) and received <= set(best.buyouts)
+    lead = "Salary dump — you keep nothing you receive. " if dump else ""
+    unspent = round(best.left_after_plan - bar.left_after_plan, 1)
+
+    if best.total_points > bar.total_points:
         recommendation = "accept"
-        delta = best.total_points - current_scenario.total_points
-        reasoning = f"Trade gains +{delta:.0f} projected points ({best.description})"
-    elif best.total_points == current_scenario.total_points:
-        if best.cap_remaining > current_scenario.cap_remaining:
-            recommendation = "accept"
-            reasoning = f"Same points but frees ${best.cap_remaining - current_scenario.cap_remaining:.1f}M cap space ({best.description})"
-        else:
-            recommendation = "decline"
-            reasoning = "No improvement in points or cap space"
-    else:
+        reasoning = (
+            f"{lead}+{best.total_points - bar.total_points:.0f} points over "
+            f"{bar_label}. Best line: {best.description}"
+        )
+    elif best.total_points < bar.total_points:
         recommendation = "decline"
-        delta = current_scenario.total_points - best.total_points
-        reasoning = f"Trade loses {delta:.0f} projected points"
+        reasoning = (
+            f"{lead}{bar.total_points - best.total_points:.0f} points worse than "
+            f"{bar_label}. Best line: {best.description}"
+        )
+    elif unspent < 0:
+        # Level on points and dearer: paying for nothing.
+        recommendation = "decline"
+        reasoning = (
+            f"{lead}Level on points with {bar_label}, and leaves "
+            f"${-unspent:.1f}M less unspent once the roster is filled"
+        )
+    else:
+        # A tie is not an ACCEPT. Cap the solver could not turn into points is
+        # a weak reason to trade, and a green verdict reads as "+10".
+        recommendation = "even"
+        extra = (
+            f"leaves ${unspent:.1f}M more unspent once the roster is filled"
+            if unspent > 0 else "spends the same once the roster is filled"
+        )
+        reasoning = f"{lead}No point gain: level with {bar_label}, and {extra}"
 
     return TradeEvaluation(
         trade_id=trade_id,
@@ -261,6 +444,11 @@ def evaluate_trade(
         recommendation=recommendation,
         reasoning=reasoning,
         source_team_code=source_team_code,
+        baseline_scenarios=baseline_scenarios,
+        baseline_best=baseline_best,
+        stress_rate=overpay,
+        stress_trade_points=stress_trade.total_points if stress_ok else None,
+        stress_baseline_points=stress_bar.total_points if stress_ok else None,
     )
 
 

@@ -141,8 +141,14 @@ class TestEvaluateTrade:
         ]
 
         result = evaluate_trade(state, give, receive, mp, auto_check_buyouts=True)
-        # Should have: keep_all + buyout_p1 + buyout_p2 = 3 scenarios
-        assert len(result.scenarios) == 3
+        # keep_all + one per eligible contract on the POST-trade roster: both
+        # received players (fresh draftees are group 3) and BOT's own.
+        eligible_after = (
+            sum(1 for q in bot.all_players if q.can_be_bought_out and q.name != worst.name)
+            + len(receive)
+        )
+        assert len(result.scenarios) == 1 + eligible_after
+        assert {p1.name, p2.name} <= {b for s in result.scenarios for b in s.buyouts}
 
     def test_two_team_trade_does_not_reuse_give_in_milp(self):
         """Free-agent flow can re-acquire give-player; two-team flow cannot."""
@@ -176,6 +182,353 @@ class TestEvaluateTrade:
 
         result = evaluate_trade(state, give, receive, mp, auto_check_buyouts=False)
         assert len(result.scenarios) == 1
+
+
+class TestTheNoTradeSideGetsBuyoutsToo:
+    """Regression (2026-09-25): buyouts were tried on the trade side only.
+
+    A trade that merely moved one of BOT's own bad contracts scored the salary
+    relief as a trade gain, because the bar it had to clear was the bare
+    current roster. On the live draft: give an overpaid goalie, receive a
+    forward, buy the forward out -> ACCEPT at +7, while buying the goalie out
+    with no trade at all was +10.
+    """
+
+    def _salary_dump(self):
+        """BOT's overpaid contract X for a rival's worse player Y at a HIGHER salary.
+
+        Both salaries are SUPPLIED rather than found, because the pool is
+        replaced before every draft and need not carry a bad contract. Built so
+        the old comparison provably accepts: trading X and buying Y out frees
+        less cap than buying X out directly, and costs the same roster spot.
+        """
+        state, _ = _setup()
+        bot = state.teams[MY_TEAM]
+        rival_code, rival = next(
+            (c, t) for c, t in state.teams.items()
+            if c != MY_TEAM and any(q.can_be_bought_out for q in t.roster_players)
+        )
+        y = min((q for q in rival.roster_players if q.can_be_bought_out),
+                key=lambda q: q.projected_points)
+        x = min((q for q in bot.roster_players
+                 if q.can_be_bought_out and q.projected_points > y.projected_points),
+                key=lambda q: q.projected_points)
+        x.salary = 6.0
+        y.salary = 6.4
+
+        from market import compute_all_market_prices
+        from price_model import load_model_params, predict_all_prices
+        model = predict_all_prices(state.available_players, load_model_params())
+        mp = {n: pr for n, (pr, _) in compute_all_market_prices(
+            state.available_players, model, state.teams).items()}
+        give = [PlayerTrade(x.name, x.position, x.salary, x.projected_points)]
+        receive = [PlayerTrade(y.name, y.position, y.salary, y.projected_points)]
+        return state, mp, give, receive, rival_code, x
+
+    def test_a_salary_dump_loses_to_buying_the_contract_out_yourself(self):
+        state, mp, give, receive, rival_code, x = self._salary_dump()
+
+        result = evaluate_trade(state, give, receive, mp, source_team_code=rival_code)
+
+        # The precondition that makes this a regression test: measured against
+        # the bare roster, the trade looks like a win. Without it this would
+        # pass against the old code too.
+        assert result.best_scenario.total_points > result.current_scenario.total_points
+        assert result.recommendation == "decline", result.reasoning
+        assert result.baseline_best.buyouts, "the bar should be a no-trade buyout"
+        assert result.baseline_best.buyouts[0] in result.reasoning
+
+    def test_the_verdict_table_names_the_move_that_beat_the_trade(self):
+        from main import templates
+        state, mp, give, receive, rival_code, x = self._salary_dump()
+        result = evaluate_trade(state, give, receive, mp, source_team_code=rival_code)
+
+        html = templates.env.get_template("partials/trade_verdict.html").render(
+            trade_result=result)
+        bar = result.baseline_best.description
+        assert bar in html
+        highlighted = [row for row in html.split("<tr") if "text-accent" in row]
+        assert len(highlighted) == 1 and bar in highlighted[0], (
+            "the highlighted row must be the side that WON, not the trade's best"
+        )
+
+    def test_the_trade_side_may_buy_out_a_player_bot_already_had(self):
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        mine = next(q for q in bot.roster_players if q.can_be_bought_out)
+        avail = max((p for p in state.available_players.values() if p.position == "F"),
+                    key=lambda p: p.projected_points)
+        result = evaluate_trade(
+            state, [], [PlayerTrade(avail.name, avail.position, 1.0, avail.projected_points)], mp)
+        assert any(s.buyouts == [mine.name] for s in result.scenarios)
+
+    def test_the_no_trade_menu_is_exactly_the_eligible_contracts(self):
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        worst = min(bot.keeper_players, key=lambda p: p.projected_points)
+        avail = next(p for p in state.available_players.values() if p.projected_points > 0)
+        result = evaluate_trade(
+            state,
+            [PlayerTrade(worst.name, worst.position, worst.salary, worst.projected_points)],
+            [PlayerTrade(avail.name, avail.position, 1.0, avail.projected_points)], mp)
+        assert [s.buyouts[0] for s in result.baseline_scenarios] == [
+            q.name for q in bot.all_players if q.can_be_bought_out
+        ]
+
+    def test_disabling_buyouts_disables_both_sides(self):
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        worst = min(bot.keeper_players, key=lambda p: p.projected_points)
+        avail = next(p for p in state.available_players.values() if p.projected_points > 0)
+        result = evaluate_trade(
+            state,
+            [PlayerTrade(worst.name, worst.position, worst.salary, worst.projected_points)],
+            [PlayerTrade(avail.name, avail.position, 1.0, avail.projected_points)], mp,
+            auto_check_buyouts=False)
+        assert result.baseline_scenarios == []
+        assert result.baseline_best is result.current_scenario
+
+    def test_in_parallel_it_agrees_with_itself_in_series(self):
+        state, mp, give, receive, rival_code, _ = self._salary_dump()
+
+        def run(workers):
+            from copy import deepcopy
+            r = evaluate_trade(deepcopy(state), deepcopy(give), deepcopy(receive), mp,
+                               source_team_code=rival_code, workers=workers)
+            return [(s.description, s.total_points, s.cap_remaining)
+                    for s in [r.current_scenario, *r.scenarios, *r.baseline_scenarios]]
+
+        assert run(4) == run(1)
+
+
+class TestATieIsJudgedOnWhatIsLeftAfterThePlan:
+    """Regression (2026-09-25): a points tie was broken on `cap_remaining`.
+
+    Dobson + Gustavsson for Kyrou-then-buyout read ACCEPT, "same points but
+    frees $1.6M", against buying Gustavsson out alone. The trade opened one
+    more roster spot, and the solver spent exactly that $1.6M filling it with a
+    Dobson-alike. Both plans spent every dollar. A tie is now EVEN, and the
+    tie-break is `left_after_plan`, which nets out what the plan buys.
+
+    The solves are STUBBED so each case can be a tie by construction -- the
+    pool is replaced before every draft and will not reliably produce one.
+    """
+
+    def _evaluate(self, monkeypatch, outcomes):
+        """`outcomes(mine, incoming)` maps a description prefix to
+        (points, cap_remaining, plan_cost). A callable, because the players are
+        derived from the pool here and the caller cannot name them in advance.
+
+        Anything unlisted scores 0 so it can never win.
+        """
+        import trade
+        from optimizer import MILPSolution
+
+        def fake(jobs, market_prices, workers):
+            out = []
+            for description, _team, _pool, buyouts in jobs:
+                pts, cap, cost = next(
+                    (v for k, v in table.items() if description.startswith(k)),
+                    (0, 1.0, 0.0),
+                )
+                sol = MILPSolution(total_points=pts, roster=[], total_cost=cost,
+                                   by_position={}, status="Optimal")
+                out.append(trade.TradeScenario(description, pts, cap, sol, buyouts))
+            return out
+
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        mine = next(q for q in bot.roster_players if q.can_be_bought_out)
+        other = next(q for q in bot.roster_players
+                     if q.can_be_bought_out and q.name != mine.name)
+        incoming = max(state.available_players.values(), key=lambda p: p.projected_points)
+        give = [PlayerTrade(q.name, q.position, q.salary, q.projected_points)
+                for q in (mine, other)]
+        receive = [PlayerTrade(incoming.name, incoming.position, 4.0,
+                               incoming.projected_points)]
+        table = outcomes(mine, incoming)
+        monkeypatch.setattr(trade, "_solve_jobs", fake)
+        return evaluate_trade(state, give, receive, mp), mine, incoming
+
+    def test_more_cap_that_the_plan_spends_is_not_a_win(self, monkeypatch):
+        """The Dobson case: $1.6M more cap, all of it spent on the extra spot."""
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3),
+            f"No trade, buy out {mine.name}": (1351, 41.9, 41.9),
+            f"Trade + buy out {incoming.name}": (1351, 43.5, 43.5),
+        })
+        assert result.recommendation == "even", result.reasoning
+        assert "spends the same" in result.reasoning
+        assert "more unspent" not in result.reasoning
+
+    def test_a_tie_that_genuinely_leaves_money_over_is_even_and_says_so(self, monkeypatch):
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3),
+            f"No trade, buy out {mine.name}": (1351, 41.9, 41.9),
+            f"Trade + buy out {incoming.name}": (1351, 43.5, 42.5),
+        })
+        assert result.recommendation == "even"
+        assert "$1.0M more unspent" in result.reasoning
+
+    def test_a_tie_that_costs_money_is_declined(self, monkeypatch):
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3),
+            f"No trade, buy out {mine.name}": (1351, 41.9, 40.9),
+            f"Trade + buy out {incoming.name}": (1351, 43.5, 43.5),
+        })
+        assert result.recommendation == "decline", result.reasoning
+
+    def test_buying_out_everything_received_is_called_a_salary_dump(self, monkeypatch):
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3),
+            f"Trade + buy out {incoming.name}": (1360, 43.5, 43.5),
+        })
+        assert result.recommendation == "accept"
+        assert result.reasoning.startswith("Salary dump")
+
+    def test_keeping_what_you_receive_is_not_a_salary_dump(self, monkeypatch):
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3),
+            "Keep all received": (1360, 40.0, 40.0),
+        })
+        assert result.recommendation == "accept"
+        assert "Salary dump" not in result.reasoning
+
+    def test_an_even_verdict_renders_amber_with_both_sides_highlighted(self, monkeypatch):
+        from main import templates
+        result, mine, incoming = self._evaluate(monkeypatch, lambda mine, incoming: {
+            "Current roster": (1341, 40.3, 40.3),
+            f"No trade, buy out {mine.name}": (1351, 41.9, 41.9),
+            f"Trade + buy out {incoming.name}": (1351, 43.5, 43.5),
+        })
+        html = templates.env.get_template("partials/trade_verdict.html").render(
+            trade_result=result)
+        assert "text-warning\">EVEN" in html
+        assert "/trade-execute" in html, "an even trade is still the owner's call"
+        highlighted = [row for row in html.split("<tr") if "text-accent" in row]
+        assert len(highlighted) == 2
+
+
+class TestAReleasedPlayerIsNotFreeToBuyBack:
+    """Regression (2026-09-25): the free-agent flow returned given players to
+    the pool with no PRICE, and the MILP prices a missing name at MIN_SALARY.
+
+    So a give-for-nothing trade with no partner selected let the plan buy the
+    same players straight back at $0.5M: Larkin + Dobson measured a bogus +35.
+    """
+
+    def test_buying_him_back_costs_his_market_price(self):
+        from config import MIN_SALARY
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        # The first of BOT's scorers the plan wants back. The guard below is
+        # what keeps this from passing vacuously on a pool where nobody is.
+        for q in sorted(bot.roster_players, key=lambda q: -q.projected_points):
+            result = evaluate_trade(
+                state, [PlayerTrade(q.name, q.position, q.salary, q.projected_points)],
+                [], mp, auto_check_buyouts=False)
+            keep = result.scenarios[0].roster
+            if any(r.name == q.name for r in keep.roster):
+                break
+        else:
+            pytest.fail("the plan bought none of BOT's released players back")
+
+        implied = keep.total_cost - sum(
+            mp[r.name] for r in keep.roster if r.name != q.name)
+        assert implied > MIN_SALARY + 0.05, (
+            f"{q.name} was bought back for ${implied:.2f}M -- the minimum, "
+            "i.e. he re-entered the pool without a price"
+        )
+
+
+class TestTheOverpayStress:
+    """Every plan buys its open spots at the model's EXPECTED price, and the
+    one replayed draft paid 27% over the model. The stress solves re-run the two
+    winners with prices marked up and say whether the verdict survives.
+    """
+
+    def _trade(self):
+        state, mp = _setup()
+        bot = state.teams[MY_TEAM]
+        worst = min(bot.keeper_players, key=lambda p: p.projected_points)
+        best_avail = max(
+            (p for p in state.available_players.values() if p.position == worst.position),
+            key=lambda p: p.projected_points)
+        give = [PlayerTrade(worst.name, worst.position, worst.salary, worst.projected_points)]
+        receive = [PlayerTrade(best_avail.name, best_avail.position, 2.0,
+                               best_avail.projected_points)]
+        return state, mp, give, receive
+
+    def test_no_markup_reproduces_the_unstressed_answer(self):
+        """The mechanism check: at 1.0x the stress solves ARE the verdict's
+        solves, so any difference means they re-solved the wrong scenarios."""
+        state, mp, give, receive = self._trade()
+        r = evaluate_trade(state, give, receive, mp, overpay=1.0)
+        assert r.stress_trade_points == r.best_scenario.total_points
+        assert r.stress_baseline_points == r.baseline_best.total_points
+
+    def test_dearer_prices_never_buy_more_points(self):
+        state, mp, give, receive = self._trade()
+        r = evaluate_trade(state, give, receive, mp)
+        assert r.stress_rate > 1.0
+        assert r.stress_trade_points <= r.best_scenario.total_points
+        assert r.stress_baseline_points <= r.baseline_best.total_points
+        assert r.overpay_outcome in ("ahead", "level", "behind")
+
+    def test_an_accept_that_does_not_survive_is_flagged(self):
+        from main import templates
+        state, mp, give, receive = self._trade()
+        r = evaluate_trade(state, give, receive, mp)
+        render = templates.env.get_template("partials/trade_verdict.html").render
+        r.recommendation = "accept"
+        r.stress_trade_points, r.stress_baseline_points = 1270, 1276
+        assert "Falls behind" in render(trade_result=r)
+        r.stress_trade_points, r.stress_baseline_points = 1280, 1276
+        html = render(trade_result=r)
+        assert "Still ahead" in html and "Falls behind" not in html
+        r.stress_trade_points, r.stress_baseline_points = 1276, 1276
+        html = render(trade_result=r)
+        assert "Still level" in html and "Falls behind" not in html, (
+            "a tie at stressed prices is not falling behind"
+        )
+
+    def test_a_tight_budget_can_still_be_stressed(self):
+        """Barely enough to fill the roster at the minimum. Marking the FLOOR
+        up would make that roster unfillable; marking up only what sits above
+        it cannot, because the cheapest players stay the cheapest."""
+        from config import ROSTER_SIZE
+        state, mp, _, _ = self._trade()
+        bot = state.teams[MY_TEAM]
+        spots = ROSTER_SIZE - bot.roster_count
+        # $0.58M a spot: the pool has hundreds of near-floor players at every
+        # position, so this fills -- and a marked-up floor ($0.625M) does not.
+        bot.penalties += bot.remaining_budget - spots * 0.58
+        r = evaluate_trade(state, [], [], mp)
+        assert r.current_scenario.roster.status == "Optimal", "precondition"
+        assert r.stress_trade_points is not None, (
+            "the stressed roster could not be filled -- the floor was marked up"
+        )
+
+    def test_an_unsolvable_stress_is_not_compared(self, monkeypatch):
+        """If a stress solve is not Optimal its points are the bare roster's,
+        not a plan -- so the outcome must be unknown, not a verdict."""
+        import trade
+        from optimizer import MILPSolution
+        real = trade._solve_jobs
+        calls = []
+
+        def second_call_infeasible(jobs, prices, workers):
+            calls.append(1)
+            out = real(jobs, prices, workers)
+            if len(calls) == 2:
+                out[0].roster = MILPSolution(0, [], 0.0, {}, "Infeasible")
+            return out
+
+        monkeypatch.setattr(trade, "_solve_jobs", second_call_infeasible)
+        state, mp, give, receive = self._trade()
+        r = evaluate_trade(state, give, receive, mp, auto_check_buyouts=False)
+        assert len(calls) == 2
+        assert r.overpay_outcome is None
 
 
 class TestEvaluateBuyout:

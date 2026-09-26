@@ -24,7 +24,7 @@
    then trivially true. wait_for_selector(".trade-verdict") has to keep meaning
    what it means. #}
 {% if trade_result is defined and trade_result %}
-{% set verdict_class = 'success' if trade_result.recommendation == 'accept' else 'error' %}
+{% set verdict_class = {'accept': 'success', 'even': 'warning'}.get(trade_result.recommendation, 'error') %}
 <div id="trade-result" class="trade-verdict mt-3 p-3 rounded-lg bg-{{ verdict_class }}/10 border border-{{ verdict_class }}/30">
     {# Shown by shortcuts.js the moment either list changes. /trade-execute
        posts the SERVER's last_trade_eval, not this form, so once the selection
@@ -50,20 +50,55 @@
     </div>
     <h3 class="font-bold text-sm">Verdict: <span class="text-{{ verdict_class }}">{{ trade_result.recommendation|upper }}</span></h3>
     <p class="text-xs opacity-80 mt-1">{{ trade_result.reasoning }}</p>
+    {# The overpay line. Every row below assumes BOT fills its open spots at the
+       model's EXPECTED price; this re-solves the two sides that decide the
+       verdict with every auction price marked up (config.OVERPAY_STRESS, from
+       the one replayed draft), and says whether the answer holds. Worded as a
+       comparison of two numbers, not a second verdict, so it cannot contradict
+       the one above -- it says how much to trust it. #}
+    {% set outcome = trade_result.overpay_outcome %}
+    {% if outcome is not none %}
+    {% set pct = ((trade_result.stress_rate - 1) * 100)|round|int %}
+    {% set vs = "%.0f vs %.0f without the trade"|format(trade_result.stress_trade_points, trade_result.stress_baseline_points) %}
+    {% if outcome == "ahead" %}
+    <p class="trade-overpay text-xs text-success mt-1">Still ahead if the auction runs {{ pct }}% over the model: {{ vs }}.</p>
+    {% elif outcome == "level" %}
+    <p class="trade-overpay text-xs opacity-70 mt-1">Still level if the auction runs {{ pct }}% over the model: {{ vs }}.</p>
+    {% elif trade_result.recommendation in ("accept", "even") %}
+    <p class="trade-overpay text-xs text-warning font-semibold mt-1">⚠ Falls behind if the auction runs {{ pct }}% over the model: {{ vs }}. The gain depends on buying players at the model's expected price.</p>
+    {% else %}
+    <p class="trade-overpay text-xs opacity-70 mt-1">If the auction runs {{ pct }}% over the model: {{ vs }}.</p>
+    {% endif %}
+    {% endif %}
 
     <table class="table table-xs mt-2">
-        <thead><tr><th>Scenario</th><th>Points</th><th>Cap Remaining</th></tr></thead>
+        <thead><tr><th>Scenario</th><th>Points</th><th>Cap Remaining</th><th title="Players the plan still has to buy">To fill</th></tr></thead>
+        {# Four rows at most, not every scenario: both sides now try every legal
+           buyout (~2 per contract), and a dozen rows of "buy out X" bury the two
+           that decide the verdict. Each side shows doing nothing and its best
+           buyout, and the highlighted row is whichever side WON -- the trade's
+           best on ACCEPT, the best no-trade move on DECLINE, both on EVEN.
+           Highlighting the trade's best on a decline is how "+7" read as a
+           reason to accept when a plain buyout beat it. `.buyouts` is the "is
+           this a buyout" test rather than `==`, which would compare two whole
+           MILP solutions.
+
+           "To fill" is there because Cap Remaining alone misleads: scenarios
+           open different numbers of spots, so more cap can be cap already
+           spoken for (see TradeScenario.left_after_plan). #}
+        {% set rec = trade_result.recommendation %}
+        {% set winners = [trade_result.best_scenario] if rec == 'accept' else ([trade_result.baseline_best] if rec == 'decline' else [trade_result.best_scenario, trade_result.baseline_best]) %}
+        {% set rows = [trade_result.current_scenario] %}
+        {% if trade_result.baseline_best and trade_result.baseline_best.buyouts %}{% set rows = rows + [trade_result.baseline_best] %}{% endif %}
+        {% set rows = rows + [trade_result.scenarios[0]] %}
+        {% if trade_result.best_scenario.buyouts %}{% set rows = rows + [trade_result.best_scenario] %}{% endif %}
         <tbody>
-        <tr>
-            <td>{{ trade_result.current_scenario.description }}</td>
-            <td>{{ "%.0f"|format(trade_result.current_scenario.total_points) }}</td>
-            <td>${{ "%.1f"|format(trade_result.current_scenario.cap_remaining) }}M</td>
-        </tr>
-        {% for s in trade_result.scenarios %}
-        <tr class="{% if s == trade_result.best_scenario %}font-bold text-accent{% endif %}">
+        {% for s in rows %}
+        <tr class="{% for w in winners if s is sameas w %}font-bold text-accent{% endfor %}">
             <td>{{ s.description }}</td>
             <td>{{ "%.0f"|format(s.total_points) }}</td>
             <td>${{ "%.1f"|format(s.cap_remaining) }}M</td>
+            <td>{{ s.spots_to_fill }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -72,7 +107,7 @@
     {# Inside .trade-verdict on purpose: markTradeEvalStale() disables every
        submit button it finds in there, so moving this out silently un-arms the
        staleness guard. Pinned by test_the_execute_form_is_inside_the_verdict. #}
-    {% if trade_result.recommendation == "accept" %}
+    {% if trade_result.recommendation in ("accept", "even") %}
     <form hx-post="/trade-execute" hx-target="#app" hx-swap="innerHTML" class="mt-2">
         <input type="hidden" name="trade_id" value="{{ trade_result.trade_id }}">
         <button type="submit" class="btn btn-primary btn-sm">Execute Trade</button>

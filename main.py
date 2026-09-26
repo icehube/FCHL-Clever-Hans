@@ -2154,6 +2154,9 @@ async def trade_evaluate(request: Request):
     if give or receive:
         result = evaluate_trade(
             auction_state, give, receive, market_prices, source_team_code=source_team,
+            # Both sides' buyouts, ~2 solves per eligible contract. On the loop
+            # on purpose: trades happen in auction breaks -- see evaluate_trade.
+            workers=SCAN_WORKERS, model_params=model_params,
         )
         last_trade_eval = result
     else:

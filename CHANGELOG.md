@@ -20,6 +20,115 @@ behaviour, or a race that turned out to be unreachable. Filing those under
 rediscover the same non-problem.
 
 
+## [2026-09-25]
+
+### Fixed
+
+- **The trade evaluator no longer counts a buyout you could do yourself as
+  something the trade gained.** Reported from the live draft: giving Filip
+  Gustavsson (G, $3.2M, just drafted against a $1.76M model price) for Jordan
+  Kyrou (F, $4.0M) read **ACCEPT, +7** — "buy out Jordan Kyrou". The owner's
+  objection was exactly right on both counts: why make a trade only to buy out
+  the player coming back, and the Scan Roster dots were already recommending a
+  buyout of Gustavsson that the trade verdict never considered. The two sides
+  of the comparison did not get the same options. The trade side tried a
+  buyout of each **received** player; the side it was measured against was the
+  bare current roster, no buyouts at all. So a trade that moved one of BOT's own
+  bad contracts booked the salary relief as a trade gain. Measured on the saved
+  state (1 transaction in): current 1341, trade and keep Kyrou 1343, trade and
+  buy him out 1348 — and **no trade, buy out Gustavsson, 1351**, with $0.4M
+  more cap and no partner needed. The trade was worth −3.
+
+  `evaluate_trade` now gives both sides the same menu: no buyout, or any one
+  legal buyout (`can_be_bought_out`, `all_players`, the Scan Roster set). On the
+  trade side that includes players BOT already had, not only the ones received.
+  The verdict compares the best of each, via a new
+  `TradeEvaluation.baseline_best`, and when the bar is a buyout the reasoning
+  names it ("Buying out … without trading scores 1351, against 1348 …"). One
+  buyout per option, as before. `trade_verdict.html` shows at most four rows
+  (each side's do-nothing and best buyout) and highlights the side that **won**:
+  it used to highlight the trade's best even on a decline, which is how "+7"
+  read as a reason to accept.
+
+  **Cost, measured**: about two solves per eligible contract, and each is ~300ms
+  of CBC on a full pool. They run as one `ThreadPoolExecutor` batch at
+  `SCAN_WORKERS` (in input order, so deterministic, and pinned by a
+  parallel-equals-serial test). That takes **1.4s** against 0.9s for the old
+  three-solve version; one batch per side measured 2.0s. It stays on the event
+  loop because trades happen in auction breaks. `test_roster_capacity`'s
+  preview-vs-execution test now reads the keep-all scenario, since the trade
+  side's best can now be a buyout of a filler that `execute_trade` never makes.
+  The new regression test builds its salary dump from supplied salaries and
+  first asserts the old comparison **would** have accepted it. Both mutants
+  (the verdict compared against the bare roster, and the highlight on the
+  trade's best) were run and go red.
+
+- **A points tie in the trade evaluator is EVEN, not ACCEPT, and it is judged
+  on the money left AFTER the plan.** The first real test of the fix above
+  turned this up. Dobson (D, $2.0M) + Gustavsson for Kyrou, then buying Kyrou
+  out, read **ACCEPT**, "same points but frees $1.6M cap space", against
+  buying Gustavsson out alone: 1351 both, $43.5M left against $41.9M. The
+  owner asked the right question: how does $1.6M buy nothing? It bought
+  something. The trade opens **one more roster spot** (two out, the incoming
+  player bought out), and the solver spent that exact $1.6M filling it, with
+  Filip Hronek (D, 48pts, $1.8M) standing in for Dobson (D, 47pts). Both plans
+  spent every dollar. The tie-break compared `cap_remaining`, which is cap
+  **before** the plan, across two rosters with different numbers of open spots.
+
+  Ties now break on `TradeScenario.left_after_plan` (`cap_remaining −
+  roster.total_cost`). An equal-points trade that leaves as much or more
+  unspent is a new amber **EVEN** verdict (Execute still offered: it is the
+  owner's call); one that leaves less is DECLINE. The best scenario on each
+  side is chosen on the same key. When the best line buys out everything
+  received, the reasoning now opens "Salary dump — you keep nothing you
+  receive", which was the owner's first objection and is legitimate but should
+  not need reverse-engineering from a scenario name. The verdict table gained a
+  **To fill** column (the players the plan still buys), since Cap Remaining
+  alone was what misled, and the reasoning text lost its nested parentheses.
+  The tie tests stub `_solve_jobs`, because a real pool cannot be relied on to
+  produce an exact tie; the `cap_remaining` mutant fails three of them.
+
+- **The trade preview no longer lets you buy a released player back for
+  $0.5M.** With no partner selected, `evaluate_trade` returns the given players
+  to the pool so the plan can model re-acquiring them, but it never priced them:
+  `market_prices` was computed before they were in the pool, and the MILP
+  prices a missing name at `MIN_SALARY`. So Larkin (F, 72pts, $2.7M) + Dobson
+  for nothing, with no partner, measured **+35**: the plan simply bought both
+  back at the minimum. With a partner selected (the owner's screenshot) the
+  result was right. They are now priced the way `/trade-execute`'s recompute
+  prices them once the trade is real (the model, capped by the post-trade market
+  ceiling), and the two flows agree on that trade (1335 keep-all, 1343 best).
+  The live execute path was never affected: it re-runs `predict_all_prices`.
+
+### Added
+
+- **The trade verdict says whether it survives an expensive auction.** Asked
+  by the owner of the corrected Larkin + Dobson trade: does giving two players
+  away really leave more salary to buy better ones? By the model, yes, barely.
+  The plan refills their spots with Elias Pettersson (F, 69pts, ~$2.51M),
+  Steven Stamkos and Filip Hronek at **expected** prices, for +2 (1333 -> 1335).
+  But the one real draft replayed paid $308.0M against a $242.9M model total, 27%
+  over, and a give-for-nothing trade is a bet on exactly the expected price.
+  `evaluate_trade` now re-solves the two scenarios that decide the verdict with
+  every auction price marked up by `config.OVERPAY_STRESS` (1.25, rounded down
+  from 1.27 so the test is not stricter than the evidence), in one extra
+  two-solve batch (~1.7s total). The verdict shows the result as a line under
+  the reasoning, amber when an ACCEPT or EVEN falls behind. For this trade it
+  does: **1270 against 1276**, so the +3 becomes −6. The verdict itself is not
+  overridden; the line says how far to trust it. The 1.0x case must reproduce
+  the unstressed figures exactly, which is what catches a stress solve aimed at
+  the wrong scenario.
+
+  Two things the `/grill` of this caught before it shipped. **Only the part of a
+  price above the league minimum is marked up**: the first cut marked up every
+  price, so a floor player cost $0.625M and a tight endgame roster (10 spots on
+  $5.8M) could not be filled at all, and the Infeasible solve's bare-roster
+  points were then compared as if they were a plan. Exempting prices of exactly
+  $0.5M was not enough, because the near-floor players a tight roster fills
+  with are priced $0.51, $0.52 and so on. Any non-Optimal stress solve now
+  reports no outcome rather than a comparison. And the outcome is three-way
+  (ahead / level / behind): a strict `>` printed "Falls behind: 1276 vs 1276"
+  on exactly the EVEN verdicts most likely to tie again.
 ## [2026-09-23]
 
 ### Fixed

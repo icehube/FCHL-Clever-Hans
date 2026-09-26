@@ -6,6 +6,15 @@ MIN_SALARY = 0.5
 MAX_SALARY = 11.4
 SALARY_INCREMENT = 0.1
 
+# Stress rate for the trade evaluator's "does it survive an expensive auction"
+# re-solve: every auction price is marked up this much. The one real draft
+# replayed (tests/measure_replay.py, 2026-09-13) paid $308.0M against a $242.9M
+# model total -- 27% over -- so a trade whose gain comes from buying players
+# back at the model's EXPECTED price is exactly the gain that draft falsified.
+# Rounded down to 25% so the test is not stricter than the evidence, and
+# applied only to the part of a price above MIN_SALARY (see evaluate_trade).
+OVERPAY_STRESS = 1.25
+
 # How close the price can get to a player's value before the advisor stops
 # saying BID and starts saying CAUTION.
 CAUTION_BAND = 0.3

@@ -287,8 +287,13 @@ class TestFullRosterTrades:
         recv = [PlayerTrade(name=stud.name, position=stud.position,
                             salary=2.0, projected_points=stud.projected_points)]
 
-        previewed = evaluate_trade(state, give=[], receive=recv,
-                                   market_prices=mp).best_scenario.total_points
+        # The KEEP-ALL scenario, which is what execute_trade performs. Not
+        # best_scenario: since 2026-09-25 the trade side tries buying out every
+        # eligible contract, so its best can be a buyout of one of the fillers --
+        # a move execution never makes, and a comparison that would fail for a
+        # reason unrelated to the minors routing this test exists to pin.
+        previewed = evaluate_trade(state, give=[], receive=recv, market_prices=mp,
+                                   auto_check_buyouts=False).scenarios[0].total_points
 
         live = deepcopy(state)
         execute_trade(live, give=[], receive=[PlayerTrade(

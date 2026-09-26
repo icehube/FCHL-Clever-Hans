@@ -57,6 +57,14 @@ rediscover the same non-problem.
   the code. The tests that pinned one scenario per contract were rewritten to
   pin what the solver is OFFERED, via a spy on `solve_optimal_roster`.
 
+  The `/grill` of it found two more. A buyout job that bought nobody out was
+  kept as a duplicate of the plain plan and could win the tie-break on money
+  left over, printing "Best line: Trade +", the bare job label; it is now
+  dropped (5446eb1). And the minors path, which frees cap without freeing a
+  spot, was untested: deleting its relief left all 90 related tests green. A
+  test now buys out a dead group-3 minor and checks the figure against the
+  buyout applied for real.
+
 - **Every MILP solve is time-boxed at 10s, and a corner timer shows how long
   the server has been working.** The solver-checker's `/go` pass flagged that
   the one `prob.solve` had no time limit (true since the first commit; the

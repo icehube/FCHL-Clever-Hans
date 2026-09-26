@@ -669,6 +669,38 @@ class TestTheSolverChoosesAnyNumberOfBuyouts:
         assert sol.status == "Optimal"
         assert "deadG" not in sol.buyouts, "bought out a goalie nobody could replace"
 
+    def test_a_dead_contract_in_the_minors_is_bought_out_for_its_cap(self):
+        """The minors path, which only frees money: a group-3 contract in the
+        minors counts fully on the cap, starts for nobody, and buying it out
+        returns half. Found untested in the /grill of b1dbffe -- deleting the
+        minors relief left every test green. Checked against the buyout
+        applied for real, so the relief is credited at its true size."""
+        from copy import deepcopy
+        from tests.test_bench_value import _keeper, _player
+        from optimizer import solve_optimal_roster
+        from state import PlayerOnRoster, TeamState
+        from config import MIN_SALARY
+        keepers = ([_keeper(f"sF{i}", "F", 60, 1.0) for i in range(11)]
+                   + [_keeper(f"sD{i}", "D", 50, 1.0) for i in range(6)]
+                   + [_keeper(f"sG{i}", "G", 60, 1.0) for i in range(2)])
+        minor = PlayerOnRoster("deadMinor", "F", "3", 4.0, 0, is_minor=True)
+        team = TeamState(code="BOT", name="T", keeper_players=keepers,
+                         minor_players=[minor])
+        assert minor.counts_on_cap, "precondition: a group-3 minor is on the cap"
+        team.penalties = team.remaining_budget - team.total_spots_remaining * MIN_SALARY - 0.5
+        pool = {f"cheap{i}": _player(f"cheap{i}", "F", 20) for i in range(8)}
+        pool["star"] = _player("star", "F", 90)
+        prices = {n: 0.5 for n in pool} | {"star": 2.0}
+
+        sol = solve_optimal_roster(team, pool, prices, buyout_candidates={"deadMinor"})
+        assert sol.buyouts == ["deadMinor"], "his $2M of relief buys the star"
+
+        real = deepcopy(team)
+        gone = real.minor_players.pop()
+        real.penalties += gone.salary * BUYOUT_PENALTY_RATE
+        assert sol.total_points == pytest.approx(
+            solve_optimal_roster(real, pool, prices).total_points)
+
     def test_two_dead_contracts_received_are_both_bought_out(self):
         """The owner's case, supplied rather than found: two cheap rival
         contracts made worthless, received for BOT's worst keeper."""

@@ -366,6 +366,8 @@ doesn't fail the test, either the assertion is wrong or the test is aimed at the
 wrong operation — the stress ownership invariant could not fail under `/assign`
 at all, and only became real once it also ran after `/undo`.
 
+**A pipeline's exit status is its LAST command's.** `pytest ... | tail -n 1 && git commit` commits whatever pytest said, because `tail` succeeded — it happened 2026-09-25, a failing reference check committed as `cfbb5bf` and was re-anchored one commit later. Gate a commit on `pytest` itself (or `set -o pipefail`), and read the count, not the colour.
+
 **A mutation that applied to nothing is not a passing test.** A scripted mutant
 whose anchor missed — shell escaping, a wrapped line, indentation one level off —
 runs the suite against the *unmutated* file and prints green, which reads exactly
